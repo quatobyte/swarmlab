@@ -1,0 +1,17 @@
+# Профиль «Средний» — целевой для показа: 3 улья × 100 пчёл, карта 300 м (BEES_SPEC §9).
+
+timing:
+  physics_hz: 200
+  decision_hz: 10
+  frame_hz: 10
+
+bees:
+  world:
+    map_size: 300.0
+    n_hives: 3
+    trees: {per_ha: 7.0}     # средне
+    rocks: {per_ha: 2.0}
+  pool:
+    max_bees_per_hive: 100
+  enemies:
+    hornets: {max: 8}

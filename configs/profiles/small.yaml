@@ -1,0 +1,19 @@
+# Профиль «Малый» — слабый ноутбук, один улей (BEES_SPEC §9).
+# Структура профиля: общая секция timing (частоты ядра) + секция на каждый модуль.
+
+timing:
+  physics_hz: 200
+  decision_hz: 10
+  frame_hz: 10
+
+bees:
+  world:
+    map_size: 150.0
+    n_hives: 1
+    trees: {per_ha: 4.0}     # редко
+    rocks: {per_ha: 2.0}
+    flowers: {cluster_distance: [20.0, 60.0]}
+  pool:
+    max_bees_per_hive: 50
+  enemies:
+    hornets: {max: 3}

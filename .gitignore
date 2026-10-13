@@ -1,0 +1,26 @@
+# окружение
+.venv/
+venv/
+
+# кэши Python и инструментов
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+build/
+dist/
+
+# результаты прогонов
+*.swr
+runs/
+
+# MuJoCo
+MUJOCO_LOG.TXT
+
+# IDE / ОС
+.vscode/
+.idea/
+Thumbs.db
+.DS_Store

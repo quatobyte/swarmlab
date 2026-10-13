@@ -1,0 +1,18 @@
+# Профиль «Большой» — мощная машина: 3 улья × 300 пчёл, карта 600 м (BEES_SPEC §9).
+
+timing:
+  physics_hz: 200
+  decision_hz: 10
+  frame_hz: 10
+
+bees:
+  world:
+    map_size: 600.0
+    n_hives: 3
+    trees: {per_ha: 7.0}     # средне
+    rocks: {per_ha: 2.0}
+    flowers: {clusters_per_hive: 8, cluster_distance: [30.0, 200.0]}
+  pool:
+    max_bees_per_hive: 300
+  enemies:
+    hornets: {max: 20}

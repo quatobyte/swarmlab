@@ -1,0 +1,32 @@
+# Матч вехи M0: мир профиля «Малый» и одна пчела, облетающая точки вокруг улья.
+#   swarmlab run configs/matches/m0.yaml --headless
+#   swarmlab run configs/matches/m0.yaml --mj-viewer
+
+seed: 42
+profile: small
+duration_s: 120
+
+hives:
+  - {color: "#f5b700"}
+
+weather: {enabled: false}
+enemies:
+  hornets: {enabled: false}
+  spiders: {enabled: false}
+
+demo:
+  bees:
+    - kind: forager
+      hive: 0
+      # Точки облёта: [dx, dy] от летка, м, и высота над рельефом, м.
+      waypoints:
+        - [30.0, 0.0, 12.0]
+        - [30.0, 30.0, 12.0]
+        - [-30.0, 30.0, 14.0]
+        - [-30.0, -30.0, 14.0]
+        - [30.0, -30.0, 12.0]
+        - [3.0, 0.0, 3.0]
+      loop: true
+      dwell_s: 1.0           # сколько висеть в точке, прежде чем лететь дальше
+
+overrides: {}
