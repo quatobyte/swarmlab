@@ -1,0 +1,26 @@
+# Демо-матч (BEES_SPEC §10): профиль «Средний», 3 улья, погода и враги включены.
+#   swarmlab run configs/matches/demo.yaml --headless
+#   swarmlab run configs/matches/demo.yaml --mj-viewer
+#   swarmlab replay replays/demo-s42.swr --mj-viewer
+# Умный пример против двух простых (балансный прогон M6: tools/balance.py).
+# Свой my_bees.py — в редакторе (swarmlab serve → «Редактор кода»).
+# Редактор берёт этот матч за основу и меняет ульи, профиль, врагов и погоду оверрайдами.
+# Отдельные эффекты выключаются так: --set enemies.hornets.rob=false (DECISIONS №38).
+
+seed: 42
+profile: medium
+duration_s: 300
+advanced_control: false
+sensor_noise: false
+
+hives:
+  - {script: examples/bees/example_smart.py, color: "#f5b700"}
+  - {script: examples/bees/example_basic.py, color: "#3a86ff"}
+  - {script: examples/bees/example_basic.py, color: "#e63946"}
+
+weather: {enabled: true}
+enemies:
+  hornets: {enabled: true}
+  spiders: {enabled: true}
+
+overrides: {}                # любые параметры из configs/bees/defaults.yaml

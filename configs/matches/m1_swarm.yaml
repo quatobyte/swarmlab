@@ -1,0 +1,26 @@
+# Матч вехи M1: профиль «Средний», 3 улья × 100 пчёл летают по случайным точкам, ветер.
+#   swarmlab run configs/matches/m1_swarm.yaml --headless
+#   swarmlab run configs/matches/m1_swarm.yaml --mj-viewer
+# Энергии хватает на 3–5 минут полёта (охранники — первыми): после этого пчёлы
+# падают и погибают, слоты возвращаются в пул (заправка в улье — веха M2).
+
+seed: 42
+profile: medium
+duration_s: 120
+
+weather:
+  enabled: true
+  initial: windy             # ветер 3–6 м/с на 10 м, порывы, направление поворачивается
+
+enemies:
+  hornets: {enabled: false}
+  spiders: {enabled: false}
+
+demo:
+  swarm:
+    per_hive: {scout: 20, forager: 60, guard: 20}
+    agl: [3.0, 15.0]         # высота точек над рельефом, м
+    arrive_radius: 2.0
+    dwell_s: 0.5
+
+overrides: {}

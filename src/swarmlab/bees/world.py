@@ -23,6 +23,39 @@ _SINK = 0.3
 
 
 @dataclass(frozen=True, eq=False)
+class Obstacles:
+    """Препятствия как вертикальные капсулы: ось — отрезок `(x, y, z0)…(x, y, z1)`, радиус `R`.
+
+    Одно описание для обхода препятствий в автопилоте и для сенсоров. Ствол —
+    капсула; крона — сфера (`z0 = z1`); камень и улей — описанная капсула вокруг
+    бокса (по горизонтали — описанная окружность, сверху — не ниже крыши).
+    """
+
+    xy: np.ndarray  # (K, 2)
+    z0: np.ndarray  # (K,)
+    z1: np.ndarray  # (K,)
+    radius: np.ndarray  # (K,)
+    kind: np.ndarray  # (K,) 0 — ствол, 1 — крона, 2 — камень, 3 — улей
+
+    TRUNK, CROWN, ROCK, HIVE = 0, 1, 2, 3
+
+    def __len__(self) -> int:
+        return int(self.radius.shape[0])
+
+    def closest(self, idx: np.ndarray, pos: np.ndarray) -> np.ndarray:
+        """Ближайшие к `pos (M,3)` точки осей препятствий `idx (M,)`, `(M,3)`."""
+        z = np.clip(pos[:, 2], self.z0[idx], self.z1[idx])
+        return np.column_stack([self.xy[idx], z])
+
+
+def _box_capsules(center: np.ndarray, half: np.ndarray) -> tuple[np.ndarray, ...]:
+    r = np.hypot(half[:, 0], half[:, 1])
+    z0 = center[:, 2] - half[:, 2]
+    z1 = np.maximum(z0, center[:, 2] + half[:, 2] - r)
+    return center[:, :2], z0, z1, r
+
+
+@dataclass(frozen=True, eq=False)
 class World:
     """Статический мир матча. Координаты: центр карты в (0, 0), ось z вверх.
 
@@ -65,18 +98,34 @@ class World:
         """Высота рельефа в точках `xy` формы `(..., 2)` (билинейная интерполяция узлов)."""
         xy = np.asarray(xy, dtype=np.float64)
         n = self.terrain.shape[0]
-        g = (xy + self.half_size) * ((n - 1) / self.map_size)
-        g = np.clip(g, 0.0, n - 1)
+        g = np.clip((xy + self.half_size) * ((n - 1) / self.map_size), 0.0, n - 1)
         i = np.minimum(g.astype(np.int64), n - 2)
         f = g - i
-        ix, iy = i[..., 0], i[..., 1]
         fx, fy = f[..., 0], f[..., 1]
-        t = self.terrain
-        return (
-            t[iy, ix] * (1 - fx) * (1 - fy)
-            + t[iy, ix + 1] * fx * (1 - fy)
-            + t[iy + 1, ix] * (1 - fx) * fy
-            + t[iy + 1, ix + 1] * fx * fy
+        k = i[..., 1] * n + i[..., 0]  # плоский индекс узла (ix, iy)
+        t = self.terrain.ravel()
+        low = t[k] + (t[k + 1] - t[k]) * fx
+        high = t[k + n] + (t[k + n + 1] - t[k + n]) * fx
+        return low + (high - low) * fy
+
+    def obstacles(self) -> Obstacles:
+        """Все статические препятствия (деревья, камни, ульи) капсулами."""
+        top = self.tree_pos[:, 2] + self.tree_trunk_height
+        crown_z = top + 0.6 * self.tree_crown_radius  # как в MJCF
+        rock = _box_capsules(self.rock_pos, self.rock_half)
+        hive = _box_capsules(self.hive_pos, self.hive_half)
+        n_t, n_r, n_h = len(self.tree_pos), len(self.rock_pos), len(self.hive_pos)
+        return Obstacles(
+            xy=np.concatenate([self.tree_pos[:, :2], self.tree_pos[:, :2], rock[0], hive[0]]),
+            z0=np.concatenate([self.tree_pos[:, 2], crown_z, rock[1], hive[1]]),
+            z1=np.concatenate([top, crown_z, rock[2], hive[2]]),
+            radius=np.concatenate(
+                [self.tree_trunk_radius, self.tree_crown_radius, rock[3], hive[3]]
+            ),
+            kind=np.repeat(
+                np.array([Obstacles.TRUNK, Obstacles.CROWN, Obstacles.ROCK, Obstacles.HIVE]),
+                [n_t, n_t, n_r, n_h],
+            ),
         )
 
     def digests(self) -> dict[str, str]:

@@ -52,3 +52,23 @@ def test_core_import_does_not_load_modules_at_runtime():
     )
     res = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True)
     assert res.returncode == 0, res.stdout + res.stderr
+
+
+def test_runner_and_player_host_do_not_import_simulation_or_mujoco():
+    """Раннер находит хост модуля по entry point; хост пчёлок не тянет MuJoCo и ядро симуляции."""
+    runner = {n for f in (SRC / "runner").rglob("*.py") for n in _imports(f)}
+    assert not _hits(runner, ("swarmlab.bees", "mujoco"))
+    code = (
+        "import sys, swarmlab.bees.player_host\n"
+        "bad = [m for m in sys.modules if m.startswith(('mujoco', 'swarmlab.core.sim', "
+        "'swarmlab.bees.module', 'swarmlab.bees.physics'))]\n"
+        "print(bad); sys.exit(1 if bad else 0)\n"
+    )
+    res = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True)
+    assert res.returncode == 0, res.stdout + res.stderr
+
+
+def test_server_knows_only_core():
+    """Сервер — клиент ядра (ARCHITECTURE §1): модуль пчёлок и MuJoCo он не импортирует."""
+    server = {n for f in (SRC / "server").rglob("*.py") for n in _imports(f)}
+    assert not _hits(server, ("swarmlab.bees", "swarmlab.runner", "mujoco"))

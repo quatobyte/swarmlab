@@ -86,3 +86,7 @@ class RealtimePacer:
         n = int(self._budget / self.dt)
         self._budget -= n * self.dt
         return n
+
+    def refund(self, steps: int) -> None:
+        """Вернуть шаги, которые внешний цикл не успел сделать (не больше `max_lag_s`)."""
+        self._budget = min(self._budget + max(steps, 0) * self.dt, self.max_lag_s)

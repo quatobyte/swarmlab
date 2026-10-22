@@ -35,3 +35,12 @@ def test_pacer_accumulates_and_caps_lag():
     assert p.steps_due(0.004) == 1  # 0.002 + 0.004 → 1 шаг
     assert p.steps_due(10.0) == 50  # после паузы — не больше max_lag_s
     assert RealtimePacer(dt=0.005, speed=2.0).steps_due(0.01) == 4
+
+
+def test_pacer_refund_returns_unmade_steps_up_to_max_lag():
+    p = RealtimePacer(dt=0.005, max_lag_s=0.25)
+    assert p.steps_due(0.05) == 10
+    p.refund(6)  # цикл сделал только 4 шага — 6 ещё должны
+    assert p.steps_due(0.0) == 6
+    p.refund(1000)  # не больше max_lag_s
+    assert p.steps_due(0.0) == 50

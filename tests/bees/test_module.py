@@ -1,6 +1,7 @@
 import numpy as np
 
 from swarmlab.bees.module import BeesModule
+from swarmlab.bees.state import FLYING
 from swarmlab.core.config import load_match
 from swarmlab.core.module import DebugViewable, Module, load_module
 from swarmlab.core.sim import Simulation
@@ -41,5 +42,9 @@ def test_frames_emitted_at_frame_rate():
     sim = _sim(2.0, on_frame=frames.append)
     sim.run()
     assert len(frames) == 20  # 10 Гц × 2 с
-    assert frames[-1].arrays["pos"].shape == (1, 3)
+    arrays = frames[-1].arrays
+    assert arrays["bee_pos"].shape == (1, 3)  # в кадре только тела в воздухе — одна демо-пчела
+    assert arrays["bee_pos"].dtype == np.uint16
+    assert np.count_nonzero(arrays["bee_state"] == FLYING) == 1
+    assert frames[0].events[0]["type"] == "birth"
     assert np.isclose(frames[-1].time, 2.0)

@@ -6,6 +6,13 @@ timing:
   decision_hz: 10
   frame_hz: 10
 
+runner:                      # раннеры кода игрока (ARCHITECTURE §3.4)
+  budget_ms: 20.0            # бюджет кода игрока на улей за тик решений, мс
+  hard_timeout_ms: 200.0     # нет ответа дольше — тик улья пропущен
+  misses_before_restart: 3   # пропусков подряд → перезапуск раннера
+  startup_timeout_s: 10.0    # ожидание рукопожатия при запуске, с
+  max_restarts: 20           # после стольких перезапусков улей отключается
+
 bees:
   world:
     map_size: 150.0

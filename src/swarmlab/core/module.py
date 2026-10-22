@@ -34,6 +34,8 @@ class TeamSpec:
     name: str
     script: Path | None = None
     color: str | None = None
+    #: Правила матча для кода игрока (уходят в `hello.options` раннера).
+    options: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass
@@ -138,6 +140,28 @@ class DebugViewable(Protocol):
     """Необязательная возможность модуля: открыть отладочное окно своего движка."""
 
     def open_debug_viewer(self) -> DebugViewer: ...
+
+
+@runtime_checkable
+class Describable(Protocol):
+    """Необязательная возможность модуля: строки о правилах матча для вывода CLI."""
+
+    def describe(self) -> list[str]: ...
+
+
+@runtime_checkable
+class Replayable(Protocol):
+    """Необязательная возможность модуля: сцена для реплея и показ кадров реплея.
+
+    `scene()` — статическая часть матча (мир, справочники, рамки квантования) для
+    заголовка реплея и вьюеров. `apply_frame()` выставляет тела физической модели
+    по кадру (с интерполяцией к следующему) — так отладочный вьюер показывает
+    реплей без шага физики.
+    """
+
+    def scene(self) -> dict[str, Any]: ...
+
+    def apply_frame(self, frame: Frame, nxt: Frame | None = None, alpha: float = 0.0) -> None: ...
 
 
 def available_modules() -> list[str]:

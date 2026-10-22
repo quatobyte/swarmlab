@@ -2,50 +2,59 @@
 
 Ядро не знает о конкретных модулях и физических движках: модули подключаются
 через `Module` и `PhysicsBackend`.
+
+Имена экспортируются лениво (PEP 562): процесс-раннер импортирует только
+`swarmlab.core.protocol` и не должен платить за pydantic и NumPy при старте.
 """
 
-from swarmlab.core.clock import Clock, Rates, RealtimePacer
-from swarmlab.core.config import ConfigError, MatchConfig, TimingConfig, deep_merge, load_match
-from swarmlab.core.module import (
-    DebugViewable,
-    DebugViewer,
-    Frame,
-    Module,
-    ScoreBoard,
-    TeamSpec,
-    available_modules,
-    load_module,
-)
-from swarmlab.core.physics import STATIC, ContactList, PhysicsBackend
-from swarmlab.core.protocol import AgentId, CommandBatch, SensorBatch, TeamId
-from swarmlab.core.rng import RngRegistry
-from swarmlab.core.sim import RunStats, Simulation
+from __future__ import annotations
 
-__all__ = [
-    "STATIC",
-    "AgentId",
-    "Clock",
-    "CommandBatch",
-    "ConfigError",
-    "ContactList",
-    "DebugViewable",
-    "DebugViewer",
-    "Frame",
-    "MatchConfig",
-    "Module",
-    "PhysicsBackend",
-    "Rates",
-    "RealtimePacer",
-    "RngRegistry",
-    "RunStats",
-    "ScoreBoard",
-    "SensorBatch",
-    "Simulation",
-    "TeamId",
-    "TeamSpec",
-    "TimingConfig",
-    "available_modules",
-    "deep_merge",
-    "load_match",
-    "load_module",
-]
+import importlib
+from typing import Any
+
+_EXPORTS = {
+    "Clock": "clock",
+    "Rates": "clock",
+    "RealtimePacer": "clock",
+    "ConfigError": "config",
+    "MatchConfig": "config",
+    "RunnerConfig": "config",
+    "TimingConfig": "config",
+    "deep_merge": "config",
+    "load_match": "config",
+    "DebugViewable": "module",
+    "DebugViewer": "module",
+    "Frame": "module",
+    "Module": "module",
+    "Replayable": "module",
+    "ScoreBoard": "module",
+    "TeamSpec": "module",
+    "available_modules": "module",
+    "load_module": "module",
+    "STATIC": "physics",
+    "ContactList": "physics",
+    "PhysicsBackend": "physics",
+    "AgentHost": "protocol",
+    "AgentId": "protocol",
+    "AgentLink": "protocol",
+    "CommandBatch": "protocol",
+    "SensorBatch": "protocol",
+    "TeamId": "protocol",
+    "Replay": "replay",
+    "ReplayWriter": "replay",
+    "read_replay": "replay",
+    "RngRegistry": "rng",
+    "RunnerPool": "runner_host",
+    "RunnerStats": "runner_host",
+    "RunStats": "sim",
+    "Simulation": "sim",
+}
+
+__all__ = sorted(_EXPORTS)
+
+
+def __getattr__(name: str) -> Any:
+    sub = _EXPORTS.get(name)
+    if sub is None:
+        raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+    return getattr(importlib.import_module(f"{__name__}.{sub}"), name)

@@ -3,7 +3,7 @@
 Слои (каждый следующий перекрывает предыдущий, словари сливаются рекурсивно):
 
 1. `configs/<module>/defaults.yaml` — все параметры механик модуля;
-2. `configs/profiles/<profile>.yaml` — секция `<module>:` (и общая секция `timing:`);
+2. `configs/profiles/<profile>.yaml` — секция `<module>:` (и общие секции `timing:`, `runner:`);
 3. файл матча — все ключи, кроме ключей ядра, считаются параметрами модуля;
 4. `overrides:` из файла матча;
 5. переопределения из командной строки (`--set путь.к.ключу=значение`).
@@ -25,7 +25,9 @@ from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_valida
 from swarmlab.core.clock import Rates
 
 #: Ключи файла матча, которые принадлежат ядру, а не модулю.
-CORE_KEYS = frozenset({"module", "seed", "profile", "duration_s", "timing", "overrides"})
+CORE_KEYS = frozenset(
+    {"module", "seed", "profile", "duration_s", "timing", "runner", "overrides"}
+)
 
 #: Профиль без файла: только defaults модуля + файл матча.
 CUSTOM_PROFILE = "custom"
@@ -53,6 +55,23 @@ class TimingConfig(BaseModel):
         return Rates(self.physics_hz, self.decision_hz, self.frame_hz)
 
 
+class RunnerConfig(BaseModel):
+    """Раннеры кода игрока (ARCHITECTURE §3.4)."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    #: Бюджет времени кода игрока на команду за тик решений, мс.
+    budget_ms: float = Field(20.0, gt=0)
+    #: Нет ответа за столько миллисекунд — тик команды пропущен.
+    hard_timeout_ms: float = Field(200.0, gt=0)
+    #: Пропусков подряд, после которых раннер перезапускается.
+    misses_before_restart: int = Field(3, ge=1)
+    #: Сколько ждать рукопожатия при запуске раннера, с.
+    startup_timeout_s: float = Field(10.0, gt=0)
+    #: После стольких перезапусков команда отключается (её агенты держат прошлые команды).
+    max_restarts: int = Field(20, ge=0)
+
+
 class MatchConfig(BaseModel):
     """Итоговый конфиг матча после слияния всех слоёв."""
 
@@ -63,6 +82,7 @@ class MatchConfig(BaseModel):
     profile: str = CUSTOM_PROFILE
     duration_s: float = Field(gt=0)
     timing: TimingConfig = TimingConfig()
+    runner: RunnerConfig = RunnerConfig()
     #: Параметры модуля (слитые слои 1–5), валидирует сам модуль.
     params: dict[str, Any] = Field(default_factory=dict)
     #: Файл матча, из которого собран конфиг (для логов и реплеев).
@@ -144,6 +164,7 @@ def load_match(
     params = deep_merge(params, match.get("overrides") or {})
 
     timing = deep_merge(profile_data.get("timing") or {}, match.get("timing") or {})
+    runner = deep_merge(profile_data.get("runner") or {}, match.get("runner") or {})
 
     core_fields = {k: match[k] for k in ("seed", "duration_s") if k in match}
     try:
@@ -151,6 +172,7 @@ def load_match(
             module=module,
             profile=profile,
             timing=TimingConfig(**timing),
+            runner=RunnerConfig(**runner),
             params=params,
             source=match_path,
             **core_fields,

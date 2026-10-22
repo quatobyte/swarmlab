@@ -1,0 +1,20 @@
+# Бенчмарк профиля «small» (swarmlab bench, DECISIONS №41): нагрузка как в настоящем матче —
+# раннеры example_basic.py на каждом улье, около 80% пула пчёл (max_bees 50), все шершни
+# профиля сразу, пауки, ветер. Пчёлы вылетают быстро (exit_per_tick), чтобы прогрев был коротким.
+
+seed: 1
+profile: small
+duration_s: 60
+
+hives:
+  - {script: examples/bees/example_basic.py}
+
+weather: {enabled: true, initial: windy}
+enemies:
+  hornets: {enabled: true, first_wave_s: 0.0, wave_interval_s: 1.0, wave_growth_s: 0.5}
+  spiders: {enabled: true}
+
+economy:
+  start_bees: {scout: 6, forager: 24, guard: 6, house: 4}
+hive:
+  exit_per_tick: 30

@@ -4,7 +4,8 @@
 #
 # Порядок слоёв: этот файл → configs/profiles/<профиль>.yaml (секция bees:) →
 # файл матча → overrides матча → `--set` из командной строки.
-# Значение null у параметра = «будет откалибровано» (tools/calibrate.py, веха M1).
+# Параметры, выведенные из целей (c_d, E_max, P_idle, k_p, k_rain), пересчитывает
+# tools/calibrate.py: `.venv\Scripts\python tools\calibrate.py --write`.
 
 # ---------------------------------------------------------------- §1 Мир
 world:
@@ -45,15 +46,15 @@ world:
     clusters_per_hive: 4     # полян на улей (у каждого улья — поляны на тех же расстояниях)
     flowers_per_cluster: 12
     cluster_radius: 6.0      # радиус поляны, м
-    cluster_distance: [25.0, 90.0]  # расстояние поляны от улья, м
+    cluster_distance: [20.0, 60.0]  # расстояние поляны от улья, м (M6: было 25–90 — рейсы слишком долгие)
     edge_margin: 5.0         # отступ полян от края карты, м
     height: 0.3              # высота цветка над рельефом, м
     nectar_max: 3.0          # максимум нектара в цветке, ед. (§4.2)
-    regen_per_s: 0.02        # восстановление нектара, ед./с (§4.2)
+    regen_per_s: 0.01        # восстановление нектара, ед./с (§4.2; M6: было 0.02 — цветы ограничивают рост мёда)
 
 # ---------------------------------------------------------------- §2.1 Типы пчёл
-# drag_coef, energy_max, power_idle, power_coef — подбираются из целей
-# (крейсерская скорость, время полёта) в вехе M1: tools/calibrate.py.
+# drag_coef, energy_max, power_idle, power_coef — выведены из целей (крейсерская
+# скорость, время полёта) скриптом tools/calibrate.py; руками не править.
 bee_types:
   scout:                     # разведчик
     radius: 0.20             # радиус сферы, м
@@ -63,22 +64,22 @@ bee_types:
     cruise_speed: 8.0        # цель: крейсерская скорость, м/с
     view_radius: 25.0        # радиус обзора, м
     flight_time_s: 300.0     # цель: время полёта на крейсерской скорости, с
-    drag_coef: null          # c_d: √(T_max² − (mg)²) = c_d · v_cruise²
-    energy_max: null         # E_max, Дж
-    power_idle: null         # P_idle, Вт
-    power_coef: null         # k_p в P = P_idle + k_p·|T|^1.5
+    drag_coef: 0.017112      # c_d: √(T_max² − (mg)²) = c_d · v_cruise²
+    energy_max: 1243.78      # E_max, Дж
+    power_idle: 0.197425     # P_idle, Вт
+    power_coef: 3.003729     # k_p в P = P_idle + k_p·|T|^1.5
   forager:                   # сборщик
     radius: 0.25
     mass: 0.08
-    cargo_max: 1.0
+    cargo_max: 1.5           # M6: было 1.0 — сборщик не окупался за матч
     thrust_max: 1.8
     cruise_speed: 5.0        # пустой
     view_radius: 8.0
     flight_time_s: 240.0
-    drag_coef: null
-    energy_max: null
-    power_idle: null
-    power_coef: null
+    drag_coef: 0.064796
+    energy_max: 1462.38
+    power_idle: 0.290155
+    power_coef: 2.402983
   guard:                     # охранник
     radius: 0.35
     mass: 0.15
@@ -87,10 +88,10 @@ bee_types:
     cruise_speed: 6.0
     view_radius: 12.0
     flight_time_s: 180.0
-    drag_coef: null
-    energy_max: null
-    power_idle: null
-    power_coef: null
+    drag_coef: 0.07262
+    energy_max: 1685.65
+    power_idle: 0.445938
+    power_coef: 1.716417
   # Домашняя пчела (house) не летает и не имеет тела — её параметры в economy.
 
 # ---------------------------------------------------------------- §2.2 Силы
@@ -98,16 +99,18 @@ physics:
   gravity: 9.81              # ускорение свободного падения, м/с²
   angular_damping: 0.002     # демпфирование вращения пчелы, Н·м·с (вращение для игры не важно)
   cargo_unit_mass: 0.04      # масса 1 ед. нектара, кг (груз сборщика 1.0 ед. = 0.04 кг)
-  rain_force_coef: null      # k_rain: F_rain = k_rain · r², Н/м² (M1)
+  rain_force_coef: 1.227718  # k_rain: F_rain = k_rain · r², Н/м² (≈10% веса; calibrate.py)
   rain_drag_multiplier: 1.3  # множитель сопротивления в дождь
   wall_stiffness: 2.0        # мягкие стенки и потолок: Н на метр выхода за границу на кг массы
+  bee_solref: [0.01, 1.0]    # жёсткость контактов пчёл (MuJoCo solref: timeconst ≥ 2·dt, dampratio)
+  parking_depth: 20.0        # припаркованные тела пула — на столько метров под нулём рельефа
 
-wind:                        # w(x, y, z, t), M1
+wind:                        # w(x, y, z, t); базовая сила w_ref — из состояния погоды (§6)
   height_ref: 10.0           # опорная высота профиля ветра, м
   shear_exponent: 0.14       # |w|(z) = w_ref · (z_agl / height_ref)^0.14
   min_agl: 1.0               # ниже — как на этой высоте, м
   gust_harmonics: 4          # число синусоид порывов (3–4)
-  gust_amplitude: 0.3        # амплитуда порывов, доля от w_ref
+  gust_amplitude: 0.3        # амплитуда порывов, доля от w_ref (на все гармоники вместе, СКО·√2)
   gust_period_s: [3.0, 12.0] # диапазон периодов порывов по времени, с
   gust_wavelength: [20.0, 80.0]  # диапазон длин волн порывов в пространстве, м
   turn_rate_deg_s: 0.5       # скорость поворота направления базового ветра, °/с
@@ -115,6 +118,7 @@ wind:                        # w(x, y, z, t), M1
 # ---------------------------------------------------------------- §2.3 Энергия
 energy:
   dead_on_ground: true       # при E = 0 тяга = 0; после касания земли пчела погибает
+  ground_contact_margin: 0.05  # «коснулась земли»: низ сферы ближе к рельефу, м
 
 # ---------------------------------------------------------------- §3.4 Автопилот
 autopilot:
@@ -123,15 +127,19 @@ autopilot:
   default_agl: 5.0           # fly_to без z: высота над рельефом, м
   min_clearance: 1.5         # минимальный просвет над рельефом, м
   arrive_radius: 0.5         # «долетела», м
-  avoid_obstacles: true      # отталкивание от видимых препятствий (M1)
-  avoid_gain: 4.0            # сила отталкивания, м/с² на границе препятствия (M1)
-  avoid_margin: 2.0          # дальность действия отталкивания от поверхности, м (M1)
+  avoid_obstacles: true      # отталкивание от видимых препятствий
+  avoid_gain: 4.0            # сила отталкивания, м/с² на границе препятствия
+  avoid_margin: 2.0          # дальность действия отталкивания от поверхности, м
+  terrain_lookahead_s: 1.0   # просвет считается и по рельефу впереди: точка через столько секунд полёта
+  separation: true           # мягкое расталкивание соседних пчёл (DECISIONS №27)
+  separation_gain: 12.0      # ускорение расталкивания при касании, м/с²
+  separation_margin: 0.6     # зазор между поверхностями, с которого начинается расталкивание, м
 
 # ---------------------------------------------------------------- §4 Экономика улья
 economy:
   start_honey: 20.0          # мёд на старте, ед.
   start_nectar: 0.0          # нектар на старте, ед.
-  start_bees: {scout: 5, forager: 15, guard: 5, house: 10}   # §4.6
+  start_bees: {scout: 5, forager: 15, guard: 5, house: 10}   # §4.6, только у ульев со скриптом
   collect:                   # §4.2
     rate: 0.25               # набор нектара, ед./с
     max_horizontal: 1.0      # над цветком: по горизонтали ≤, м
@@ -141,14 +149,20 @@ economy:
     k_proc: 0.1              # скорость = k_proc·√n_process, ед. нектара/с
     honey_per_nectar: 0.5    # 1 ед. нектара → 0.5 ед. мёда
   feeding:                   # §4.4
-    joules_per_honey: 2000.0 # 1 ед. мёда = 2000 Дж
+    joules_per_honey: 4000.0 # 1 ед. мёда = 4000 Дж (M6: было 2000 — заправка съедала весь доход)
     refuel_rate: 200.0       # скорость заправки, Дж/с
     house_consumption: 0.002 # потребление домашней пчелы, ед. мёда/с
-  breeding:                  # §4.5: цена (мёд) и базовое время (с); время = база / √max(1, n_nurse)
+  breeding:                  # §4.5: цена (мёд) и базовое время (с); время = база / √max(1, n_nurse);
+                             # очередь: растёт одна личинка за раз (DECISIONS №34)
     scout: {cost: 3.0, time_s: 30.0}
     forager: {cost: 4.0, time_s: 30.0}
     guard: {cost: 6.0, time_s: 45.0}
     house: {cost: 2.0, time_s: 20.0}
+
+hive:                        # вход и вылет (уточнение §3.3, DECISIONS №34)
+  enter_radius: 1.5          # go_home: ближе к летку — пчела входит в улей, м
+  exit_per_tick: 3           # leave_hive: вылетов из одного улья за тик решений
+  approach_margin: 2.5       # go_home из-за улья: облёт сбоку на таком зазоре от стенки, м
 
 # ---------------------------------------------------------------- §5 Сенсоры и связь
 sensors:
@@ -156,6 +170,7 @@ sensors:
   noise_pos_sigma: 0.3       # шум позиций при sensor_noise, м
   noise_vel_sigma: 0.1       # шум скоростей при sensor_noise, м/с
   spider_visible_radius: 4.0 # разведчик видит паука ближе, м
+  grid_cell: 5.0             # клетка пространственной сетки поиска соседей, м
 
 comms:
   radius: 15.0               # радиус связи signal(), м
@@ -169,34 +184,47 @@ pheromones:
 
 # ---------------------------------------------------------------- §6 Погода
 weather:
-  enabled: true
-  mean_duration_s: 90.0      # средняя длительность состояния марковской цепи
+  enabled: true              # false — ни ветра, ни дождя, погода всегда clear
+  wind: true                 # false — ветра нет (состояния и дождь остаются)
+  rain: true                 # false — цепь ходит только между clear и windy
+  initial: clear             # состояние на старте
+  mean_duration_s: 90.0      # средняя длительность состояния марковской цепи, с
   states:
     clear: {wind: [0.0, 1.0], rain: false}
-    windy: {wind: [3.0, 6.0], rain: false}
-    rain: {wind: [2.0, 4.0], rain: true}
+    windy: {wind: [1.5, 3.0], rain: false}   # M6: было 3–6 — против ветра сборщик (5 м/с) стоял на месте
+    rain: {wind: [1.0, 2.0], rain: true}     # M6: было 2–4
 
 # ---------------------------------------------------------------- §7 Враги
+# Враги — встроенные боты (swarmlab/bees/bots/) на том же API, что у игроков.
 enemies:
   hornets:
-    enabled: true
+    enabled: true            # false — шершней нет совсем (и тел в модели)
+    attack: true             # укусы: контакт с пчелой непрерывно kill_contact_s → пчела гибнет
+    rob: true                # грабёж мёда у летка
+    heat_ball: true          # тепловой шар: урон шершню от охранников
     max: 8                   # одновременно не больше (задаёт профиль)
-    radius: 0.4
-    mass: 0.3
-    cruise_speed: 7.0
+    radius: 0.4              # м
+    mass: 0.3                # кг
+    cruise_speed: 7.0        # м/с (c_d выводится из неё и thrust_max)
+    thrust_max: 5.0          # Н (нет в спецификации; вес 2.94 Н)
+    view_radius: 15.0        # обзор, м (нет в спецификации)
     hp: 100.0
+    first_wave_s: 60.0       # первая волна
     wave_interval_s: 60.0    # волна с края карты каждые …
     wave_growth_s: 120.0     # размер волны 1 + floor(t / wave_growth_s)
+    spawn_agl: 12.0          # высота появления над рельефом, м
     target_max_allies: 1     # цель — пчела, у которой ≤ 1 союзника …
     target_ally_radius: 3.0  # … в радиусе, м
-    kill_contact_s: 1.5      # непрерывный контакт → пчела погибает
+    kill_contact_s: 1.5      # непрерывный контакт → жертва погибает
+    touch_margin: 0.1        # «контакт»: зазор между поверхностями ≤, м
     rob_radius: 3.0          # грабёж у летка ближе, м
-    rob_guard_radius: 5.0    # … если нет охранников ближе, м
+    rob_guard_radius: 5.0    # … если нет охранников этого улья ближе к шершню, м
     rob_rate: 0.2            # кража мёда, ед./с
     heat_ball_min_guards: 2  # тепловой шар: охранников ≥
     heat_ball_distance: 1.0  # … на расстоянии от поверхности шершня ≤, м
     heat_ball_dps: 10.0      # урон за каждого охранника, HP/с
     flee_hp: 30.0            # HP ниже — шершень улетает к краю
+    leave_margin: 3.0        # убегающий шершень ближе к краю карты — покидает матч, м
   spiders:
     enabled: true
     flower_fraction: 0.10    # доля цветов с пауком
@@ -211,6 +239,7 @@ advanced_control: false      # разрешить thrust(fx, fy, fz)
 sensor_noise: false          # шум сенсоров
 hives: []                    # [{script: путь, color: "#rrggbb"}] — по записи на улей; пусто = цвета по умолчанию
 
-# Демо-пчёлы без раннера (веха M0): облёт точек скриптом внутри модуля.
+# Демо-пчёлы без раннера: доверенные скрипты внутри модуля, не код игрока.
 demo:
-  bees: []                   # [{kind, hive, waypoints: [[dx, dy, agl], …], loop, dwell_s}]
+  bees: []                   # M0: [{kind, hive, waypoints: [[dx, dy, agl], …], loop, dwell_s}]
+  swarm: null                # M1: {per_hive: {scout, forager, guard}, agl: [мин, макс], dwell_s, …}

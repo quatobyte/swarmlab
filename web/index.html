@@ -1,0 +1,150 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>SwarmLab — вьюер</title>
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Cellipse cx='16' cy='17' rx='9' ry='11' fill='%23f5b700'/%3E%3Cpath d='M8 14h16M7.5 19h17M9 24h14' stroke='%23222' stroke-width='3'/%3E%3C/svg%3E">
+  <link rel="stylesheet" href="vendor/codemirror/lib/codemirror.css">
+  <link rel="stylesheet" href="vendor/codemirror/theme/material-darker.css">
+  <link rel="stylesheet" href="vendor/codemirror/addon/hint/show-hint.css">
+  <link rel="stylesheet" href="vendor/codemirror/addon/lint/lint.css">
+  <link rel="stylesheet" href="style.css">
+  <script type="importmap">
+    {
+      "imports": {
+        "three": "./vendor/three/three.module.js",
+        "three/addons/": "./vendor/three/addons/"
+      }
+    }
+  </script>
+</head>
+<body>
+  <div id="view">
+  <div id="stage"></div>
+  <div id="fps" class="fps" hidden></div>
+
+  <div id="hud" hidden>
+    <div class="panel info" id="info">
+      <div class="info-title" id="info-title">SwarmLab</div>
+      <div class="info-row">
+        <span class="clock" id="clock">0:00</span>
+        <span class="muted" id="clock-total"></span>
+        <span class="badge" id="state-badge"></span>
+      </div>
+      <div class="info-row weather" id="weather">
+        <span id="weather-icon"></span><span id="weather-text"></span>
+        <span class="wind" id="wind"><span class="arrow" id="wind-arrow">➜</span><span id="wind-text"></span></span>
+      </div>
+    </div>
+
+    <div class="teams" id="teams"></div>
+    <div class="feed" id="feed"></div>
+    <div class="panel follow" id="follow" hidden></div>
+
+    <div class="bar" id="bar">
+      <button class="btn icon" id="btn-play" title="Пауза / продолжить (пробел)">⏸</button>
+      <div class="speeds" id="speeds"></div>
+      <div class="timeline" id="timeline" hidden>
+        <input type="range" id="seek" min="0" max="1" step="0.1" value="0" aria-label="Перемотка">
+      </div>
+      <div class="spacer"></div>
+      <select class="btn select" id="quality" title="Качество графики. «Экономное» меньше нагружает встроенную видеокарту и оставляет мощность симуляции"></select>
+      <button class="btn" id="btn-overview" title="Обзор карты (H)">Обзор</button>
+      <button class="btn" id="btn-stop" title="Остановить матч">Стоп</button>
+      <button class="btn" id="btn-menu" title="В меню">Меню</button>
+    </div>
+    <div class="hint" id="hint">
+      ЛКМ — вращать · колесо — приблизить · ПКМ — сдвиг · клик по пчеле — следить · Esc — отпустить ·
+      1–3 — к улью · H — обзор · F — FPS
+    </div>
+  </div>
+
+  <div id="view-empty" class="view-empty" hidden>
+    <div><b>Здесь появится матч.</b><br>Настройте его в панели «Матч» и нажмите «Запустить».</div>
+  </div>
+  <div id="banner" class="banner" hidden></div>
+  <div id="loading" class="loading" hidden><div class="spinner"></div><span id="loading-text">Загрузка…</span></div>
+  </div>
+
+  <div id="editor" class="editor" hidden>
+    <div class="ed-toolbar">
+      <select class="btn select" id="ed-file" title="Открыть скрипт"></select>
+      <button class="btn" id="ed-save" title="Сохранить (Ctrl+S)">Сохранить</button>
+      <button class="btn" id="ed-save-as" title="Сохранить под другим именем">Сохранить как…</button>
+      <span class="ed-status" id="ed-status"></span>
+      <span class="spacer"></span>
+      <button class="btn" id="ed-help" title="Короткая памятка по командам">Памятка</button>
+      <button class="btn" id="ed-menu" title="В меню">Меню</button>
+    </div>
+    <div class="ed-code" id="ed-code"></div>
+    <div class="ed-foot muted small">Ctrl+S — сохранить · Ctrl+Пробел или «.» — подсказки · Ctrl+/ — закомментировать · Ctrl+Enter — запустить матч</div>
+  </div>
+  <div id="ed-split" class="ed-split" hidden title="Потяните, чтобы изменить ширину"></div>
+
+  <div id="dock" class="dock" hidden>
+    <div class="dock-split" id="dock-split" title="Потяните, чтобы изменить высоту"></div>
+    <section class="dock-match">
+      <h3>Матч</h3>
+      <div class="match-form" id="match-form"></div>
+      <div class="match-actions">
+        <button class="btn primary" id="match-start" title="Сохранить, проверить и запустить (Ctrl+Enter)">▶ Запустить</button>
+        <button class="btn" id="match-stop" disabled>■ Стоп</button>
+      </div>
+      <p class="error small" id="match-error" hidden></p>
+    </section>
+    <section class="dock-logs">
+      <div class="log-tabs" id="log-tabs"></div>
+      <div class="log-body" id="log-body"></div>
+    </section>
+  </div>
+
+  <div id="help" class="overlay" hidden>
+    <div class="lobby help" id="help-body"></div>
+  </div>
+
+  <div id="lobby" class="overlay">
+    <div class="lobby">
+      <h1><span class="logo"></span>SwarmLab <small>рой пчёл</small></h1>
+      <section>
+        <h2>Новый матч</h2>
+        <div class="form">
+          <label>Матч <select id="lobby-match"></select></label>
+          <label>Seed <input id="lobby-seed" type="number" min="0" step="1" placeholder="из файла"></label>
+          <label>Скорость
+            <select id="lobby-speed">
+              <option value="0.5">×0.5</option><option value="1" selected>×1</option>
+              <option value="2">×2</option><option value="4">×4</option>
+            </select>
+          </label>
+          <button class="btn primary" id="lobby-start">Запустить</button>
+        </div>
+        <p class="small"><button class="btn" id="lobby-editor">✎ Редактор кода</button>
+          <span class="muted">— написать свой рой и сразу посмотреть, как он летает</span></p>
+        <p class="muted small" id="lobby-match-desc"></p>
+      </section>
+      <section id="lobby-live-section" hidden>
+        <h2>Идёт сейчас</h2>
+        <div class="list" id="lobby-live"></div>
+      </section>
+      <section>
+        <h2>Реплеи</h2>
+        <div class="list" id="lobby-replays"><p class="muted small">Загрузка…</p></div>
+        <label class="btn file">Открыть файл .swr…<input type="file" id="lobby-file" accept=".swr" hidden></label>
+        <span class="muted small">или перетащите файл в окно</span>
+      </section>
+      <p class="error" id="lobby-error" hidden></p>
+    </div>
+  </div>
+
+  <script src="vendor/codemirror/lib/codemirror.js"></script>
+  <script src="vendor/codemirror/mode/python/python.js"></script>
+  <script src="vendor/codemirror/addon/hint/show-hint.js"></script>
+  <script src="vendor/codemirror/addon/lint/lint.js"></script>
+  <script src="vendor/codemirror/addon/edit/matchbrackets.js"></script>
+  <script src="vendor/codemirror/addon/edit/closebrackets.js"></script>
+  <script src="vendor/codemirror/addon/comment/comment.js"></script>
+  <script src="vendor/codemirror/addon/selection/active-line.js"></script>
+  <script type="module" src="js/core/app.js"></script>
+</body>
+</html>

@@ -1,0 +1,21 @@
+# Матч вехи M2: один улей с кодом игрока (example_basic.py), экономика, без врагов.
+#   swarmlab run configs/matches/m2_economy.yaml --headless
+# Каждые 30 с печатается таблица: мёд, нектар, доставлено, переработано, пчёлы.
+# Лог кода игрока (print, ошибки) — logs/m2_economy/hive0.log.
+
+seed: 42
+profile: small
+duration_s: 120
+
+hives:
+  - {script: examples/bees/example_basic.py, color: "#3a86ff"}
+
+weather:
+  enabled: true
+  initial: clear
+
+enemies:
+  hornets: {enabled: false}
+  spiders: {enabled: false}
+
+overrides: {}

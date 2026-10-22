@@ -15,10 +15,13 @@ import numpy as np
 
 from swarmlab.bees.world import World
 
-# Маски столкновений (BEES_SPEC §2.4). Контакт есть, если
+# Маски столкновений (BEES_SPEC §2.4, DECISIONS №31). Контакт есть, если
 # (contype_a & conaffinity_b) or (contype_b & conaffinity_a).
+# Биты: 0b001 — статика, 0b010 — пчела, 0b100 — шершень.
 STATIC_CONTYPE, STATIC_CONAFFINITY = 0b001, 0b000  # статика не сталкивается сама с собой
-BEE_CONTYPE, BEE_CONAFFINITY = 0b010, 0b011  # пчёлы: с пчёлами и статикой
+BEE_CONTYPE, BEE_CONAFFINITY = 0b010, 0b111  # пчёлы: с пчёлами, шершнями и статикой
+HORNET_CONTYPE, HORNET_CONAFFINITY = 0b100, 0b011  # шершни: с пчёлами и статикой
+PARKED_CONTYPE, PARKED_CONAFFINITY = 0, 0  # припаркованные тела пула — ни с чем
 
 TERRAIN_RGBA = "0.42 0.55 0.30 1"
 BARK_RGBA = "0.40 0.27 0.16 1"
@@ -26,18 +29,26 @@ LEAF_RGBA = "0.20 0.45 0.18 1"
 ROCK_RGBA = "0.50 0.50 0.48 1"
 FLOWER_RGBA = "0.95 0.45 0.75 1"
 SPIDER_FLOWER_RGBA = "0.55 0.20 0.65 1"
+HORNET_RGBA = "0.85 0.35 0.05 1"
 DEFAULT_HIVE_COLORS = ("#f5b700", "#3a86ff", "#e63946")
 
 
 @dataclass(frozen=True)
 class BodySlot:
-    """Слот пула тел: свободная сфера."""
+    """Слот пула тел: свободная сфера (пчела или шершень — по маскам столкновений)."""
 
     name: str
     radius: float
     mass: float
     pos: tuple[float, float, float]
     rgba: str = "1 0.8 0.1 1"
+    contype: int = BEE_CONTYPE
+    conaffinity: int = BEE_CONAFFINITY
+
+
+def collides(contype_a: int, conaffinity_a: int, contype_b: int, conaffinity_b: int) -> bool:
+    """Правило фильтра контактов MuJoCo для пары геометрий."""
+    return bool((contype_a & conaffinity_b) or (contype_b & conaffinity_a))
 
 
 def hex_to_rgba(color: str, alpha: float = 1.0) -> str:
@@ -56,6 +67,7 @@ def build_mjcf(
     timestep: float,
     gravity: float,
     hive_colors: Sequence[str] = DEFAULT_HIVE_COLORS,
+    bee_solref: tuple[float, float] | None = None,
 ) -> str:
     """Собрать XML модели MuJoCo."""
     half = world.half_size
@@ -89,7 +101,7 @@ def build_mjcf(
     parts += _rocks(world)
     parts += _hives(world, hive_colors)
     parts += _flowers(world)
-    parts += [_bee(slot) for slot in slots]
+    parts += [_bee(slot, bee_solref) for slot in slots]
     parts += ["  </worldbody>", "</mujoco>"]
     return "\n".join(parts)
 
@@ -161,12 +173,13 @@ def _flowers(world: World) -> list[str]:
     ]
 
 
-def _bee(slot: BodySlot) -> str:
+def _bee(slot: BodySlot, solref: tuple[float, float] | None) -> str:
     name = quoteattr(slot.name)
+    sol = f' solref="{solref[0]:g} {solref[1]:g}"' if solref is not None else ""
     return (
         f'    <body name={name} pos="{_floats(slot.pos)}">'
         f"<freejoint name={name}/>"
         f'<geom name={name} type="sphere" size="{slot.radius:g}" mass="{slot.mass:g}"'
-        f' contype="{BEE_CONTYPE}" conaffinity="{BEE_CONAFFINITY}" rgba="{slot.rgba}"/>'
+        f' contype="{slot.contype}" conaffinity="{slot.conaffinity}" rgba="{slot.rgba}"{sol}/>'
         "</body>"
     )

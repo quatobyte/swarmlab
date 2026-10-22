@@ -17,6 +17,7 @@ dependencies = [
     "zstandard>=0.22",
     "fastapi>=0.110",
     "uvicorn>=0.29",
+    "websockets>=13",       # WebSocket в uvicorn (живой стрим вьюера)
 ]
 
 [project.optional-dependencies]
@@ -31,6 +32,10 @@ swarmlab = "swarmlab.cli:main"
 # Модули-сценарии регистрируются здесь; ядро находит их по имени, не импортируя напрямую.
 [project.entry-points."swarmlab.modules"]
 bees = "swarmlab.bees.module:BeesModule"
+
+# Хосты кода игрока для процесса-раннера (`python -m swarmlab.runner`): имя модуля → AgentHost.
+[project.entry-points."swarmlab.agent_hosts"]
+bees = "swarmlab.bees.player_host:HiveHost"
 
 [tool.setuptools.packages.find]
 where = ["src"]
