@@ -11,13 +11,19 @@ from pydantic import ValidationError
 from swarmlab.bees.autopilot import Autopilot, limit_thrust
 from swarmlab.bees.comms import Delivery, MessageBoard
 from swarmlab.bees.control import (
+    ARRIVE,
     COLLECT,
+    COLLECTED,
+    ENTER,
+    EXIT,
     FLY_DIR,
     FLY_TO,
     GO_HOME,
     HOVER,
     INTERCEPT,
+    LOST,
     THRUST,
+    WAIT_COND,
     Control,
     Parsed,
     parse,
@@ -44,6 +50,7 @@ from swarmlab.bees.world import World, generate_world
 from swarmlab.core.config import ConfigError, MatchConfig
 from swarmlab.core.module import DebugViewer, Frame, ScoreBoard, TeamSpec
 from swarmlab.core.physics import STATIC, PhysicsBackend
+from swarmlab.core.program import DONE, FAILED, RUNNING
 from swarmlab.core.protocol import CommandBatch, SensorBatch, TeamId
 from swarmlab.core.rng import RngRegistry
 from swarmlab.core.spatial import UniformGrid
@@ -572,6 +579,108 @@ class BeesModule:
                 c.mode[lost] = HOVER
                 ap.hover(lost, pos[m][~found])
 
+    # --------------------------------------------------------------- ожидание команд
+
+    def _wait_snapshot(self, parsed: Parsed) -> dict[int, tuple[int, int, float, bool]]:
+        """Ожидания слотов до команд тика и где была пчела: (seq, состояние, начало, в улье)."""
+        c, b = self.control, self.bees
+        return {
+            slot: (int(c.wait_seq[slot]), int(c.wait_state[slot]), float(c.wait_since[slot]),
+                   bool(b.state[slot] == IN_HIVE))
+            for slot, _, _, _ in parsed.waits
+        }
+
+    def _register_waits(
+        self, parsed: Parsed, prev: dict[int, tuple[int, int, float, bool]]
+    ) -> None:
+        """Любая команда движения снимает старое ожидание; ждущие команды ставят новое.
+
+        Повтор той же команды (раннер не увидел подтверждения) не сбрасывает отсчёт
+        таймаута. `unload` выполняется сразу: «выполнено», если пчела была в улье.
+        """
+        c = self.control
+        if not parsed.moves and not parsed.waits:
+            return
+        for rows in parsed.moves.values():
+            moved = np.fromiter((r[0] for r in rows), dtype=np.int64, count=len(rows))
+            c.wait_seq[moved] = 0
+            c.wait_state[moved] = RUNNING
+        n_flowers = self.world.flower_pos.shape[0]
+        flower_of = {r[0]: r[1] for r in parsed.moves.get("collect", [])}
+        for slot, seq, op, valid in parsed.waits:
+            old_seq, old_state, old_since, in_hive = prev[slot]
+            c.wait_seq[slot] = seq
+            c.wait_state[slot] = RUNNING
+            c.wait_since[slot] = (
+                old_since if old_seq == seq and old_state == RUNNING else self.time
+            )
+            if not valid:
+                c.wait_state[slot] = FAILED
+                continue
+            c.wait_cond[slot] = WAIT_COND[op]
+            if op == "unload":
+                c.wait_state[slot] = DONE if in_hive else FAILED
+            elif op == "collect" and not 0 <= flower_of.get(slot, -1) < n_flowers:
+                c.wait_state[slot] = FAILED  # такого цветка нет
+
+    def _check_waits(self) -> None:
+        """Тик решений: какие ждущие команды выполнены, а какие вышли по таймауту.
+
+        Условия — DECISIONS №61: `fly_to`/`hover` — ближе `arrive_tolerance` к цели
+        автопилота и медленнее `arrive_max_speed`; `go_home` — в улье; `leave_hive` —
+        снаружи; `collect` — набор закончен; `intercept` — цели больше нет в воздухе.
+        """
+        c, b = self.control, self.bees
+        w = np.flatnonzero((c.wait_seq > 0) & (c.wait_state == RUNNING))
+        if w.size == 0:
+            return
+        p = self.params.program
+        cond, state = c.wait_cond[w], b.state[w]
+        air = (state == FLYING) | (state == FALLING)
+        done = np.zeros(w.size, dtype=bool)
+        done |= (cond == ENTER) & (state == IN_HIVE)
+        done |= (cond == EXIT) & air
+        done |= (cond == COLLECTED) & (c.mode[w] != COLLECT)
+        done |= (cond == LOST) & (c.mode[w] != INTERCEPT)
+        arrive = cond == ARRIVE
+        done |= arrive & (state == IN_HIVE) & (c.mode[w] == HOVER) & ~c.exit_pending[w]
+        check = arrive & air
+        if np.any(check):
+            slots = w[check]
+            pos, vel = self.backend.body_state(slots)
+            ap = self.autopilot
+            goal = ap.target[slots].copy()
+            agl = ap.target_agl[slots]
+            follow = ~np.isnan(agl)
+            if np.any(follow):
+                goal[follow, 2] = self.world.ground_height(goal[follow, :2]) + agl[follow]
+            near = np.linalg.norm(pos - goal, axis=1) <= p.arrive_tolerance
+            slow = np.linalg.norm(vel, axis=1) <= p.arrive_max_speed
+            done[np.flatnonzero(check)[near & slow]] = True
+        c.wait_state[w[done]] = DONE
+        late = ~done & (self.time - c.wait_since[w] > p.command_timeout_s + 1e-9)
+        c.wait_state[w[late]] = FAILED
+
+    def _attach_waits(self, cache: dict[int, list[AgentSensors]]) -> None:
+        """Статус ожидания в сенсоры ждущих пчёл: `me["wait"] = [seq, состояние]`."""
+        c, b = self.control, self.bees
+        w = np.flatnonzero(c.wait_seq > 0)
+        if w.size == 0:
+            return
+        status = {
+            uid: [seq, st]
+            for uid, seq, st in zip(
+                b.uid[w].tolist(), c.wait_seq[w].tolist(), c.wait_state[w].tolist(),
+                strict=True,
+            )
+        }
+        for h in np.unique(b.hive[w]).tolist():
+            for agent in cache.get(h, []):
+                me = agent["me"]
+                st = status.get(me["id"])
+                if st is not None:
+                    me["wait"] = st
+
     def _find_targets(self, uids: np.ndarray) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
         """Цели `intercept` по uid среди пчёл в воздухе и шершней: найдена, позиция, скорость."""
         b = self.bees
@@ -625,6 +734,7 @@ class BeesModule:
         a = b.airborne
         pos, vel = self.backend.body_state(a)
         self._refresh_targets(a, pos, vel)
+        self._check_waits()
         self.enemies.refresh_targets(self._find_targets)
         self.bee_grid.build(pos)
         self._decide_pos, self._decide_vel, self._decide_slots = pos, vel, a
@@ -684,6 +794,7 @@ class BeesModule:
                     enemy_vel=e_vel,
                 )
             )
+            self._attach_waits(self._sensor_cache)
         return self._sensor_cache[hive]
 
     def _counts(self, hive: int) -> dict[str, Any]:
@@ -777,7 +888,9 @@ class BeesModule:
             channels=self.params.pheromones.channels,
         )
         self.invalid_commands[team] += parsed.invalid
+        prev = self._wait_snapshot(parsed)
         self._apply_moves(parsed)
+        self._register_waits(parsed, prev)
         for task, task_slots in parsed.house.items():
             self.economy.set_task(np.array(task_slots, dtype=np.int64), _TASK_CODES[task])
         for slot, values in parsed.signals:

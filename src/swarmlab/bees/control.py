@@ -9,6 +9,10 @@ API игрока проверяет аргументы в момент вызо�
 Режим движения пчелы хранится массивами по слотам (SoA). Режимы, которым нужна
 свежая цель каждый тик (`fly_dir`, `go_home`, `collect`, `intercept`), модуль
 пересчитывает векторно на тике решений.
+
+Команда с полем `"wait": seq` — программа игрока ждёт её выполнения (`step()` с
+`yield`, DECISIONS №57, №61). Ожидание тоже хранится по слотам: номер, условие
+выполнения, начало; модуль проверяет все ждущие слоты векторно на тике решений.
 """
 
 from __future__ import annotations
@@ -40,6 +44,12 @@ _FLYING_OPS: dict[str, tuple[int, int | None]] = {
     "thrust": (3, None),
 }
 HOUSE_OPS = ("rest", "process", "nurse")
+#: Условие выполнения команды, которую ждёт программа игрока (DECISIONS №61).
+ARRIVE, ENTER, EXIT, COLLECTED, LOST, NOW = range(6)
+WAIT_COND = {
+    "fly_to": ARRIVE, "hover": ARRIVE, "go_home": ENTER, "leave_hive": EXIT,
+    "collect": COLLECTED, "intercept": LOST, "unload": NOW,
+}
 #: Не больше стольких `mark` за тик от одной пчелы.
 MAX_MARKS_PER_TICK = 8
 
@@ -57,6 +67,12 @@ class Control:
         self.speed = np.full(n, np.nan)
         #: Пчела в улье хочет вылететь.
         self.exit_pending = np.zeros(n, dtype=bool)
+        #: Ожидание программы игрока: номер (0 — не ждёт), условие, начало, состояние
+        #: (`core.program.RUNNING/DONE/FAILED`).
+        self.wait_seq = np.zeros(n, dtype=np.int64)
+        self.wait_cond = np.zeros(n, dtype=np.int8)
+        self.wait_since = np.zeros(n)
+        self.wait_state = np.zeros(n, dtype=np.int8)
 
     def reset(self, slots: np.ndarray) -> None:
         self.mode[slots] = HOVER
@@ -64,6 +80,8 @@ class Control:
         self.direction[slots] = 0.0
         self.speed[slots] = np.nan
         self.exit_pending[slots] = False
+        self.wait_seq[slots] = 0
+        self.wait_state[slots] = 0
 
 
 @dataclass
@@ -79,6 +97,8 @@ class Parsed:
     breed: list[tuple[str, int]] = field(default_factory=list)
     cancel: list[str] = field(default_factory=list)
     hive_signal: list[float] | None = None
+    #: Команды, выполнения которых ждёт программа: (слот, seq, op, разобрана ли команда).
+    waits: list[tuple[int, int, str, bool]] = field(default_factory=list)
     invalid: int = 0
 
 
@@ -101,6 +121,15 @@ def _values(v: Any, limit: int) -> list[float]:
     return [_num(x) for x in v]
 
 
+def _wait_seq(cmd: dict[str, Any]) -> int:
+    """Номер ожидания команды (0 — не ждут, команда без движения или битый номер)."""
+    seq = cmd.get("wait")
+    if isinstance(seq, bool) or not isinstance(seq, int) or seq <= 0:
+        return 0
+    move = cmd.get("move")
+    return seq if isinstance(move, list) and move and move[0] in WAIT_COND else 0
+
+
 def parse(
     commands: dict[int, dict[str, Any]],
     team_command: dict[str, Any] | None,
@@ -119,8 +148,16 @@ def parse(
         try:
             if uid in flying:
                 slot = flying[uid]
-                _parse_flying(out, slot, int(flying_kind[slot]), cmd, advanced_control,
-                              max_values, channels)
+                wait = _wait_seq(cmd)
+                try:
+                    _parse_flying(out, slot, int(flying_kind[slot]), cmd, advanced_control,
+                                  max_values, channels)
+                except (TypeError, ValueError, KeyError, IndexError):
+                    if wait:  # битая команда, которую ждут: сразу «не вышло»
+                        out.waits.append((slot, wait, "", False))
+                    raise
+                if wait:
+                    out.waits.append((slot, wait, cmd["move"][0], True))
             elif uid in house:
                 move = cmd.get("move")
                 if move is not None:

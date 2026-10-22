@@ -159,6 +159,11 @@ economy:
     guard: {cost: 6.0, time_s: 45.0}
     house: {cost: 2.0, time_s: 20.0}
 
+program:                     # §3.1: step() с yield ждёт выполнения команды (DECISIONS №57, №61)
+  arrive_tolerance: 0.5      # «прилетела»: ближе к цели автопилота, м
+  arrive_max_speed: 0.3      # …и медленнее, м/с
+  command_timeout_s: 60.0    # потолок ожидания одной команды, с игрового времени (yield → False)
+
 hive:                        # вход и вылет (уточнение §3.3, DECISIONS №34)
   enter_radius: 1.5          # go_home: ближе к летку — пчела входит в улей, м
   exit_per_tick: 3           # leave_hive: вылетов из одного улья за тик решений

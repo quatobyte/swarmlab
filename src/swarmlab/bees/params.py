@@ -293,6 +293,14 @@ class HiveTrafficParams(_Strict):
     approach_margin: float = Field(gt=0)
 
 
+class ProgramParams(_Strict):
+    """Ожидание команд в `step()` с `yield` (BEES_SPEC §3.1, DECISIONS №57, №61)."""
+
+    arrive_tolerance: float = Field(gt=0)
+    arrive_max_speed: float = Field(gt=0)
+    command_timeout_s: float = Field(gt=0)
+
+
 class PoolParams(_Strict):
     max_bees_per_hive: int = Field(ge=1)
 
@@ -347,6 +355,7 @@ class BeesParams(_Strict):
     energy: EnergyParams
     economy: EconomyParams
     hive: HiveTrafficParams
+    program: ProgramParams
     sensors: SensorParams
     comms: CommsParams
     pheromones: PheromoneParams

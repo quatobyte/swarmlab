@@ -12,6 +12,10 @@
   (`self.my_flower = ...`), она доживёт до следующего тика.
 * Улей может принимать решения в функции `hive_step(hive)`: выводить новых
   пчёл, следить за мёдом.
+* Ждать выполнения команды можно через `yield`: `ok = yield self.fly_to(x, y)` —
+  пчела долетит (`True`) или не успеет за 60 с (`False`). `yield wait()` —
+  подождать один тик, `yield wait(5)` — пять секунд. Процедуру с ожиданием
+  вызывают так: `result = yield from self.my_trip(s)`.
 
 Файл игрока
 -----------
@@ -41,6 +45,8 @@ import random
 from dataclasses import dataclass, field
 from typing import Any, Literal, NamedTuple
 
+from swarmlab.core.program import Order, Wait
+
 #: Тип пчелы.
 Kind = Literal["scout", "forager", "guard", "house"]
 #: Погода.
@@ -51,8 +57,24 @@ Task = Literal["rest", "process", "nurse"]
 #: `from_id` сообщений, которые отправил сам улей (`hive.signal`).
 HIVE_ID = -1
 
+
 # Правила матча; раннер заполняет их перед загрузкой скрипта игрока.
 _RULES: dict[str, Any] = {"advanced_control": False, "channels": 4, "max_values": 8}
+
+
+# ===================================================================== ожидание
+
+
+def wait(seconds: float = 0.0) -> Wait:
+    """Подождать: `yield wait()` — один тик, `yield wait(5)` — 5 секунд игрового времени.
+
+    Работает только с `yield` внутри `step()` или `hive_step()`. Пока пчела ждёт,
+    она продолжает последнюю команду.
+    """
+    seconds = _num("seconds", seconds)
+    if seconds < 0:
+        raise ValueError("wait(): секунды не могут быть отрицательными")
+    return Wait(seconds)
 
 
 # ===================================================================== векторы
@@ -405,8 +427,10 @@ class _Agent:
             cmd = self.__dict__["_swarmlab_cmd"] = {}
         return cmd
 
-    def _move(self, *op: Any) -> None:
-        self._commands()["move"] = list(op)
+    def _move(self, *op: Any, instant: bool = False) -> Order:
+        move = list(op)
+        self._commands()["move"] = move
+        return Order(move, instant)
 
 
 class _Flyer(_Agent):
@@ -419,7 +443,7 @@ class _Flyer(_Agent):
         z: float | None = None,
         speed: float | None = None,
         avoid: bool = True,
-    ) -> None:
+    ) -> Order:
         """Лететь к точке `(x, y)`.
 
         * `z` — высота (абсолютная, м). Не задана — держаться в 5 м над землёй.
@@ -428,21 +452,21 @@ class _Flyer(_Agent):
 
         Можно передать точку целиком: `self.fly_to(*flower.pos)`.
         """
-        self._move(
+        return self._move(
             "fly_to", _num("x", x), _num("y", y), _opt("z", z), _opt("speed", speed),
             bool(avoid),
         )
 
-    def fly_dir(self, dx: float, dy: float, dz: float = 0.0, speed: float | None = None) -> None:
+    def fly_dir(self, dx: float, dy: float, dz: float = 0.0, speed: float | None = None) -> Order:
         """Лететь в направлении `(dx, dy, dz)` (длина неважна), пока не скажут другое."""
         dx, dy, dz = _num("dx", dx), _num("dy", dy), _num("dz", dz)
         if dx == 0 and dy == 0 and dz == 0:
             raise ValueError("fly_dir: направление (0, 0, 0) — непонятно, куда лететь")
-        self._move("fly_dir", dx, dy, dz, _opt("speed", speed))
+        return self._move("fly_dir", dx, dy, dz, _opt("speed", speed), instant=True)
 
-    def hover(self) -> None:
+    def hover(self) -> Order:
         """Зависнуть на месте."""
-        self._move("hover")
+        return self._move("hover")
 
 
 class Bee(_Flyer):
@@ -462,15 +486,15 @@ class Bee(_Flyer):
 
     # ----------------------------------------------------------------- движение
 
-    def go_home(self) -> None:
+    def go_home(self) -> Order:
         """Лететь к летку и войти в улей (там заправка и выгрузка нектара)."""
-        self._move("go_home")
+        return self._move("go_home")
 
-    def leave_hive(self) -> None:
+    def leave_hive(self) -> Order:
         """Вылететь из улья (если пчела внутри)."""
-        self._move("leave_hive")
+        return self._move("leave_hive")
 
-    def thrust(self, fx: float, fy: float, fz: float) -> None:
+    def thrust(self, fx: float, fy: float, fz: float) -> Order:
         """Продвинутый режим: прямая сила тяги, Н. Автопилот выключается.
 
         Работает, только если в матче `advanced_control: true`. Тяга вниз не бывает,
@@ -478,7 +502,7 @@ class Bee(_Flyer):
         """
         if not _RULES["advanced_control"]:
             raise RuntimeError("thrust() разрешена только в матче с advanced_control: true")
-        self._move("thrust", _num("fx", fx), _num("fy", fy), _num("fz", fz))
+        return self._move("thrust", _num("fx", fx), _num("fy", fy), _num("fz", fz), instant=True)
 
     # ----------------------------------------------------------------- связь
 
@@ -536,17 +560,17 @@ class Forager(Bee):
 
     kind: Kind = "forager"
 
-    def collect(self, flower: Flower | int) -> None:
+    def collect(self, flower: Flower | int) -> Order:
         """Подлететь к цветку, зависнуть над ним и набирать нектар (0.25 ед./с).
 
         Набор идёт, пока груз не полный или цветок не пустой. Можно передать
         сам цветок или его номер: `self.collect(f)` или `self.collect(f.id)`.
         """
-        self._move("collect", _id("collect", flower))
+        return self._move("collect", _id("collect", flower))
 
-    def unload(self) -> None:
+    def unload(self) -> Order:
         """Выгрузить весь нектар на склад. Работает, только когда сборщик в улье."""
-        self._move("unload")
+        return self._move("unload")
 
     def step(self, s: Sensors) -> None:
         me = s.me
@@ -586,9 +610,9 @@ class Guard(Bee):
 
     kind: Kind = "guard"
 
-    def intercept(self, target: Enemy | BeeInfo | int) -> None:
+    def intercept(self, target: Enemy | BeeInfo | int) -> Order:
         """Преследовать цель с упреждением (лететь туда, где она будет)."""
-        self._move("intercept", _id("intercept", target))
+        return self._move("intercept", _id("intercept", target))
 
     def step(self, s: Sensors) -> None:
         me = s.me
@@ -631,17 +655,17 @@ class HouseBee(_Agent):
         else:
             self.rest()
 
-    def process(self) -> None:
+    def process(self) -> Order:
         """Перерабатывать нектар в мёд (1 ед. нектара → 0.5 ед. мёда)."""
-        self._move("process")
+        return self._move("process", instant=True)
 
-    def nurse(self) -> None:
+    def nurse(self) -> Order:
         """Ухаживать за личинками: чем больше нянек, тем быстрее выведение."""
-        self._move("nurse")
+        return self._move("nurse", instant=True)
 
-    def rest(self) -> None:
+    def rest(self) -> Order:
         """Отдыхать (мёд всё равно ест)."""
-        self._move("rest")
+        return self._move("rest", instant=True)
 
 
 # ===================================================================== враги
@@ -663,9 +687,9 @@ class Hornet(_Flyer):
     def step(self, s: HornetSensors) -> None:
         """Решение шершня на этом тике. Переопределите в своём классе."""
 
-    def intercept(self, target: BeeInfo | int) -> None:
+    def intercept(self, target: BeeInfo | int) -> Order:
         """Преследовать пчелу с упреждением (лететь туда, где она будет)."""
-        self._move("intercept", _id("intercept", target))
+        return self._move("intercept", _id("intercept", target))
 
 
 class Spider(_Agent):

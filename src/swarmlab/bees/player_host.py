@@ -8,6 +8,13 @@
 подсчётом, без потопа). Время кода игрока меряется `time.perf_counter()`
 (DECISIONS №32) — только вокруг вызовов кода игрока.
 
+`step()` и `hive_step()` могут быть генераторами (DECISIONS №57–59): хост держит
+генератор между тиками (`core.program.Program`), добавляет к команде номер
+ожидания `wait` и продолжает генератор, когда модуль прислал в сенсорах пчелы
+`me["wait"] = [seq, состояние]`. Пока программа ждёт, `s` в генераторе
+обновляется на месте — после `yield` в нём свежие сенсоры. Пчела погибла —
+генератор закрывается (`finally` выполняется); конец матча — `close()`.
+
 Тот же хост без процесса исполняет встроенных ботов врагов (шершни, пауки,
 DECISIONS №36): модуль передаёт классы ботов в `use_classes` и вызывает `step`
 у себя — протокол и классы API те же, что у игрока.
@@ -18,6 +25,7 @@ DECISIONS №36): модуль передаёт классы ботов в `use_
 from __future__ import annotations
 
 import importlib.util
+import inspect
 import sys
 import time
 import traceback
@@ -26,6 +34,7 @@ from pathlib import Path
 from typing import Any
 
 from swarmlab.bees import api
+from swarmlab.core.program import Order, Program
 from swarmlab.core.protocol import CommandBatch, SensorBatch
 
 _BASES: dict[str, type] = {
@@ -60,6 +69,12 @@ class HiveHost:
         self.hive = api.Hive()
         self.team = 0
         self.script_dir: Path | None = None
+        #: `step()` с `yield`: генераторы пчёл, которые сейчас ждут (DECISIONS №57).
+        self.programs: dict[int, Program] = {}
+        #: Объект `s`, который держит генератор: обновляется на месте каждый тик.
+        self.held_sensors: dict[int, Any] = {}
+        self.hive_program: Program | None = None
+        self._seq = 0
         self._error_counts: dict[tuple[str, str, int], int] = {}
 
     # --------------------------------------------------------------- загрузка
@@ -134,27 +149,38 @@ class HiveHost:
             kind = str(me["kind"])
             seen.add(uid)
             sensors = self._sensors(raw, kind)
+            program = self.programs.get(uid)
             t0 = perf()
             try:
-                bee = self.agents.get(uid)
-                if bee is None:
-                    bee = self._create(kind, uid)
-                bee.__dict__["_swarmlab_cmd"] = {}
-                bee.step(sensors)
-                cmd = bee.__dict__.get("_swarmlab_cmd") or {}
+                if program is not None:
+                    cmd = self._continue(uid, program, sensors, raw)
+                else:
+                    bee = self.agents.get(uid)
+                    if bee is None:
+                        bee = self._create(kind, uid)
+                    bee.__dict__["_swarmlab_cmd"] = {}
+                    result = bee.step(sensors)
+                    cmd = bee.__dict__.get("_swarmlab_cmd") or {}
+                    if inspect.isgenerator(result):
+                        cmd = self._start(uid, Program(result), sensors, float(raw["time"]))
             except Exception as e:
                 # Летающий агент зависает; домашняя пчела и паук продолжают как было.
                 cmd = {"move": ["hover"]} if kind not in ("house", "spider") else {}
                 errors.append(uid)
+                self._forget_program(uid)  # генератор с исключением уже закончен
                 self._report(e, f"Пчела {kind} id={uid}, тик {batch.tick}")
             finally:
                 cpu += perf() - t0
             if cmd:
                 commands[uid] = cmd
 
-        # Погибшие пчёлы — забываем их объекты (в рождение id не повторяются).
+        # Погибшие пчёлы — закрываем их программы и забываем объекты (id не повторяются).
         for uid in [u for u in self.agents if u not in seen]:
-            del self.agents[uid]
+            t0 = perf()
+            try:
+                self._drop(uid)
+            finally:
+                cpu += perf() - t0
 
         team_command = None
         self._update_hive(batch.team_view)
@@ -163,9 +189,10 @@ class HiveHost:
             hive._swarmlab_cmd = {}
             t0 = perf()
             try:
-                self.hive_step(hive)
+                self._hive_tick(hive)
                 team_command = hive._swarmlab_cmd or None
             except Exception as e:
+                self.hive_program = None
                 self._report(e, f"hive_step, тик {batch.tick}")
             finally:
                 cpu += perf() - t0
@@ -177,6 +204,102 @@ class HiveHost:
             cpu_ms=cpu * 1000.0,
             errors=errors,
         )
+
+    # --------------------------------------------------------------- программы (yield)
+
+    def _next_seq(self) -> int:
+        self._seq += 1
+        return self._seq
+
+    def _start(self, uid: int, program: Program, sensors: Any, now: float) -> dict[str, Any]:
+        """`step()` оказался генератором: прогнать до первого `yield`."""
+        bee = self.agents[uid]
+        if program.start(now, self._next_seq()):
+            self.programs[uid] = program
+            self.held_sensors[uid] = sensors
+        return self._with_wait(bee.__dict__.get("_swarmlab_cmd") or {}, uid)
+
+    def _continue(
+        self, uid: int, program: Program, sensors: Any, raw: dict[str, Any]
+    ) -> dict[str, Any]:
+        """Пчела ждёт: обновить её `s` на месте и, если ожидание кончилось, продолжить."""
+        held = self.held_sensors[uid]
+        for name in type(held).__slots__:
+            setattr(held, name, getattr(sensors, name))
+        status = raw["me"].get("wait")
+        now = float(raw["time"])
+        result = program.poll(now, status)
+        if result is None:
+            if program.acknowledged(status):
+                return {}  # пчела продолжает команду, которую ждёт
+            # Команда не дошла до модуля (бюджет, пропуск тика) — отправить ещё раз.
+            return self._with_wait({}, uid)
+        bee = self.agents[uid]
+        bee.__dict__["_swarmlab_cmd"] = {}
+        alive = program.resume(result, now, self._next_seq())
+        cmd = bee.__dict__.get("_swarmlab_cmd") or {}
+        if not alive:
+            self._forget_program(uid)
+            return cmd
+        return self._with_wait(cmd, uid)
+
+    def _with_wait(self, cmd: dict[str, Any], uid: int) -> dict[str, Any]:
+        """Добавить к команде то, чего ждёт программа (`yield жетон`)."""
+        program = self.programs.get(uid)
+        if program is None or not isinstance(program.waiting, Order):
+            return cmd
+        cmd = dict(cmd)
+        cmd["move"] = program.waiting.move
+        if program.seq:
+            cmd["wait"] = program.seq
+        return cmd
+
+    def _forget_program(self, uid: int) -> None:
+        self.programs.pop(uid, None)
+        self.held_sensors.pop(uid, None)
+
+    def _drop(self, uid: int) -> None:
+        """Пчела погибла: закрыть её программу (`finally` выполнится) и забыть объект."""
+        program = self.programs.get(uid)
+        self._forget_program(uid)
+        del self.agents[uid]
+        if program is not None:
+            try:
+                program.close()
+            except Exception as e:
+                self._report(e, f"finally пчелы id={uid}")
+
+    def _hive_tick(self, hive: api.Hive) -> None:
+        """`hive_step` один раз за тик; если он генератор — ждать по `yield wait(…)`."""
+        assert self.hive_step is not None
+        program = self.hive_program
+        now = hive.time
+        if program is not None:
+            result = program.poll(now, None)
+            if result is not None and not program.resume(result, now, 0):
+                self.hive_program = None
+            return
+        result = self.hive_step(hive)
+        if inspect.isgenerator(result):
+            program = Program(result)
+            if program.start(now, 0):
+                self.hive_program = program
+
+    def close(self) -> None:
+        """Конец матча: закрыть все программы (`finally` выполнится)."""
+        for uid in list(self.programs):
+            program = self.programs[uid]
+            self._forget_program(uid)
+            try:
+                program.close()
+            except Exception as e:
+                self._report(e, f"finally пчелы id={uid}")
+        if self.hive_program is not None:
+            program, self.hive_program = self.hive_program, None
+            try:
+                program.close()
+            except Exception as e:
+                self._report(e, "finally hive_step")
 
     def _create(self, kind: str, uid: int) -> Any:
         cls = self.classes.get(kind)

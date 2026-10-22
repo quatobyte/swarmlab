@@ -65,6 +65,22 @@ def hive_step(hive):              # улей: кого выводить
 - Ничего не вызвал — пчела продолжает прошлую команду.
 - Хочешь что-то запомнить — сохрани в `self`: `self.my_flower = flower`.
 
+## Ждать (`yield`)
+
+Напиши `yield` перед командой — пчела **дождётся**, пока команда выполнится:
+
+| Пишешь | Что будет |
+|---|---|
+| `ok = yield self.fly_to(x, y)` | долетела — `ok = True`; не долетела за 60 с — `False` |
+| `yield self.collect(flower)` | ждать, пока наберёт нектар |
+| `yield self.go_home()` | ждать, пока войдёт в улей |
+| `yield wait()` | подождать один тик |
+| `yield wait(5)` | подождать 5 секунд |
+| `x = yield from self.my_trip(s)` | вызвать свою процедуру с ожиданием |
+
+`wait` нужно импортировать: `from swarmlab.bees.api import Forager, wait`.
+Когда `step()` с `yield` дошёл до конца, он начнётся заново.
+
 ## Улей (`hive.…`)
 
 | Пишешь | Что это |
@@ -103,6 +119,26 @@ class MyForager(Forager):
             self.collect(flower)          # собирать
         else:
             self.fly_to(s.home.pos.x + 20, s.home.pos.y)   # искать дальше
+```
+
+**Сборщик по шагам (с `yield`):**
+
+```python
+class MyForager(Forager):
+    def step(self, s):
+        if s.me.in_hive:
+            yield self.unload()                       # выгрузить
+            while s.me.energy_percent < 90:
+                yield wait()                          # заправиться
+            yield self.leave_hive()
+            return
+        flower = s.nearest_flower(min_nectar=0.3)
+        if flower is None:
+            yield self.fly_to(s.home.pos.x + 20, s.home.pos.y)   # искать
+            return
+        if (yield self.fly_to(flower.pos.x, flower.pos.y)):     # долетела?
+            yield self.collect(flower)                # набрать
+        yield self.go_home()                          # домой
 ```
 
 **Разведчик рассказывает про цветы:**

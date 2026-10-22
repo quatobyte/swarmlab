@@ -1,0 +1,21 @@
+# Матч вехи M7a: один улей с example_wait.py — step() с yield ждёт выполнения команд.
+#   swarmlab run configs/matches/wait.yaml --headless
+#   swarmlab run configs/matches/wait.yaml --mj-viewer
+# Лог кода игрока (print: «лечу к цветку», «над цветком», «принесла») — logs/wait/hive0.log.
+
+seed: 42
+profile: small
+duration_s: 180
+
+hives:
+  - {script: examples/bees/example_wait.py, color: "#3a86ff"}
+
+weather:
+  enabled: true
+  initial: clear
+
+enemies:
+  hornets: {enabled: false}
+  spiders: {enabled: false}
+
+overrides: {}

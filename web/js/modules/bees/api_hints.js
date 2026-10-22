@@ -832,28 +832,28 @@ export const API_HINTS = {
      "name": "fly_dir",
      "kind": "method",
      "sig": "(dx, dy, dz=0.0, speed=None)",
-     "type": "None",
+     "type": "Order",
      "doc": "Лететь в направлении `(dx, dy, dz)` (длина неважна), пока не скажут другое."
     },
     {
      "name": "fly_to",
      "kind": "method",
      "sig": "(x, y, z=None, speed=None, avoid=True)",
-     "type": "None",
+     "type": "Order",
      "doc": "Лететь к точке `(x, y)`."
     },
     {
      "name": "go_home",
      "kind": "method",
      "sig": "()",
-     "type": "None",
+     "type": "Order",
      "doc": "Лететь к летку и войти в улей (там заправка и выгрузка нектара)."
     },
     {
      "name": "hover",
      "kind": "method",
      "sig": "()",
-     "type": "None",
+     "type": "Order",
      "doc": "Зависнуть на месте."
     },
     {
@@ -866,7 +866,7 @@ export const API_HINTS = {
      "name": "leave_hive",
      "kind": "method",
      "sig": "()",
-     "type": "None",
+     "type": "Order",
      "doc": "Вылететь из улья (если пчела внутри)."
     },
     {
@@ -887,7 +887,7 @@ export const API_HINTS = {
      "name": "thrust",
      "kind": "method",
      "sig": "(fx, fy, fz)",
-     "type": "None",
+     "type": "Order",
      "doc": "Продвинутый режим: прямая сила тяги, Н. Автопилот выключается."
     },
     {
@@ -909,28 +909,28 @@ export const API_HINTS = {
      "name": "fly_dir",
      "kind": "method",
      "sig": "(dx, dy, dz=0.0, speed=None)",
-     "type": "None",
+     "type": "Order",
      "doc": "Лететь в направлении `(dx, dy, dz)` (длина неважна), пока не скажут другое."
     },
     {
      "name": "fly_to",
      "kind": "method",
      "sig": "(x, y, z=None, speed=None, avoid=True)",
-     "type": "None",
+     "type": "Order",
      "doc": "Лететь к точке `(x, y)`."
     },
     {
      "name": "go_home",
      "kind": "method",
      "sig": "()",
-     "type": "None",
+     "type": "Order",
      "doc": "Лететь к летку и войти в улей (там заправка и выгрузка нектара)."
     },
     {
      "name": "hover",
      "kind": "method",
      "sig": "()",
-     "type": "None",
+     "type": "Order",
      "doc": "Зависнуть на месте."
     },
     {
@@ -943,7 +943,7 @@ export const API_HINTS = {
      "name": "leave_hive",
      "kind": "method",
      "sig": "()",
-     "type": "None",
+     "type": "Order",
      "doc": "Вылететь из улья (если пчела внутри)."
     },
     {
@@ -964,7 +964,7 @@ export const API_HINTS = {
      "name": "thrust",
      "kind": "method",
      "sig": "(fx, fy, fz)",
-     "type": "None",
+     "type": "Order",
      "doc": "Продвинутый режим: прямая сила тяги, Н. Автопилот выключается."
     },
     {
@@ -986,35 +986,35 @@ export const API_HINTS = {
      "name": "collect",
      "kind": "method",
      "sig": "(flower)",
-     "type": "None",
+     "type": "Order",
      "doc": "Подлететь к цветку, зависнуть над ним и набирать нектар (0.25 ед./с)."
     },
     {
      "name": "fly_dir",
      "kind": "method",
      "sig": "(dx, dy, dz=0.0, speed=None)",
-     "type": "None",
+     "type": "Order",
      "doc": "Лететь в направлении `(dx, dy, dz)` (длина неважна), пока не скажут другое."
     },
     {
      "name": "fly_to",
      "kind": "method",
      "sig": "(x, y, z=None, speed=None, avoid=True)",
-     "type": "None",
+     "type": "Order",
      "doc": "Лететь к точке `(x, y)`."
     },
     {
      "name": "go_home",
      "kind": "method",
      "sig": "()",
-     "type": "None",
+     "type": "Order",
      "doc": "Лететь к летку и войти в улей (там заправка и выгрузка нектара)."
     },
     {
      "name": "hover",
      "kind": "method",
      "sig": "()",
-     "type": "None",
+     "type": "Order",
      "doc": "Зависнуть на месте."
     },
     {
@@ -1027,7 +1027,7 @@ export const API_HINTS = {
      "name": "leave_hive",
      "kind": "method",
      "sig": "()",
-     "type": "None",
+     "type": "Order",
      "doc": "Вылететь из улья (если пчела внутри)."
     },
     {
@@ -1048,14 +1048,14 @@ export const API_HINTS = {
      "name": "thrust",
      "kind": "method",
      "sig": "(fx, fy, fz)",
-     "type": "None",
+     "type": "Order",
      "doc": "Продвинутый режим: прямая сила тяги, Н. Автопилот выключается."
     },
     {
      "name": "unload",
      "kind": "method",
      "sig": "()",
-     "type": "None",
+     "type": "Order",
      "doc": "Выгрузить весь нектар на склад. Работает, только когда сборщик в улье."
     },
     {
@@ -1077,35 +1077,35 @@ export const API_HINTS = {
      "name": "fly_dir",
      "kind": "method",
      "sig": "(dx, dy, dz=0.0, speed=None)",
-     "type": "None",
+     "type": "Order",
      "doc": "Лететь в направлении `(dx, dy, dz)` (длина неважна), пока не скажут другое."
     },
     {
      "name": "fly_to",
      "kind": "method",
      "sig": "(x, y, z=None, speed=None, avoid=True)",
-     "type": "None",
+     "type": "Order",
      "doc": "Лететь к точке `(x, y)`."
     },
     {
      "name": "go_home",
      "kind": "method",
      "sig": "()",
-     "type": "None",
+     "type": "Order",
      "doc": "Лететь к летку и войти в улей (там заправка и выгрузка нектара)."
     },
     {
      "name": "hover",
      "kind": "method",
      "sig": "()",
-     "type": "None",
+     "type": "Order",
      "doc": "Зависнуть на месте."
     },
     {
      "name": "intercept",
      "kind": "method",
      "sig": "(target)",
-     "type": "None",
+     "type": "Order",
      "doc": "Преследовать цель с упреждением (лететь туда, где она будет)."
     },
     {
@@ -1118,7 +1118,7 @@ export const API_HINTS = {
      "name": "leave_hive",
      "kind": "method",
      "sig": "()",
-     "type": "None",
+     "type": "Order",
      "doc": "Вылететь из улья (если пчела внутри)."
     },
     {
@@ -1139,7 +1139,7 @@ export const API_HINTS = {
      "name": "thrust",
      "kind": "method",
      "sig": "(fx, fy, fz)",
-     "type": "None",
+     "type": "Order",
      "doc": "Продвинутый режим: прямая сила тяги, Н. Автопилот выключается."
     },
     {
@@ -1165,21 +1165,21 @@ export const API_HINTS = {
      "name": "nurse",
      "kind": "method",
      "sig": "()",
-     "type": "None",
+     "type": "Order",
      "doc": "Ухаживать за личинками: чем больше нянек, тем быстрее выведение."
     },
     {
      "name": "process",
      "kind": "method",
      "sig": "()",
-     "type": "None",
+     "type": "Order",
      "doc": "Перерабатывать нектар в мёд (1 ед. нектара → 0.5 ед. мёда)."
     },
     {
      "name": "rest",
      "kind": "method",
      "sig": "()",
-     "type": "None",
+     "type": "Order",
      "doc": "Отдыхать (мёд всё равно ест)."
     },
     {
@@ -1199,28 +1199,28 @@ export const API_HINTS = {
      "name": "fly_dir",
      "kind": "method",
      "sig": "(dx, dy, dz=0.0, speed=None)",
-     "type": "None",
+     "type": "Order",
      "doc": "Лететь в направлении `(dx, dy, dz)` (длина неважна), пока не скажут другое."
     },
     {
      "name": "fly_to",
      "kind": "method",
      "sig": "(x, y, z=None, speed=None, avoid=True)",
-     "type": "None",
+     "type": "Order",
      "doc": "Лететь к точке `(x, y)`."
     },
     {
      "name": "hover",
      "kind": "method",
      "sig": "()",
-     "type": "None",
+     "type": "Order",
      "doc": "Зависнуть на месте."
     },
     {
      "name": "intercept",
      "kind": "method",
      "sig": "(target)",
-     "type": "None",
+     "type": "Order",
      "doc": "Преследовать пчелу с упреждением (лететь туда, где она будет)."
     },
     {
@@ -1372,6 +1372,11 @@ export const API_HINTS = {
    "name": "HIVE_ID",
    "kind": "const",
    "doc": "`from_id` сообщений, которые отправил сам улей (`hive.signal`)."
+  },
+  {
+   "name": "wait",
+   "kind": "function",
+   "doc": "Подождать: `yield wait()` — один тик, `yield wait(5)` — 5 секунд игрового времени."
   },
   {
    "name": "Vec",

@@ -9,7 +9,8 @@
    задаёт seed модуля `random` (детерминизм скриптов), хост загружает скрипт.
    Ответ `ready` (`ok: false` и трассировка, если скрипт не загрузился).
 3. На каждый `sensors` отвечает `commands`. Время кода игрока меряет хост.
-4. `stop` — выход. Ядро закрыло канал (EOF) — выход, даже если код игрока
+4. `stop` — хост закрывает программы агентов (`finally` в `step()` с `yield`) и
+   раннер выходит. Ядро закрыло канал (EOF) — выход, даже если код игрока
    завис в `while True`: поток-читатель завершает процесс через `os._exit`.
 """
 
@@ -141,6 +142,12 @@ def main() -> int:
     while True:
         msg = inbox.get()
         if msg is None or msg.get("t") == "stop":
+            close = getattr(host, "close", None)
+            if close is not None:
+                try:
+                    close()  # finally в программах агентов (DECISIONS №58)
+                except Exception:
+                    pass
             return 0
         if msg.get("t") != "sensors":
             continue
