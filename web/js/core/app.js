@@ -8,6 +8,7 @@ import { QUALITY, QUALITY_ORDER, Stage, saveQuality } from "./stage.js";
 import { Editor } from "./ui/editor.js";
 import { FpsMeter, isTyping } from "./ui/fps.js";
 import { Lobby, STATE_RU, fmtTime } from "./ui/lobby.js";
+import { SeriesView } from "./ui/series.js";
 
 /** Вьюеры модулей: имя модуля из header.module → загрузчик. */
 const MODULES = {
@@ -111,11 +112,12 @@ class Session {
     this.endShown = true;
     const stopped = this.source.status?.state === "stopped";
     const text = this.viewer?.describeResult(footer.score, stopped) || (stopped ? "Матч остановлен" : "Матч окончен");
+    const toSeries = this.seriesId ? [["📊 Таблица серии", () => { hideBanner(); showSeries(this.seriesId); }]] : [];
     if (editor.active) {
-      showBanner(text, [["↻ Перезапустить", () => { hideBanner(); editor.start(); }], ["Закрыть", hideBanner]]);
+      showBanner(text, [...toSeries, ["↻ Перезапустить", () => { hideBanner(); editor.start(); }], ["Закрыть", hideBanner]]);
       return;
     }
-    const actions = [];
+    const actions = [...toSeries];
     if (this.source.kind === "live" && footer.replay) {
       const id = footer.replay.replace(/\.swr$/, "");
       actions.push(["Смотреть реплей", () => openReplay(id, footer.replay)]);
@@ -330,6 +332,7 @@ async function startMatch(body) {
 function toLobby() {
   if (editor.active && editor.dirty && !confirm("В редакторе есть несохранённые правки. Выйти в меню без сохранения?")) return;
   editor.close();
+  seriesView.hide();
   session?.close();
   session = null;
   hideBanner();
@@ -339,7 +342,49 @@ function toLobby() {
   lobby.show();
 }
 
-const lobby = new Lobby({ startMatch, openLive, openReplay, openFile });
+// ------------------------------------------------------------------ серии (M7c)
+
+/** Таблица серии: в меню — поверх страницы, в редакторе — поверх вьюера. */
+const seriesView = new SeriesView({
+  onWatch: (sid, seed, title) => watchSeriesReplay(sid, seed, title),
+  onClose: () => {
+    lobby.refreshSeries();
+    editor.onSeriesClosed?.(seriesView.id);
+  },
+});
+
+function seriesContainer() {
+  return editor.active ? $("view") : document.body;
+}
+
+async function showSeries(id) {
+  await seriesView.show(id, seriesContainer());
+}
+
+async function startSeries(body) {
+  return seriesView.start(body, seriesContainer());
+}
+
+async function watchSeriesReplay(sid, seed, title) {
+  seriesView.root.hidden = true; // не hide(): таблица вернётся по кнопке, опрос не нужен
+  showLoading("Загрузка реплея…");
+  try {
+    const src = await ReplaySource.fromUrl(api.seriesReplayUrl(sid, seed), `s${seed}.swr`);
+    begin(src, title, "");
+    session.seriesId = sid;
+  } catch (e) {
+    hideLoading();
+    showBanner(`Не удалось открыть реплей: ${e.message}`, [["Таблица серии", () => { hideBanner(); showSeries(sid); }]]);
+  }
+}
+
+const lobby = new Lobby({
+  startMatch, openLive, openReplay, openFile, startSeries, openSeries: showSeries,
+  async openInEditor(name) {
+    await openEditor();
+    await editor.openScript(name);
+  },
+});
 
 // ------------------------------------------------------------------ редактор (M5)
 
@@ -353,6 +398,8 @@ const editor = new Editor({
   stop() {
     if (session?.source.kind === "live") session.source.stop();
   },
+  startSeries,
+  showSeries,
   exit: toLobby,
 });
 
@@ -375,7 +422,12 @@ window.addEventListener("dragover", (e) => e.preventDefault());
 window.addEventListener("drop", (e) => {
   e.preventDefault();
   const f = e.dataTransfer?.files?.[0];
-  if (f) openFile(f);
+  if (!f) return;
+  if (/\.swarm$/i.test(f.name)) {
+    // Проект: в меню — загрузка в projects/, в редакторе — «Открыть проект…».
+    if (editor.active) editor.openProjectFile(f);
+    else lobby.uploadProject(f);
+  } else openFile(f);
 });
 
 // Ссылка вида #live=<id> или #replay=<id> открывает сразу (перезагрузка вкладки).

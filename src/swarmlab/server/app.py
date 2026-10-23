@@ -17,6 +17,15 @@ REST:
     PUT  /api/scripts/{name}       {text, blocks?} → сохранить; {ok, errors[{line, col, …, block}]}
     POST /api/scripts/check        {text} → синтаксические ошибки (`ast.parse`)
     GET  /api/help                 памятка игрока `docs/CHEATSHEET.md` (текст Markdown)
+    GET  /api/projects             загруженные проекты `.swarm` (папка `projects/`, M7c)
+    POST /api/projects             тело — файл `.swarm` → {name, mode, …, status: new | same}
+    GET  /api/projects/{name}      проект: код и блоки
+    POST /api/projects/{name}/to-editor   копия проекта — свой скрипт редактора
+    GET  /api/series               прошлые и идущая серии (папки `replays/series/`)
+    POST /api/series               {match, overrides, start_seed?, n, jobs?, scripts?, projects?}
+    GET  /api/series/{id}          `series.json` + `done` (прогресс — опросом раз в 1 с)
+    POST /api/series/{id}/stop     остановить: дописанные матчи остаются
+    GET  /api/series/{id}/replays/{seed}  реплей матча серии
 WS:
     /ws/matches/{id}               сервер → бинарный msgpack: header, frame, status, log, footer;
                                    клиент → JSON: pause, resume, speed {value}, stop
@@ -48,8 +57,10 @@ from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
+from swarmlab.core import series as sr
 from swarmlab.core.config import ConfigError, load_match, load_yaml
 from swarmlab.core.protocol import encode
+from swarmlab.server.projects import ProjectStore
 from swarmlab.server.scripts import ScriptError, ScriptStore, check_syntax
 
 log = logging.getLogger("swarmlab.server")
@@ -84,6 +95,13 @@ class ServerConfig:
     max_matches: int = 1
     #: Папка скриптов редактора (M5); по умолчанию `<root>/examples/bees`.
     scripts: Path | None = None
+    #: Загруженные проекты `.swarm` (M7c); по умолчанию `<root>/projects`.
+    projects: Path | None = None
+
+    @property
+    def series(self) -> Path:
+        """Папки серий матчей (M7c): `<replays>/series/`."""
+        return self.replays / "series"
 
 
 def default_config(root: Path | None = None) -> ServerConfig:
@@ -92,7 +110,8 @@ def default_config(root: Path | None = None) -> ServerConfig:
     if not web.is_dir():  # запуск не из корня проекта — web/ рядом с пакетом
         web = Path(__file__).resolve().parents[3] / "web"
     return ServerConfig(root=root, configs=root / "configs", replays=root / "replays",
-                        logs=root / "logs", web=web, scripts=root / "examples" / "bees")
+                        logs=root / "logs", web=web, scripts=root / "examples" / "bees",
+                        projects=root / "projects")
 
 
 # ====================================================================== зрители
@@ -308,9 +327,10 @@ class MatchProcess:
 class MatchManager:
     """Реестр матчей; одновременно идут не больше `max_matches` (новый вытесняет старый)."""
 
-    def __init__(self, cfg: ServerConfig, scripts: ScriptStore) -> None:
+    def __init__(self, cfg: ServerConfig, scripts: ScriptStore, projects: ProjectStore) -> None:
         self.cfg = cfg
         self.scripts = scripts
+        self.projects = projects
         self.matches: dict[str, MatchProcess] = {}
 
     def running(self) -> list[MatchProcess]:
@@ -333,30 +353,37 @@ class MatchManager:
             mid = f"{base}-{n}"
         return mid
 
-    def check_scripts(self, names: list[str]) -> None:
-        """Синтаксис скриптов матча — до запуска процесса; ошибка → 400 со строкой."""
-        for name in dict.fromkeys(names):
+    def check_scripts(self, names: list[str], projects: list[str] | None = None) -> None:
+        """Синтаксис скриптов и проектов матча — до запуска процесса; ошибка → 400 со строкой."""
+        checks = [(n, self.scripts.check_file, None) for n in dict.fromkeys(names)]
+        checks += [(n, self.projects.check_file, n) for n in dict.fromkeys(projects or [])]
+        for name, check, project in checks:
             try:
-                _, problems = self.scripts.check_file(name)
+                _, problems = check(name)
             except ScriptError as e:
                 raise HTTPException(e.status, e.message) from e
             if problems:
                 p = problems[0]
+                label = f"проект {project}" if project else name
                 raise HTTPException(400, {
-                    **p.as_dict(), "script": name,
-                    "message": f"{name}, строка {p.line}: {p.message}",
+                    **p.as_dict(), "script": None if project else name, "project": project,
+                    "message": f"{label}, строка {p.line}: {p.message}",
                 })
+
+    def load_config(self, path: Path, overrides: list[str]) -> Any:
+        """Проверить конфиг сразу: ошибка — 400, а не упавший процесс."""
+        try:
+            return load_match(path, configs_dir=self.cfg.configs, cli_overrides=overrides)
+        except ConfigError as e:
+            raise HTTPException(400, f"Ошибка конфига: {e}") from e
 
     def start(self, req: StartRequest) -> MatchProcess:
         path = self.match_path(req.match)
-        self.check_scripts(req.scripts)
+        self.check_scripts(req.scripts, req.projects)
         overrides = list(req.overrides)
         if req.seed is not None:
             overrides.append(f"seed={req.seed}")
-        try:  # проверить конфиг сразу: ошибка — 400, а не упавший процесс
-            cfg = load_match(path, configs_dir=self.cfg.configs, cli_overrides=overrides)
-        except ConfigError as e:
-            raise HTTPException(400, f"Ошибка конфига: {e}") from e
+        cfg = self.load_config(path, overrides)
         for old in self.running()[: max(0, len(self.running()) - self.cfg.max_matches + 1)]:
             log.info("новый матч вытесняет %s", old.id)
             old.stop()
@@ -397,6 +424,163 @@ class MatchManager:
                 p.kill()
 
 
+# ====================================================================== серии (M7c)
+
+
+@dataclass
+class SeriesProcess:
+    """Серия, запущенная сервером: процесс `swarmlab series --progress-json`."""
+
+    id: str
+    dir: Path
+    proc: subprocess.Popen[bytes]
+    stderr_tail: collections.deque[str] = field(
+        default_factory=lambda: collections.deque(maxlen=60))
+
+    @property
+    def alive(self) -> bool:
+        return self.proc.poll() is None
+
+
+class SeriesManager:
+    """Серии матчей: тот же код, что `swarmlab series` (DECISIONS №66), отдельным процессом.
+
+    Сервер не знает модулей: колонки таблицы, ульи и итог он берёт из `series.json`
+    (процесс серии переписывает его после каждого матча). Прогресс клиент узнаёт опросом
+    `GET /api/series/{id}` раз в секунду. Остановка — файл `.stop` в папке серии.
+    Одновременно идёт одна серия: на слабой машине вторая только замедлила бы обе.
+    """
+
+    def __init__(self, cfg: ServerConfig, matches: MatchManager) -> None:
+        self.cfg = cfg
+        self.matches = matches
+        self.running: dict[str, SeriesProcess] = {}
+
+    def folder(self, sid: str) -> Path:
+        if not _NAME.match(sid) or sid.startswith("."):
+            raise HTTPException(400, f"Недопустимое имя серии: {sid!r}")
+        path = self.cfg.series / sid
+        if not (path / "series.json").is_file():
+            raise HTTPException(404, f"Нет серии {sid}")
+        return path
+
+    def start(self, req: SeriesRequest) -> dict[str, Any]:
+        if not sr.N_MIN <= req.n <= sr.N_MAX:
+            raise HTTPException(400, f"Матчей в серии — от {sr.N_MIN} до {sr.N_MAX}")
+        busy = [s for s in self.running.values() if s.alive]
+        if busy:
+            raise HTTPException(409, f"Уже идёт серия {busy[0].id} — дождитесь её или остановите")
+        path = self.matches.match_path(req.match)
+        self.matches.check_scripts(req.scripts, req.projects)
+        seed = [f"seed={req.start_seed}"] if req.start_seed is not None else []
+        self.matches.load_config(path, [*req.overrides, *seed])
+        cmd = [sys.executable, "-m", "swarmlab.cli", "series", str(path), "--n", str(req.n),
+               "--out", str(self.cfg.series), "--configs", str(self.cfg.configs),
+               "--progress-json"]
+        if req.start_seed is not None:
+            cmd += ["--seed", str(req.start_seed)]
+        if req.jobs is not None:
+            cmd += ["--jobs", str(req.jobs)]
+        if req.team is not None:
+            cmd += ["--team", str(req.team)]
+        for o in req.overrides:
+            cmd += ["--set", o]
+        env = dict(os.environ)
+        env.update(PYTHONHASHSEED="0", PYTHONIOENCODING="utf-8", PYTHONUNBUFFERED="1")
+        flags = getattr(subprocess, "CREATE_NO_WINDOW", 0) if sys.platform == "win32" else 0
+        proc = subprocess.Popen(cmd, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
+                                stderr=subprocess.PIPE, cwd=str(self.cfg.root), env=env,
+                                creationflags=flags)
+        assert proc.stdout is not None
+        first = proc.stdout.readline()  # {"t": "start", "id", "dir"} — после сборки мира
+        try:
+            hello = json.loads(first.decode("utf-8"))
+        except ValueError as e:
+            err = proc.stderr.read().decode("utf-8", errors="replace") if proc.stderr else ""
+            proc.wait()
+            raise HTTPException(
+                400, f"Серия не запустилась: {err.strip() or 'нет ответа'}") from e
+        sp = SeriesProcess(id=hello["id"], dir=Path(hello["dir"]), proc=proc)
+        self.running[sp.id] = sp
+        threading.Thread(target=self._drain, args=(sp,), daemon=True,
+                         name=f"series-{sp.id}").start()
+        log.info("серия %s запущена (%s, %d матчей)", sp.id, path.name, req.n)
+        return self.get(sp.id)
+
+    @staticmethod
+    def _drain(sp: SeriesProcess) -> None:
+        """Читать вывод процесса серии, чтобы пайпы не переполнились."""
+        def err() -> None:
+            assert sp.proc.stderr is not None
+            for raw in sp.proc.stderr:
+                line = raw.decode("utf-8", errors="replace").rstrip()
+                sp.stderr_tail.append(line)
+                log.info("[серия %s] %s", sp.id, line)
+
+        threading.Thread(target=err, daemon=True).start()
+        assert sp.proc.stdout is not None
+        for _ in sp.proc.stdout:
+            pass
+        sp.proc.wait()
+
+    def _read(self, path: Path) -> dict[str, Any]:
+        data = sr.read_series(path / sr.SERIES_FILE)
+        sp = self.running.get(data.get("id", path.name))
+        if data.get("state") == "running" and (sp is None or not sp.alive):
+            data["state"] = "interrupted"  # процесс серии умер (или сервер перезапускали)
+            if sp is not None and sp.stderr_tail:
+                data["error"] = "\n".join(sp.stderr_tail)
+        data["done"] = len(data.get("matches", []))
+        return data
+
+    def get(self, sid: str) -> dict[str, Any]:
+        return self._read(self.folder(sid))
+
+    def list(self) -> list[dict[str, Any]]:
+        if not self.cfg.series.is_dir():
+            return []
+        out = []
+        for path in sorted(self.cfg.series.iterdir(), reverse=True):
+            if not (path / "series.json").is_file():
+                continue
+            try:
+                d = self._read(path)
+            except (OSError, ValueError):
+                continue
+            s = d.get("summary") or {}
+            out.append({k: d.get(k) for k in ("id", "created", "project", "match", "profile",
+                                               "duration_s", "start_seed", "n", "state",
+                                               "done")}
+                       | {"wins": s.get("wins"), "with_code_errors": s.get("with_code_errors"),
+                          "played": s.get("played")})
+        return out
+
+    def stop(self, sid: str) -> dict[str, Any]:
+        path = self.folder(sid)
+        sp = self.running.get(sid)
+        if sp is not None and sp.alive:
+            (path / ".stop").write_text("", encoding="utf-8")
+        return self._read(path)
+
+    def replay(self, sid: str, seed: int) -> Path:
+        path = self.folder(sid) / f"s{seed}.swr"
+        data = self._read(path.parent)
+        if not path.is_file() or seed not in {m["seed"] for m in data.get("matches", [])}:
+            raise HTTPException(404, f"Нет реплея s{seed}.swr в серии {sid}")
+        return path
+
+    def shutdown(self) -> None:
+        for sp in self.running.values():
+            if sp.alive:
+                with contextlib.suppress(OSError):
+                    (sp.dir / ".stop").write_text("", encoding="utf-8")
+        for sp in self.running.values():
+            try:
+                sp.proc.wait(30)
+            except subprocess.TimeoutExpired:
+                sp.proc.kill()
+
+
 class StartRequest(BaseModel):
     match: str = Field(description="имя файла в configs/matches, например demo.yaml")
     seed: int | None = Field(default=None, ge=0)
@@ -405,6 +589,24 @@ class StartRequest(BaseModel):
     scripts: list[str] = Field(
         default_factory=list,
         description="скрипты из папки редактора, синтаксис которых проверить до запуска")
+    projects: list[str] = Field(
+        default_factory=list,
+        description="загруженные проекты (имя в projects/), синтаксис которых проверить")
+
+
+class SeriesRequest(BaseModel):
+    match: str = Field(description="имя файла в configs/matches, например demo.yaml")
+    overrides: list[str] = Field(default_factory=list, description="как --set ПУТЬ=ЗНАЧЕНИЕ")
+    start_seed: int | None = Field(default=None, ge=0, description="нет — случайный")
+    n: int = Field(default=10)
+    jobs: int | None = Field(default=None, ge=1, le=64)
+    team: int | None = Field(default=None, ge=0)
+    scripts: list[str] = Field(default_factory=list)
+    projects: list[str] = Field(default_factory=list)
+
+
+class ToEditorRequest(BaseModel):
+    name: str | None = Field(default=None, description="имя своего скрипта; нет — по проекту")
 
 
 class ScriptText(BaseModel):
@@ -440,15 +642,20 @@ def _describe_yaml(path: Path) -> dict[str, Any]:
 def create_app(cfg: ServerConfig | None = None) -> FastAPI:
     cfg = cfg or default_config()
     scripts = ScriptStore(cfg.scripts or cfg.root / "examples" / "bees", cfg.root)
-    manager = MatchManager(cfg, scripts)
+    projects = ProjectStore(cfg.projects or cfg.root / "projects", scripts)
+    manager = MatchManager(cfg, scripts, projects)
+    series = SeriesManager(cfg, manager)
 
     @contextlib.asynccontextmanager
     async def lifespan(_: FastAPI) -> AsyncIterator[None]:
         yield
-        await asyncio.get_running_loop().run_in_executor(None, manager.shutdown)
+        loop = asyncio.get_running_loop()
+        await asyncio.gather(loop.run_in_executor(None, manager.shutdown),
+                             loop.run_in_executor(None, series.shutdown))
 
     app = FastAPI(title="SwarmLab", lifespan=lifespan)
     app.state.manager = manager
+    app.state.series = series
     app.state.cfg = cfg
 
     @app.middleware("http")
@@ -543,6 +750,49 @@ def create_app(cfg: ServerConfig | None = None) -> FastAPI:
     @app.put("/api/scripts/{name}")
     def write_script(name: str, body: ScriptText) -> dict[str, Any]:
         return _script_call(scripts.write, name, body.text, body.blocks)
+
+    # ------------------------------------------------------------ проекты (M7c)
+
+    @app.get("/api/projects")
+    def list_projects() -> list[dict[str, Any]]:
+        return projects.list()
+
+    @app.post("/api/projects")
+    async def upload_project(request: Request) -> dict[str, Any]:
+        raw = await request.body()
+        return _script_call(projects.add, raw)
+
+    @app.get("/api/projects/{name}")
+    def read_project(name: str) -> dict[str, Any]:
+        return _script_call(projects.read, name)
+
+    @app.post("/api/projects/{name}/to-editor")
+    def project_to_editor(name: str, body: ToEditorRequest | None = None) -> dict[str, Any]:
+        return _script_call(projects.to_editor, name, body.name if body else None)
+
+    # ------------------------------------------------------------ серии (M7c)
+
+    @app.get("/api/series")
+    def list_series() -> list[dict[str, Any]]:
+        return series.list()
+
+    @app.post("/api/series")
+    def start_series(req: SeriesRequest) -> dict[str, Any]:
+        return series.start(req)
+
+    @app.get("/api/series/{sid}")
+    def get_series(sid: str) -> dict[str, Any]:
+        return series.get(sid)
+
+    @app.post("/api/series/{sid}/stop")
+    def stop_series(sid: str) -> dict[str, Any]:
+        return series.stop(sid)
+
+    @app.get("/api/series/{sid}/replays/{seed}")
+    def series_replay(sid: str, seed: int) -> FileResponse:
+        path = series.replay(sid, seed)
+        return FileResponse(path, media_type="application/octet-stream",
+                            filename=f"{sid}-{path.name}")
 
     @app.websocket("/ws/matches/{mid}")
     async def stream(ws: WebSocket, mid: str) -> None:

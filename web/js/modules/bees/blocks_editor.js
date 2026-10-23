@@ -6,6 +6,7 @@ import { BLOCKS_API } from "./blocks_api.js";
 import { apiBlock, BEE_KINDS, generate } from "./blocks_gen.js";
 import {
   API_RU, BLOCKLY_MSG, BUILTIN_ADVANCED, BUILTIN_BEGINNER, CATEGORIES, CLASS_CATEGORY, CUSTOM_RU, LITERALS, MESSAGES,
+  SEARCH_RU,
 } from "./blocks_ru.js";
 
 const B = () => window.Blockly;
@@ -169,15 +170,72 @@ export function toolbox() {
   push(advanced, "python", "bees_python_line");
   push(advanced, "python", "bees_python_expr");
 
-  const category = (cat, contents) => ({ kind: "category", name: CATEGORIES[cat][0], colour: hue(cat), contents });
+  // toolboxitemid — ключ категории: по нему категория находит иконку и справку (M7c).
+  const category = (cat, contents, id = cat) => ({
+    kind: "category", name: CATEGORIES[cat][0], colour: hue(cat), contents, toolboxitemid: id,
+  });
   const order = ["programs", "move", "sense", "objects", "house", "hive", "logic", "loops", "math", "text", "lists"];
-  const contents = order.filter((c) => beginner[c]).map((c) => category(c, beginner[c]));
-  contents.push({ kind: "category", name: CATEGORIES.variables[0], colour: hue("variables"), custom: "VARIABLE" });
-  contents.push({ kind: "category", name: CATEGORIES.procedures[0], colour: hue("procedures"), custom: "PROCEDURE" });
+  const contents = [{
+    kind: "category", name: SEARCH_RU.category, colour: "#f5b700", custom: SEARCH_CATEGORY,
+    toolboxitemid: SEARCH_CATEGORY, hidden: "true",
+  }];
+  contents.push(...order.filter((c) => beginner[c]).map((c) => category(c, beginner[c])));
+  contents.push({ ...category("variables", undefined), custom: "VARIABLE" });
+  contents.push({ ...category("procedures", undefined), custom: "PROCEDURE" });
   contents.push({ kind: "sep" });
-  const adv = [...order, "python"].filter((c) => advanced[c]).map((c) => category(c, advanced[c]));
-  contents.push({ kind: "category", name: CATEGORIES.advanced[0], colour: "#777", contents: adv });
+  const adv = [...order, "python"].filter((c) => advanced[c]).map((c) => category(c, advanced[c], `adv_${c}`));
+  contents.push({ ...category("advanced", adv), colour: "#777" });
+  for (const c of contents) if (c.contents === undefined) delete c.contents;
   return { kind: "categoryToolbox", contents };
+}
+
+/** Все блоки панели (для поиска): `[{entry, category}]`, по категориям, без повторов. */
+export function toolboxBlocks(tb = toolbox()) {
+  const out = [];
+  const seen = new Set();
+  const walk = (items, cat) => {
+    for (const it of items || []) {
+      if (it.kind === "category") walk(it.contents, it.toolboxitemid);
+      else if (it.kind === "block" && !seen.has(it.type)) {
+        seen.add(it.type);
+        out.push({ entry: it, category: cat });
+      }
+    }
+  };
+  walk(tb.contents, null);
+  return out;
+}
+
+/** Динамическая категория «Найдено» (M7c): блоки, чья подпись содержит строку поиска. */
+const SEARCH_CATEGORY = "SL_SEARCH";
+
+/** Категория панели с иконкой и справкой при наведении (M7c, в духе MakeCode). */
+function defineCategory() {
+  const Bl = B();
+  if (Bl.__slCategory) return;
+  const withIcon = (Base) => class IconCategory extends Base {
+    createIconDom_() {
+      const icon = document.createElement("span");
+      const key = String(this.toolboxItemDef_.toolboxitemid || "").replace(/^adv_/, "");
+      icon.className = "sl-cat-icon";
+      icon.textContent = key === SEARCH_CATEGORY ? "🔍" : CATEGORIES[key]?.[2] || "•";
+      icon.style.background = this.colour_ || "#777";
+      return icon;
+    }
+
+    createDom_() {
+      const dom = super.createDom_();
+      const key = String(this.toolboxItemDef_.toolboxitemid || "").replace(/^adv_/, "");
+      const tip = CATEGORIES[key]?.[3];
+      if (tip && this.rowDiv_) this.rowDiv_.title = tip;
+      return dom;
+    }
+  };
+  // Обычная категория и сворачиваемая («Продвинутые» с вложенными категориями).
+  for (const Base of [Bl.ToolboxCategory, Bl.CollapsibleToolboxCategory]) {
+    Bl.registry.register(Bl.registry.Type.TOOLBOX_ITEM, Base.registrationName, withIcon(Base), true);
+  }
+  Bl.__slCategory = true;
 }
 
 /** Рабочая область нового скрипта: программы сборщика и улья. */
@@ -209,25 +267,150 @@ export class BlocksEditor {
   /** onChange() — после каждого изменения рабочей области (не во время перетаскивания). */
   constructor(el, { onChange }) {
     defineBlocks();
+    defineCategory();
     const Bl = B();
     this.Bl = Bl;
+    this.el = el;
+    this.tb = toolbox();
     this.ws = Bl.inject(el, {
-      toolbox: toolbox(),
+      toolbox: this.tb,
       media: "vendor/blockly/media/",
       theme: Bl.Theme.defineTheme(THEME.name, { base: Bl.Themes.Classic, ...THEME }),
-      grid: { spacing: 24, length: 2, colour: "#26303b", snap: true },
-      zoom: { controls: true, wheel: true, startScale: 0.9, maxScale: 2, minScale: 0.4 },
+      grid: { spacing: 32, length: 2, colour: "#26303b", snap: true },
+      zoom: { controls: true, wheel: true, startScale: 0.75, maxScale: 2, minScale: 0.35 },
       trashcan: true,
       sounds: false,
-      renderer: "geras",
+      // Крупные скруглённые блоки, как в MakeCode (M7c).
+      renderer: "zelos",
     });
     this.ws.addChangeListener(Bl.Events.disableOrphans); // неподключённые — серые (DECISIONS №56)
     this.loading = false;
     this.marked = new Set();
+    this.hints = [];
     this.ws.addChangeListener((e) => {
+      if (!this.loading) this._scheduleHints();
       if (this.loading || e.isUiEvent || this.ws.isDragging()) return;
       onChange();
     });
+    this._setupSearch();
+  }
+
+  // ------------------------------------------------------------ поиск блока (M7c)
+
+  /** Подписи блоков панели — по тексту блока Blockly (подписи из blocks_ru.js и Blockly.Msg). */
+  _searchIndex() {
+    if (this.index) return this.index;
+    const Bl = this.Bl;
+    const headless = new Bl.Workspace();
+    this.index = [];
+    try {
+      for (const { entry } of toolboxBlocks(this.tb)) {
+        let text = "";
+        try {
+          const block = Bl.serialization.blocks.append(entry, headless, { recordUndo: false });
+          text = block.toString();
+        } catch {
+          text = entry.type;
+        }
+        this.index.push({ entry, text: text.toLowerCase().replace(/\s+/g, " ") });
+      }
+    } finally {
+      headless.dispose();
+    }
+    return this.index;
+  }
+
+  /** Блоки, подпись которых содержит строку (без учёта регистра и «ё»). */
+  search(query) {
+    const norm = (s) => s.toLowerCase().replace(/ё/g, "е").trim();
+    const q = norm(query);
+    if (!q) return [];
+    return this._searchIndex().filter((x) => norm(x.text).includes(q)).map((x) => x.entry);
+  }
+
+  _setupSearch() {
+    const box = document.createElement("div");
+    box.className = "bl-search";
+    const input = document.createElement("input");
+    input.type = "search";
+    input.placeholder = SEARCH_RU.placeholder;
+    input.setAttribute("aria-label", SEARCH_RU.placeholder);
+    box.appendChild(input);
+    this.el.appendChild(box);
+    this.searchInput = input;
+    this.query = "";
+    this.ws.registerToolboxCategoryCallback(SEARCH_CATEGORY, () => {
+      const found = this.search(this.query);
+      return found.length ? found : [{ kind: "label", text: SEARCH_RU.nothing }];
+    });
+    let timer = 0;
+    input.addEventListener("input", () => {
+      clearTimeout(timer);
+      timer = setTimeout(() => this.setQuery(input.value), 120);
+    });
+    input.addEventListener("keydown", (e) => {
+      if (e.key === "Escape") {
+        input.value = "";
+        this.setQuery("");
+      }
+    });
+  }
+
+  /** Показать «Найдено» с результатами поиска (пустой запрос — спрятать категорию). */
+  setQuery(query) {
+    this.query = query;
+    const toolbox = this.ws.getToolbox();
+    const cat = toolbox?.getToolboxItemById(SEARCH_CATEGORY);
+    if (!cat) return;
+    const on = query.trim() !== "";
+    cat.setVisible_(on);
+    if (!on) {
+      if (toolbox.getSelectedItem() === cat) toolbox.setSelectedItem(null);
+      return;
+    }
+    if (toolbox.getSelectedItem() === cat) toolbox.refreshSelection();
+    else toolbox.setSelectedItem(cat);
+  }
+
+  // ------------------------------------------------------------ подсказки новичку (M7c)
+
+  _scheduleHints() {
+    if (this._hintFrame) return;
+    this._hintFrame = requestAnimationFrame(() => {
+      this._hintFrame = 0;
+      this.updateHints();
+    });
+  }
+
+  /** «Перетащи сюда команду» в пустых программах (нет блоков внутри DO). */
+  updateHints() {
+    const empty = this.ws.getTopBlocks(false).filter((b) => (b.type === "bees_program_bee" || b.type === "bees_program_hive")
+      && !b.getInputTargetBlock("DO") && !b.isInFlyout);
+    const host = this.el.getBoundingClientRect();
+    while (this.hints.length < empty.length) {
+      const h = document.createElement("div");
+      h.className = "bl-hint";
+      h.textContent = SEARCH_RU.emptyProgram;
+      this.el.appendChild(h);
+      this.hints.push(h);
+    }
+    this.hints.forEach((h, i) => {
+      const b = empty[i];
+      const r = b?.getSvgRoot()?.getBoundingClientRect();
+      const visible = b && r && r.width > 0 && host.width > 0;
+      h.hidden = !visible;
+      if (!visible) return;
+      // Внутрь «рта» блока программы: под строкой заголовка, с отступом от левого края.
+      const scale = this.ws.scale;
+      h.style.left = `${r.left - host.left + 34 * scale}px`;
+      h.style.top = `${r.top - host.top + 52 * scale}px`;
+      h.style.fontSize = `${Math.max(11, 15 * scale)}px`;
+    });
+  }
+
+  /** ↶ / ↷ рабочей области. */
+  undo(redo = false) {
+    this.ws.undo(redo);
   }
 
   load(workspace) {
@@ -240,6 +423,7 @@ export class BlocksEditor {
       this.Bl.Events.enable();
       this.loading = false;
     }
+    this.ws.clearUndo(); // отмена не уводит в чужой файл
     // Серость неподключённых после загрузки (события были выключены).
     for (const b of this.ws.getTopBlocks(false)) {
       if (b.previousConnection || b.outputConnection) b.setDisabledReason(true, "ORPHANED_BLOCK");
@@ -264,6 +448,7 @@ export class BlocksEditor {
 
   resize() {
     this.Bl.svgResize(this.ws);
+    this._scheduleHints();
     if (this.pendingScroll && this.ws.getParentSvg().getBoundingClientRect().width > 0) {
       this.pendingScroll = false;
       // Размеры блоков известны только после отрисовки (Blockly рисует в requestAnimationFrame).

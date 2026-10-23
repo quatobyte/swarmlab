@@ -61,7 +61,7 @@
   </div>
 
   <div id="view-empty" class="view-empty" hidden>
-    <div><b>Здесь появится матч.</b><br>Настройте его в панели «Матч» и нажмите «Запустить».</div>
+    <div><b>Здесь появится матч.</b><br>Настройте его в панели «Матч» внизу и нажмите «Запустить».</div>
   </div>
   <div id="banner" class="banner" hidden></div>
   <div id="loading" class="loading" hidden><div class="spinner"></div><span id="loading-text">Загрузка…</span></div>
@@ -69,21 +69,31 @@
 
   <div id="editor" class="editor" hidden>
     <div class="ed-toolbar">
+      <div class="ed-side">
+        <span class="ed-project" id="ed-project" title="Проект — имя скрипта">—</span>
+        <button class="btn icon" id="ed-undo" title="Отменить (Ctrl+Z)">↶</button>
+        <button class="btn icon" id="ed-redo" title="Повторить (Ctrl+Y)">↷</button>
+      </div>
+      <div class="ed-switch" id="ed-tabs" role="tablist">
+        <button class="ed-tab" id="ed-tab-blocks" title="Собирать программу из блоков">🧩 Блоки</button>
+        <button class="ed-tab" id="ed-tab-python" title="Код на Python">🐍 Python</button>
+      </div>
+      <div class="ed-side right">
+        <button class="btn primary" id="ed-export" title="Скачать проект .swarm — его можно загрузить в меню или передать другу">⬇ Экспорт проекта</button>
+        <label class="btn file" title="Открыть файл .swarm как свой новый скрипт">📂 Открыть проект…<input type="file" id="ed-open-project" accept=".swarm" hidden></label>
+        <button class="btn" id="ed-menu" title="В меню">Меню</button>
+      </div>
+    </div>
+    <div class="ed-filebar">
       <select class="btn select" id="ed-file" title="Открыть скрипт"></select>
-      <button class="btn" id="ed-save" title="Сохранить (Ctrl+S)">Сохранить</button>
-      <button class="btn" id="ed-save-as" title="Сохранить под другим именем">Сохранить как…</button>
-      <button class="btn" id="ed-new" title="Новый скрипт из блоков">Новый…</button>
+      <button class="btn small" id="ed-save" title="Сохранить (Ctrl+S)">Сохранить</button>
+      <button class="btn small" id="ed-save-as" title="Сохранить под другим именем">Сохранить как…</button>
+      <button class="btn small" id="ed-new" title="Новый скрипт из блоков">Новый…</button>
       <span class="ed-status" id="ed-status"></span>
       <span class="spacer"></span>
-      <button class="btn" id="ed-help" title="Короткая памятка по командам">Памятка</button>
-      <button class="btn" id="ed-menu" title="В меню">Меню</button>
-    </div>
-    <div class="ed-tabs" id="ed-tabs">
-      <button class="ed-tab" id="ed-tab-blocks" title="Собирать программу из блоков">Блоки</button>
-      <button class="ed-tab" id="ed-tab-python" title="Код на Python">Python</button>
       <span class="ed-tabs-note muted small" id="ed-mode-note"></span>
-      <span class="spacer"></span>
       <button class="btn small" id="ed-to-python" hidden title="Дальше писать этот скрипт на Python (блоки перестанут обновлять файл)">Перейти на Python…</button>
+      <button class="btn small" id="ed-help" title="Короткая памятка по командам">Памятка</button>
     </div>
     <div class="ed-blocks" id="ed-blocks" hidden></div>
     <div class="ed-code" id="ed-code"></div>
@@ -100,6 +110,10 @@
         <button class="btn primary" id="match-start" title="Сохранить, проверить и запустить (Ctrl+Enter)">▶ Запустить</button>
         <button class="btn" id="match-stop" disabled>■ Стоп</button>
       </div>
+      <div class="match-actions">
+        <button class="btn" id="match-series" title="Тот же матч на разных seed подряд: таблица и реплеи">Серия…</button>
+        <button class="btn" id="match-series-table" hidden title="Открыть таблицу последней серии">📊 Таблица</button>
+      </div>
       <p class="error small" id="match-error" hidden></p>
     </section>
     <section class="dock-logs">
@@ -114,9 +128,30 @@
 
   <div id="lobby" class="overlay">
     <div class="lobby">
-      <h1><span class="logo"></span>SwarmLab <small>рой пчёл</small></h1>
+      <h1>SwarmLab <small>рой пчёл</small></h1>
       <section>
-        <h2>Новый матч</h2>
+        <h2>Матч: рои в ульях</h2>
+        <div class="match-form lobby-form" id="lobby-form"><p class="muted small">Загрузка…</p></div>
+        <div class="match-actions lobby-actions">
+          <button class="btn primary" id="lobby-watch" title="Живой матч в 3D">▶ Смотреть матч</button>
+          <button class="btn" id="lobby-series" title="Тот же матч на разных seed подряд: таблица и реплеи">Серия…</button>
+        </div>
+        <p class="small"><button class="btn" id="lobby-editor">✎ Редактор кода</button>
+          <span class="muted">— написать свой рой и сразу посмотреть, как он летает</span></p>
+      </section>
+      <section>
+        <h2>Проекты</h2>
+        <div class="list" id="lobby-projects"><p class="muted small">Загрузка…</p></div>
+        <label class="btn file">📂 Загрузить проект .swarm…<input type="file" id="lobby-project-file" accept=".swarm" hidden></label>
+        <span class="muted small">или перетащите файл .swarm в окно</span>
+        <p class="small" id="lobby-project-msg" hidden></p>
+      </section>
+      <section>
+        <h2>Серии матчей</h2>
+        <div class="list" id="lobby-series-list"><p class="muted small">Загрузка…</p></div>
+      </section>
+      <section>
+        <h2>Матч из файла</h2>
         <div class="form">
           <label>Матч <select id="lobby-match"></select></label>
           <label>Seed <input id="lobby-seed" type="number" min="0" step="1" placeholder="из файла"></label>
@@ -126,10 +161,8 @@
               <option value="2">×2</option><option value="4">×4</option>
             </select>
           </label>
-          <button class="btn primary" id="lobby-start">Запустить</button>
+          <button class="btn" id="lobby-start">Запустить</button>
         </div>
-        <p class="small"><button class="btn" id="lobby-editor">✎ Редактор кода</button>
-          <span class="muted">— написать свой рой и сразу посмотреть, как он летает</span></p>
         <p class="muted small" id="lobby-match-desc"></p>
       </section>
       <section id="lobby-live-section" hidden>

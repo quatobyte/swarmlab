@@ -100,7 +100,8 @@ def server(tmp_path: Path) -> Iterator[Server]:
         for src in (ROOT / "examples" / "bees").glob(pattern):
             shutil.copy2(src, scripts / src.name)
     cfg = ServerConfig(root=ROOT, configs=ROOT / "configs", replays=tmp_path / "replays",
-                       logs=tmp_path / "logs", web=ROOT / "web", scripts=scripts)
+                       logs=tmp_path / "logs", web=ROOT / "web", scripts=scripts,
+                       projects=tmp_path / "projects")
     app = create_app(cfg)
     port = _free_port()
     uv = uvicorn.Server(uvicorn.Config(app, host="127.0.0.1", port=port, log_level="warning",

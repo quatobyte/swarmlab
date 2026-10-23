@@ -1,4 +1,4 @@
-"""Командная строка `swarmlab`: run | bench | replay | serve."""
+"""Командная строка `swarmlab`: run | series | bench | replay | serve."""
 
 from __future__ import annotations
 
@@ -91,6 +91,29 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     rep.add_argument("--no-replay", action="store_true", help="не записывать реплей")
     run.set_defaults(handler=_cmd_run)
+
+    series = sub.add_parser("series", help="серия матчей на seed подряд: реплеи и таблица")
+    series.add_argument("match", type=Path, help="файл матча, например configs/matches/demo.yaml")
+    series.add_argument("--n", type=int, default=10, help="сколько матчей (2–50, по умолчанию 10)")
+    series.add_argument("--seed", type=int,
+                        help="начальный seed: матч i идёт с seed+i (по умолчанию случайный)")
+    series.add_argument("--duration", type=float, help="длительность матча, с")
+    series.add_argument(
+        "--set", dest="overrides", action="append", default=[], metavar="ПУТЬ=ЗНАЧЕНИЕ",
+        help="переопределить параметр, как у run (ульи — --set 'hives=[...]')",
+    )
+    series.add_argument("--jobs", type=int,
+                        help="матчей одновременно (по умолчанию физических ядер − 1, не меньше 1)")
+    series.add_argument("--out", type=Path, default=Path("replays") / "series",
+                        help="куда класть папку серии (по умолчанию replays/series/)")
+    series.add_argument("--team", type=int,
+                        help="улей, по которому строится таблица (по умолчанию первый с кодом)")
+    series.add_argument("--name", help="имя проекта в имени папки (по умолчанию — имя скрипта)")
+    series.add_argument("--configs", type=Path,
+                        help="папка configs/ (по умолчанию — рядом с матчем)")
+    series.add_argument("--progress-json", action="store_true",
+                        help="печатать ход серии строками JSON (для сервера)")
+    series.set_defaults(handler=_cmd_series)
 
     replay = sub.add_parser("replay", help="показать реплей: счёт, события, проверка хеша")
     replay.add_argument("file", type=Path, help="файл реплея .swr")
@@ -302,6 +325,96 @@ def _run_viewer(sim: Simulation, speed: float) -> int:
         viewer.close()
     print(f"Вьюер закрыт на {sim.time:.1f} с симуляции.")
     return 0
+
+
+# ====================================================================== series
+
+
+def _cmd_series(args: argparse.Namespace) -> int:
+    import json
+    import secrets
+
+    from swarmlab.core import series as sr
+
+    overrides = list(args.overrides)
+    if args.duration is not None:
+        overrides.append(f"duration_s={args.duration}")
+    # Случайный начальный seed — вне симуляции: сам матч зависит только от напечатанного seed.
+    start = args.seed if args.seed is not None else secrets.randbelow(1_000_000)
+    jobs = args.jobs if args.jobs is not None else sr.default_jobs()
+    spec = sr.SeriesSpec(match=args.match, overrides=overrides, start_seed=start, n=args.n,
+                         jobs=jobs, out=args.out, configs=args.configs, team=args.team,
+                         name=args.name)
+    try:
+        series = sr.Series(spec)
+    except sr.SeriesError as e:
+        print(f"Ошибка серии: {e}", file=sys.stderr)
+        return 2
+    data = series.data
+    columns = data["columns"]
+
+    def emit(msg: dict[str, Any]) -> None:
+        if args.progress_json:
+            print(json.dumps(msg, ensure_ascii=False), flush=True)
+
+    emit({"t": "start", "id": data["id"], "dir": str(series.dir)})
+    if not args.progress_json:
+        hive = next((h for h in data["hives"] if h["team"] == data["team"]), None)
+        print(f"Серия {data['id']}: {args.match}, {data['n']} матчей с seed {start}…"
+              f"{start + data['n'] - 1}, профиль {data['profile']}, {data['duration_s']:g} с, "
+              f"процессов {data['jobs']}")
+        for h in data["hives"]:
+            mark = "  ← таблица" if hive is h else ""
+            print(f"  {h['name']}: {h['script']} (sha256 {(h['sha256'] or '')[:12]}…){mark}")
+        print(f"  папка: {series.dir}  (остановить — Ctrl+C)")
+
+    def progress(m: dict[str, Any]) -> None:
+        done = len(data["matches"])
+        emit({"t": "match", "seed": m["seed"], "done": done, "n": data["n"], "state": m["state"]})
+        if args.progress_json:
+            return
+        if m["state"] != sr.FINISHED:
+            print(f"  матч {done} из {data['n']}: seed {m['seed']} — ОШИБКА МАТЧА "
+                  f"(лог: {series.dir / 'logs' / ('s' + str(m['seed'])) / 'match.log'})")
+            return
+        row = sr.focus_row(m, data["team"]) or {}
+        cells = ", ".join(f"{c['title']} {_fmt(row.get(c['key'], 0))}" for c in columns[:3])
+        flag = "  ⚠ ошибки кода" if sr.has_code_errors(row) else ""
+        print(f"  матч {done} из {data['n']}: seed {m['seed']} — {cells}{flag}")
+
+    data = series.run(progress)
+    emit({"t": "end", "state": data["state"], "done": len(data["matches"])})
+    if args.progress_json:
+        return 0
+    if data["state"] == sr.STOPPED:
+        print(f"Серия остановлена: дописано матчей {len(data['matches'])} из {data['n']}.")
+    _print_series(data)
+    print(f"Файлы: {series.dir / sr.SERIES_FILE}, {series.dir / sr.CSV_FILE}")
+    return 0
+
+
+def _print_series(data: dict[str, Any]) -> None:
+    from swarmlab.core import series as sr
+
+    columns = data["columns"]
+    head = ["seed", *(c["title"] for c in columns)]
+    rows = []
+    for m in data["matches"]:
+        row = sr.focus_row(m, data["team"])
+        if row is None:
+            rows.append([str(m["seed"]), *("—" for _ in columns)])
+            continue
+        mark = " ⚠" if sr.has_code_errors(row) else ""
+        rows.append([str(m["seed"]) + mark, *(_fmt(row.get(c["key"], 0)) for c in columns)])
+    s = data["summary"] or sr.summarize(data)
+    rows.append(["среднее", *(_fmt(s["means"].get(c["key"], 0)) for c in columns)])
+    widths = [max(len(h), *(len(r[i]) for r in rows)) for i, h in enumerate(head)]
+    print("  ".join(h.rjust(w) for h, w in zip(head, widths, strict=True)))
+    for r in rows:
+        print("  ".join(c.rjust(w) for c, w in zip(r, widths, strict=True)))
+    print(f"Побед: {s['wins']} из {s['played']}; матчей с ошибками кода: {s['with_code_errors']}; "
+          f"худший seed: {s['worst_seed']}" + (f"; упавших матчей: {s['errors']}"
+                                              if s["errors"] else ""))
 
 
 # ====================================================================== replay

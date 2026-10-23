@@ -28,6 +28,8 @@ _EXPORTS = {
     "Module": "module",
     "Replayable": "module",
     "ScoreBoard": "module",
+    "ScoreColumn": "module",
+    "ScoreColumns": "module",
     "TeamSpec": "module",
     "available_modules": "module",
     "load_module": "module",

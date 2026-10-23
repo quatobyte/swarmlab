@@ -149,6 +149,28 @@ class Describable(Protocol):
     def describe(self) -> list[str]: ...
 
 
+@dataclass(frozen=True)
+class ScoreColumn:
+    """Колонка таблицы результатов (серии матчей, DECISIONS №66).
+
+    `key` — ключ строки `ScoreBoard.teams[team]`, `title` — заголовок для людей.
+    `worst` — в какую сторону значение хуже ("max" — больше хуже, как у места;
+    "min" — меньше хуже, как у очков); колонки с `worst` в порядке списка задают
+    сортировку «худшего» матча серии.
+    """
+
+    key: str
+    title: str
+    worst: str | None = None
+
+
+@runtime_checkable
+class ScoreColumns(Protocol):
+    """Необязательная возможность модуля: какие метрики счёта показывать таблицей."""
+
+    def score_columns(self) -> list[ScoreColumn]: ...
+
+
 @runtime_checkable
 class Replayable(Protocol):
     """Необязательная возможность модуля: сцена для реплея и показ кадров реплея.

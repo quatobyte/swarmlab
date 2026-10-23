@@ -1,4 +1,4 @@
-// Редактор кода в браузере (M5): CodeMirror 5 слева, вьюер матча справа, внизу — панель
+// Редактор кода в браузере (M5): CodeMirror 5 и блоки, вьюер матча, внизу — панель
 // матча и логи ульев. Сервер хранит скрипты в examples/bees/ и проверяет синтаксис (ast.parse).
 // Часть, которая знает модуль (подсказки, форма матча), — js/modules/<модуль>/editor.js.
 //
@@ -6,7 +6,15 @@
 // «Блоки» `.py` генерируется из блоков при каждом изменении (вкладка Python — только чтение);
 // «Перейти на Python» помечает файл блоков `mode: "python"`, и дальше блоки `.py` не трогают.
 
+//
+// M7c: вьюер слева, код или блоки справа (`--ew` — ширина редактора), верхняя панель
+// «Блоки | Python», отмена/повтор, имя проекта, «⬇ Экспорт проекта» / «📂 Открыть проект…»
+// (файл `.swarm`, DECISIONS №63, №65), «Серия…» в панели «Матч» (таблица поверх вьюера).
+
 import { api } from "../api.js";
+import { makeProject, parseProject, projectName, projectText, PROJECT_EXT } from "../project.js";
+import { confirmForeignCode } from "../trust.js";
+import { ask, askSeries } from "./dialog.js";
 import { renderMarkdown } from "./markdown.js";
 
 const $ = (id) => document.getElementById(id);
@@ -36,7 +44,7 @@ function blocksName(name) {
 }
 
 export class Editor {
-  /** handlers: {start(body) → Promise, stop(), exit()} */
+  /** handlers: {start(body) → Promise, stop(), startSeries(body), showSeries(id), exit()} */
   constructor(handlers) {
     this.h = handlers;
     this.cm = null;
@@ -134,6 +142,16 @@ export class Editor {
     $("ed-to-python").onclick = () => this.toPython();
     $("ed-menu").onclick = () => this.h.exit();
     $("ed-help").onclick = () => this.showHelp();
+    $("ed-undo").onclick = () => this.undo(false);
+    $("ed-redo").onclick = () => this.undo(true);
+    $("ed-export").onclick = () => this.exportProject();
+    $("ed-open-project").onchange = (e) => {
+      const f = e.target.files[0];
+      e.target.value = "";
+      if (f) this.openProjectFile(f);
+    };
+    $("match-series").onclick = () => this.startSeries();
+    $("match-series-table").onclick = () => this.lastSeries && this.h.showSeries(this.lastSeries);
     $("help").onclick = (e) => {
       if (e.target.id === "help" || e.target.classList.contains("close")) $("help").hidden = true;
     };
@@ -220,6 +238,7 @@ export class Editor {
     this._renderMode();
     this.setView(this.mode === "blocks" ? "blocks" : "python");
     $("ed-file").value = name;
+    $("ed-project").textContent = projectName(name);
     try {
       localStorage.setItem("swarmlab.editor.file", name);
     } catch {
@@ -282,6 +301,125 @@ export class Editor {
     await this._loadScripts();
     await this.openFile(name);
     return true;
+  }
+
+  /** Открыть скрипт по имени (например, копию проекта из меню). */
+  async openScript(name) {
+    await this._ready;
+    await this._loadScripts();
+    await this._switchFile(name);
+  }
+
+  // ------------------------------------------------------------ отмена, проект (M7c)
+
+  /** ↶ / ↷: в режиме блоков — история Blockly, в Python — CodeMirror. */
+  undo(redo) {
+    if (this.mode === "blocks" && this.blocks) this.blocks.undo(redo);
+    else if (this.cm && !this.cm.getOption("readOnly")) {
+      if (redo) this.cm.redo();
+      else this.cm.undo();
+      this.cm.focus();
+    }
+  }
+
+  /** Ошибки текущего кода для предупреждения при экспорте (блоки и `ast` на сервере). */
+  async _problems() {
+    if (this.mode === "blocks") {
+      this._regenerate();
+      if (this.gen.errors.length) return this.gen.errors.map((e) => e.message);
+    }
+    try {
+      const res = await api.checkScript(this._payload(this.file.name).text);
+      return res.errors.map((e) => `строка ${e.line}: ${e.message}`);
+    } catch {
+      return [];
+    }
+  }
+
+  /** «⬇ Экспорт проекта»: скачать `<имя>.swarm` (с ошибками — после подтверждения). */
+  async exportProject() {
+    if (!this.file) return;
+    const problems = await this._problems();
+    if (problems.length) {
+      const more = problems.length > 1 ? ` (и ещё ${problems.length - 1})` : "";
+      const ok = await ask(`Проект с ошибками: ${problems[0]}${more}.\n\nТакой проект откроется, но матч `
+        + "с ним не запустится, пока ошибки не исправлены. Всё равно экспортировать?",
+      { title: "Экспорт проекта", ok: "Экспортировать" });
+      if (!ok) return;
+    }
+    const { text, blocks } = this._payload(this.file.name);
+    const project = makeProject({ name: this.file.name, mode: this.mode, code: text, blocks: blocks?.workspace });
+    const url = URL.createObjectURL(new Blob([projectText(project)], { type: "application/json" }));
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `${project.name}${PROJECT_EXT}`;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 10_000);
+    this._status(`⬇ ${a.download} — в папке загрузок браузера`, "ok");
+  }
+
+  /** «📂 Открыть проект…»: `.swarm` → новый свой скрипт (с блоками), после предупреждения. */
+  async openProjectFile(file) {
+    let project;
+    try {
+      project = parseProject(await file.text());
+    } catch (e) {
+      alert(`${file.name}: ${e.message}`);
+      return;
+    }
+    const trusted = await confirmForeignCode([project.code],
+      (text) => ask(text, { title: "Чужой код", ok: "Открыть", cancel: "Отмена" }));
+    if (!trusted) return;
+    if (this.dirty && !confirm(`В ${this.file.name} есть несохранённые правки. Открыть проект без сохранения?`)) return;
+    await this._loadScripts();
+    const taken = (n) => this.scripts.some((s) => s.name === n) || /^(example_|template\.py$)/.test(n);
+    let name = `${project.name}.py`;
+    if (taken(name)) {
+      let k = 2;
+      while (taken(`${project.name}_${k}.py`)) k += 1;
+      const answer = prompt(`Скрипт ${name} уже есть. Под каким именем открыть проект?`, `${project.name}_${k}.py`);
+      if (answer === null) return;
+      name = answer.trim().endsWith(".py") ? answer.trim() : `${answer.trim()}.py`;
+      if (!NAME_RE.test(name) || taken(name)) {
+        alert(`Имя ${name} не подходит или занято: латинские буквы, цифры и _, в конце .py`);
+        return;
+      }
+    }
+    const blocks = project.mode === "blocks" ? { format: 1, mode: "blocks", workspace: project.blocks } : null;
+    try {
+      await api.saveScript(name, project.code, blocks);
+    } catch (e) {
+      alert(`Проект не открыт: ${e.message}`);
+      return;
+    }
+    await this._loadScripts();
+    await this.openFile(name);
+    this._status(`📂 проект ${project.name} открыт как ${name}`, "ok");
+  }
+
+  // ------------------------------------------------------------ серия (M7c)
+
+  async startSeries() {
+    if (!this.file) return;
+    this._showStartError(null);
+    if (!(await this._readyToRun())) return;
+    const opts = await askSeries({ n: 10, seed: this.panel.build().seed, note: `Таблица — по улью 1 (${this.file.name}).` });
+    if (!opts) return;
+    try {
+      const info = await this.h.startSeries(this.panel.seriesBody(opts));
+      this.lastSeries = info.id;
+      $("match-series-table").hidden = false;
+    } catch (e) {
+      this._showStartError(`Серия не запущена: ${e.message}`, e.data);
+      if (this._startError) this._jumpToError();
+    }
+  }
+
+  onSeriesClosed(id) {
+    if (id) this.lastSeries = id;
+    $("match-series-table").hidden = !this.lastSeries;
   }
 
   // ------------------------------------------------------------ блоки (M7b)
@@ -486,22 +624,24 @@ export class Editor {
 
   // ------------------------------------------------------------ матч
 
-  async start() {
-    if (!this.file) return;
-    this._showStartError(null);
+  /** Перед матчем и серией: блоки без ошибок, правки сохранены. */
+  async _readyToRun() {
     if (this.mode === "blocks") {
       // Проверка по порядку (DECISIONS №56): сначала блоки, потом — ast на сервере.
       this._regenerate();
       if (this.gen.errors.length) {
         this._showStartError(`В блоках есть ошибки: ${this.gen.errors[0].message}`, { block: this.gen.errors[0].block });
         this._jumpToError();
-        return;
+        return false;
       }
     }
-    if (this.dirty) {
-      const ok = await this.save();
-      if (!ok) return;
-    }
+    return !this.dirty || this.save();
+  }
+
+  async start() {
+    if (!this.file) return;
+    this._showStartError(null);
+    if (!(await this._readyToRun())) return;
     const body = this.panel.build();
     $("match-start").disabled = true;
     try {
@@ -740,8 +880,10 @@ export class Editor {
         el.addEventListener("pointerup", up);
       });
     };
+    // Вьюер слева, редактор справа: `--ew` — ширина редактора (как и до M7c, раскладка
+    // из localStorage подходит без пересчёта).
     drag($("ed-split"), (e) => {
-      const w = Math.min(Math.max(e.clientX, 320), window.innerWidth - 360);
+      const w = Math.min(Math.max(window.innerWidth - e.clientX, 360), window.innerWidth - 320);
       root.setProperty("--ew", `${w}px`);
       this.blocks?.resize();
     });

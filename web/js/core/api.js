@@ -1,10 +1,10 @@
 // REST-клиент сервера (ARCHITECTURE §7).
 
-async function request(method, path, body) {
+async function request(method, path, body, raw = false) {
   const res = await fetch(path, {
     method,
-    headers: body ? { "Content-Type": "application/json" } : undefined,
-    body: body ? JSON.stringify(body) : undefined,
+    headers: body ? { "Content-Type": raw ? "application/octet-stream" : "application/json" } : undefined,
+    body: body ? (raw ? body : JSON.stringify(body)) : undefined,
   });
   if (!res.ok) {
     let detail = `${res.status} ${res.statusText}`;
@@ -39,4 +39,15 @@ export const api = {
     blocks ? { text, blocks } : { text }),
   checkScript: (text) => request("POST", "/api/scripts/check", { text }),
   help: () => request("GET", "/api/help"),
+  // Проекты .swarm и серии матчей (M7c).
+  projects: () => request("GET", "/api/projects"),
+  project: (name) => request("GET", `/api/projects/${encodeURIComponent(name)}`),
+  uploadProject: (text) => request("POST", "/api/projects", text, true),
+  projectToEditor: (name, target) => request("POST", `/api/projects/${encodeURIComponent(name)}/to-editor`,
+    target ? { name: target } : {}),
+  seriesList: () => request("GET", "/api/series"),
+  series: (id) => request("GET", `/api/series/${encodeURIComponent(id)}`),
+  startSeries: (body) => request("POST", "/api/series", body),
+  stopSeries: (id) => request("POST", `/api/series/${encodeURIComponent(id)}/stop`),
+  seriesReplayUrl: (id, seed) => `/api/series/${encodeURIComponent(id)}/replays/${seed}`,
 };

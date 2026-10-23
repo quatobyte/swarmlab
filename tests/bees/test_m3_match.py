@@ -186,3 +186,42 @@ def test_replay_frame_restores_body_positions(tmp_path):
                  + dequantize(frame.arrays["bee_pos"][i], lo, hi))
     got, _ = module.backend.body_state(prev.arrays["bee_slot"][j].astype(np.int64))
     assert np.allclose(got, mid, atol=1e-9)
+
+
+# ------------------------------------------------------------------ гибели по причинам (M7c)
+
+
+def test_deaths_by_cause_in_score_match_death_events(tmp_path):
+    """Критерий M7c: гибели в счёте (энергия / шершень / паук) = события `death` реплея.
+
+    Разведчики с малым запасом энергии падают, цветы с пауками кусают сборщиков, а
+    шершня тест ставит вплотную к пчёлам в воздухе (волна сама до них не долетела бы).
+    """
+    cfg = load_match(CONFIGS / "matches" / "m2_economy.yaml", cli_overrides=(
+        *_BUSY, "enemies.hornets.enabled=true", "enemies.hornets.first_wave_s=1e9",
+        "enemies.spiders.enabled=true", "bee_types.scout.energy_max=40"))
+    path = tmp_path / "d.swr"
+    with Simulation(cfg) as sim:
+        m = sim.module
+        writer = ReplayWriter(path, make_header(cfg, sim.teams, m.scene()))
+        sim.on_frame = writer
+        while not sim.finished:
+            sim.run(max_steps=sim.clock.steps_for(3.0))
+            air = m.bees.airborne
+            if air.size and m.enemies.alive.sum() < 2:
+                pos, _ = m.backend.body_state(air[:1])
+                m.enemies.spawn(pos[0] + np.array([1.5, 0.0, 0.0]))
+        writer.close(m.score())
+    rp = read_replay(path)
+    counted: dict[tuple[int, str], int] = {}
+    for f in rp.frames:
+        for e in f.events:
+            if e["type"] == "death":
+                key = (e["hive"], e["cause"])
+                counted[key] = counted.get(key, 0) + 1
+    print(f"гибели по событиям: {counted}")
+    teams = rp.footer["score"]["teams"]
+    for cause in ("energy", "hornet", "spider"):
+        assert any(c == cause for _, c in counted), f"в матче нет гибелей «{cause}»"
+        for hive, row in teams.items():
+            assert row[f"deaths_{cause}"] == counted.get((int(hive), cause), 0), (hive, cause)

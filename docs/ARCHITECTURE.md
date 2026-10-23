@@ -55,6 +55,7 @@ swarmlab/
       runner_host.py  # запуск и обслуживание процессов-раннеров
       replay.py       # запись/чтение реплеев, хеш
       bench.py        # бенчмарк и рекомендация профиля
+      series.py       # серии матчей: seed подряд, процесс на матч, series.json, results.csv (M7c)
     runner/
       main.py         # процесс-раннер: рукопожатие, цикл, перехват print
       __main__.py     # python -m swarmlab.runner
@@ -74,10 +75,13 @@ swarmlab/
     server/
       app.py          # FastAPI: REST, WS-стрим, статика web/
       scripts.py      # скрипты редактора: только examples/bees/, проверка имени, ast.parse, файл блоков X.blocks.json
+      projects.py     # проекты .swarm: проверка формата, папка projects/, копия в редактор (M7c)
       worker.py       # процесс живого матча (python -m swarmlab.server.worker)
-    cli.py            # swarmlab run|bench|replay|serve
+    cli.py            # swarmlab run|series|bench|replay|serve
   web/                # фронтенд без сборки: index.html, js/core/, js/modules/<модуль>/, vendor/
   examples/bees/      # template.py, example_basic.py, example_smart.py, example_wait.py, example_blocks.py (+ .blocks.json) — только чтение в редакторе; my_bees.py и свои скрипты
+  projects/           # загруженные в меню проекты .swarm: <имя>.py, <имя>.blocks.json, <имя>.swarm (не видны в редакторе; в .gitignore)
+  replays/            # реплеи матчей; replays/series/<YYYYMMDD-HHMMSS>-<проект>/ — серии (s<seed>.swr, series.json, results.csv, logs/)
   tools/              # calibrate.py, balance.py, gen_api_hints.py, gen_blocks_api.py, blocks_to_py.mjs — служебные скрипты разработчика
   tests/
 ```
@@ -103,7 +107,7 @@ class Module(Protocol):
     def is_finished(self) -> bool: ...
 ```
 
-Необязательно: `DebugViewable.open_debug_viewer()` — отладочное окно движка (`--mj-viewer`); `Replayable.scene()` — статическая сцена для заголовка реплея и вьюеров, `Replayable.apply_frame(frame, nxt, alpha)` — выставить тела по кадру реплея (показ реплея в отладочном окне без шага физики); `Describable.describe()` — строки о правилах матча для CLI. Модули регистрируются в entry points `swarmlab.modules` и загружаются ядром по имени (`core.module.load_module`), без импорта в коде ядра.
+Необязательно: `ScoreColumns.score_columns()` — какие метрики счёта показывать таблицей серии (M7c); `DebugViewable.open_debug_viewer()` — отладочное окно движка (`--mj-viewer`); `Replayable.scene()` — статическая сцена для заголовка реплея и вьюеров, `Replayable.apply_frame(frame, nxt, alpha)` — выставить тела по кадру реплея (показ реплея в отладочном окне без шага физики); `Describable.describe()` — строки о правилах матча для CLI. Модули регистрируются в entry points `swarmlab.modules` и загружаются ядром по имени (`core.module.load_module`), без импорта в коде ядра.
 
 ### 3.2 PhysicsBackend
 
@@ -209,6 +213,9 @@ class PhysicsBackend(Protocol):
   - `GET /api/matches`, `GET /api/matches/{id}` (состояние, время, скорость, RTF, счёт), `POST /api/matches/{id}/stop`;
   - `GET /api/replays` — `.swr` в `replays/` (кроме пишущихся), `GET /api/replays/{id}` — файл реплея;
   - редактор (M5, DECISIONS №47): `GET /api/scripts` (имя, путь, `readonly`, `mode`), `GET /api/scripts/{name}` (`text`, `blocks`), `PUT /api/scripts/{name}` `{text, blocks?}` → `{ok, errors[]}` — только в `examples/bees/`, проверка имени, `template.py` и `example_*.py` только для чтения; `POST /api/scripts/check` `{text}` → синтаксические ошибки `{line, col, end_line, end_col, message, block}`. Блоки (M7b, DECISIONS №62): `blocks` = `{format: 1, mode: "blocks" | "python", workspace}` пишется в `X.blocks.json` рядом с `X.py`; после `mode: "python"` запись блоков — 409; `block` — id из комментария `# block:<id>` на строке ошибки (и в 400 при запуске матча); `GET /api/profiles` — профили и их YAML; `GET /api/help` — памятка `docs/CHEATSHEET.md`.
+  - проекты (M7c, DECISIONS №63–65): `POST /api/projects` (тело — файл `.swarm`) → `{name, title, mode, created, uploaded, path, sha256, status: new | same}`; `GET /api/projects`, `GET /api/projects/{name}` (`code`, `blocks`), `POST /api/projects/{name}/to-editor` `{name?}` → копия в `examples/bees/` под свободным именем. Формат `.swarm` проверяют и сервер (`server/projects.py`), и браузер (`js/core/project.js`): неизвестный `format`, нет `code`, битый JSON → 400 с понятным текстом. Другое содержимое под тем же именем — новый проект `<имя>-YYYYMMDD-HHMM`. В `POST /api/matches` и `POST /api/series` поле `projects[]` — проекты, синтаксис которых проверить (ошибка — 400 `{project, line, col, message}`); в `hives` — путь `projects/<имя>.py`;
+  - серии (M7c, DECISIONS №66–67): `POST /api/series` `{match, overrides, start_seed?, n, jobs?, team?, scripts?, projects?}` → `series.json` серии (сервер запускает `python -m swarmlab.cli series … --progress-json` и ждёт первую строку `{t: "start", id, dir}`; одновременно — одна серия, вторая — 409); `GET /api/series` — прошлые и идущая (из папок `replays/series/`, ничего не удаляется); `GET /api/series/{id}` — `series.json` + `done` (прогресс — опросом раз в 1 с; `state: interrupted`, если процесс серии умер); `POST /api/series/{id}/stop` — файл `.stop` в папке серии; `GET /api/series/{id}/replays/{seed}` — реплей матча.
+- CLI серии (M7c, `core/series.py`, DECISIONS №66): `swarmlab series <матч.yaml> --n 10 --seed S [--set ПУТЬ=ЗНАЧЕНИЕ …] [--jobs N] [--out replays/series] [--team H]`. Матч i — seed `S + i`; каждый матч — процесс `python -m swarmlab.core.series` (задание — JSON-строка в stdin, итог — JSON-строка в stdout; сторож stdin запускается только после сборки мира: на Windows поток, ждущий чтения из пайпа, блокирует загрузку DLL). Остановка — EOF в stdin матча, через 15 с — `taskkill /T` (venv-`python.exe` на Windows — лаунчер). `series.json` переписывается атомарно после каждого матча (повтор `os.replace`, пока сервер держит файл открытым). Колонки таблицы — `ScoreColumns.score_columns()` модуля (`ScoreColumn {key, title, worst}`) + ошибки кода из `RunnerStats` (`agent_errors`, `missed`, `over_budget`); худший матч — по колонкам с `worst` по порядку (у пчёл: место, потом мёд). `results.csv` — UTF-8 с BOM, `;`, дробная часть через запятую (Excel на русской Windows; pandas — `sep=";", decimal=","`).
 - Живой матч — отдельный процесс `python -m swarmlab.server.worker` (DECISIONS №43): канал stdin/stdout как у раннера; реплей пишется в `replays/<матч>-s<seed>-<дата-время>.swr`, логи кода игрока — `logs/<id>/`. Реальное время (`RealtimePacer`), пауза и скорость 0.25–8 — на лету; не успевает — медленнее реального, шаг физики тот же. Одновременно — `--max-matches` матчей, новый вытесняет старый. Закрытая вкладка матч не останавливает; EOF stdin (сервер умер) — воркер дописывает реплей и выходит.
 - WS `/ws/matches/{id}` (сервер → бинарный msgpack, массивы `{"__nd__": [dtype, shape, bytes]}` как в реплее):
 
@@ -222,6 +229,7 @@ class PhysicsBackend(Protocol):
 
   Клиент → JSON: `{t: "pause"}`, `{t: "resume"}`, `{t: "speed", value}`, `{t: "stop"}`. Неизвестный матч — закрытие с кодом 4404. Подключившийся позже получает header, последний status и кадр.
 - Вьюер `web/` — ES-модули без сборщика, библиотеки в `web/vendor/` (версии — `VERSIONS.md`, DECISIONS №44):
+  - M7c: в лобби — форма матча на `MatchPanel` модуля (у каждого улья пример или загруженный проект, seed по умолчанию случайный, 🎲), «▶ Смотреть матч», «Серия…», проекты (загрузка кнопкой и перетаскиванием `.swarm`, «Открыть в редакторе»), список серий. Редактор: вьюер слева, блоки/код справа (`--ew` — ширина редактора), верхняя панель «Блоки | Python», ↶/↷, имя проекта, «⬇ Экспорт проекта» (Blob), «📂 Открыть проект…»; блоки — рендерер `zelos`, категории с иконкой и справкой, поиск («Найдено» — динамическая категория по тексту блоков), подсказка в пустой программе. Общие модули: `project.js` (`.swarm`), `trust.js` (sha256 кода в `localStorage["swarmlab.trusted"]`), `ui/dialog.js`, `ui/series.js` (прогресс, таблица, «Смотреть» → `ReplaySource`).
   - `js/core/` — общее: `app.js` (лобби → источник → вьюер модуля по `header.module`; режим `#editor`), `codec.js` + `msgpack.js` (пакеты и `.swr`), `live.js` / `replay.js` (источники кадров), `playback.js`, `stage.js` (рендерер, небо, туман, свет, орбита, «следить»), `ui/` (лобби, FPS по клавише F, `editor.js` — редактор M5: CodeMirror 5, файлы, логи ульев, запуск и стоп; вкладки «Блоки | Python», режим файла, «Перейти на Python», «Новый…» (M7b); `markdown.js` — памятка);
   - `js/modules/bees/` — мир (рельеф с цветом по высоте, деревья, камни, ульи с маяками цвета команды, цветы с яркостью по нектару), агенты (InstancedMesh по типам пчёл, шершни, тепловой шар), погода (дождь, небо), HUD (ульи, погода, лента событий, панель пчелы), `editor.js` (подсказки по API из `api_hints.js` — генерирует `tools/gen_api_hints.py`; панель «Матч»: профиль, скрипты ульев, seed, длительность, шершни / пауки / погода, скорость); блоки (M7b): `blocks_api.js` (генерирует `tools/gen_blocks_api.py`), `blocks_ru.js` (подписи вручную), `blocks_gen.js` (Python из JSON рабочей области: `# block:<id>`, неподключённые, дубликаты, проверки, процедуры, рекурсия), `blocks_editor.js` (Blockly: определения блоков, панель, ошибки на блоках).
   - Источник кадров — WS (`LiveSource`) или файл (`ReplaySource`: таймлайн, перемотка, скорость); рендер один. Интерполяция по `uid` между соседними кадрами, ориентация по скорости.

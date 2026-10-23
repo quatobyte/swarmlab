@@ -48,7 +48,7 @@ from swarmlab.bees.state import FALLING, FLYING, FREE, IN_HIVE, STATE_NAMES, Bee
 from swarmlab.bees.weather import Weather
 from swarmlab.bees.world import World, generate_world
 from swarmlab.core.config import ConfigError, MatchConfig
-from swarmlab.core.module import DebugViewer, Frame, ScoreBoard, TeamSpec
+from swarmlab.core.module import DebugViewer, Frame, ScoreBoard, ScoreColumn, TeamSpec
 from swarmlab.core.physics import STATIC, PhysicsBackend
 from swarmlab.core.program import DONE, FAILED, RUNNING
 from swarmlab.core.protocol import CommandBatch, SensorBatch, TeamId
@@ -75,6 +75,8 @@ _TASK_CODES = {"rest": REST, "process": PROCESS, "nurse": NURSE}
 _POS_MARGIN = 10.0
 _WEATHER_STATES = ("clear", "windy", "rain")
 _U16 = 65535.0
+#: Причины гибели пчёл (`cause` события `death`), по которым ведётся счёт.
+DEATH_CAUSES = ("energy", "hornet", "spider")
 
 
 class BeesModule:
@@ -104,6 +106,7 @@ class BeesModule:
         self.events: list[dict[str, Any]] = []
         #: Отброшенные битые команды по ульям (защитная проверка, см. control.py).
         self.invalid_commands: list[int] = []
+        self.deaths: dict[str, np.ndarray] = {}
         #: Сообщения игроку (отказ выведения…) — уходят в `team_view.notes` следующего тика.
         self._notes: list[list[str]] = []
         self._decision_dt = 0.1
@@ -284,6 +287,8 @@ class BeesModule:
         )
         #: Время выбывания ульев со скриптом (NaN — в игре), BEES_SPEC §8.
         self.eliminated_at = np.full(world.n_hives, np.nan)
+        #: Гибели пчёл по ульям и причинам (`kill(..., cause)`), для счёта и серий.
+        self.deaths = {cause: np.zeros(world.n_hives, dtype=np.int64) for cause in DEATH_CAUSES}
         self._playing = [spec.team for spec in self.teams]
         self._min_flying_cost = min(p.economy.breeding[k].cost for k in FLYING_KINDS)
 
@@ -376,11 +381,14 @@ class BeesModule:
         """Пчёлы погибают: событие, слот паркуется и возвращается в пул."""
         slots = np.atleast_1d(np.asarray(slots, dtype=np.int64))
         b = self.bees
+        counter = self.deaths.get(cause)
         for s in slots.tolist():
             self.events.append(
                 {"type": "death", "time": self.time, "bee": int(b.uid[s]), "slot": s,
                  "hive": int(b.hive[s]), "kind": b.kind_name(s), "cause": cause}
             )
+            if counter is not None:
+                counter[int(b.hive[s])] += 1
             if self.swarm is not None:
                 self.swarm.remove(int(b.uid[s]))
         self.backend.park(slots, self._park_pos[slots])
@@ -1290,6 +1298,8 @@ class BeesModule:
             row["house"] = float(e.house_count(h))
             row["alive"] = float(alive.sum()) + row["house"]
             row["eliminated"] = float(not np.isnan(self.eliminated_at[h]))
+            for cause, counts in self.deaths.items():
+                row[f"deaths_{cause}"] = float(counts[h])
             teams[h] = row
 
         def rank(h: int) -> tuple[float, ...]:
@@ -1303,6 +1313,18 @@ class BeesModule:
         for place, h in enumerate(order, start=1):
             teams[h]["place"] = float(place)
         return ScoreBoard(teams=teams, winner=order[0] if order else None)
+
+    def score_columns(self) -> list[ScoreColumn]:
+        """Колонки таблицы серии (DECISIONS №66): худший матч — по месту, потом по мёду."""
+        return [
+            ScoreColumn("place", "место", worst="max"),
+            ScoreColumn("honey", "мёд", worst="min"),
+            ScoreColumn("delivered", "доставлено нектара"),
+            ScoreColumn("alive", "живых пчёл"),
+            ScoreColumn("deaths_energy", "гибели: энергия"),
+            ScoreColumn("deaths_hornet", "гибели: шершень"),
+            ScoreColumn("deaths_spider", "гибели: паук"),
+        ]
 
     def is_finished(self) -> bool:
         """Досрочный конец: из ≥ 2 ульев остался один, или выбыл единственный (DECISIONS №40)."""
