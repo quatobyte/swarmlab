@@ -72,11 +72,20 @@
       <select class="btn select" id="ed-file" title="Открыть скрипт"></select>
       <button class="btn" id="ed-save" title="Сохранить (Ctrl+S)">Сохранить</button>
       <button class="btn" id="ed-save-as" title="Сохранить под другим именем">Сохранить как…</button>
+      <button class="btn" id="ed-new" title="Новый скрипт из блоков">Новый…</button>
       <span class="ed-status" id="ed-status"></span>
       <span class="spacer"></span>
       <button class="btn" id="ed-help" title="Короткая памятка по командам">Памятка</button>
       <button class="btn" id="ed-menu" title="В меню">Меню</button>
     </div>
+    <div class="ed-tabs" id="ed-tabs">
+      <button class="ed-tab" id="ed-tab-blocks" title="Собирать программу из блоков">Блоки</button>
+      <button class="ed-tab" id="ed-tab-python" title="Код на Python">Python</button>
+      <span class="ed-tabs-note muted small" id="ed-mode-note"></span>
+      <span class="spacer"></span>
+      <button class="btn small" id="ed-to-python" hidden title="Дальше писать этот скрипт на Python (блоки перестанут обновлять файл)">Перейти на Python…</button>
+    </div>
+    <div class="ed-blocks" id="ed-blocks" hidden></div>
     <div class="ed-code" id="ed-code"></div>
     <div class="ed-foot muted small">Ctrl+S — сохранить · Ctrl+Пробел или «.» — подсказки · Ctrl+/ — закомментировать · Ctrl+Enter — запустить матч</div>
   </div>
@@ -145,6 +154,9 @@
   <script src="vendor/codemirror/addon/edit/closebrackets.js"></script>
   <script src="vendor/codemirror/addon/comment/comment.js"></script>
   <script src="vendor/codemirror/addon/selection/active-line.js"></script>
+  <script src="vendor/blockly/blockly_compressed.js"></script>
+  <script src="vendor/blockly/blocks_compressed.js"></script>
+  <script src="vendor/blockly/msg/ru.js"></script>
   <script type="module" src="js/core/app.js"></script>
 </body>
 </html>

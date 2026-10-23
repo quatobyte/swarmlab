@@ -96,8 +96,9 @@ def server(tmp_path: Path) -> Iterator[Server]:
     # Скрипты редактора — копия examples/bees во временной папке: тесты пишут туда.
     scripts = tmp_path / "scripts"
     scripts.mkdir()
-    for src in (ROOT / "examples" / "bees").glob("*.py"):
-        shutil.copy2(src, scripts / src.name)
+    for pattern in ("*.py", "*.blocks.json"):
+        for src in (ROOT / "examples" / "bees").glob(pattern):
+            shutil.copy2(src, scripts / src.name)
     cfg = ServerConfig(root=ROOT, configs=ROOT / "configs", replays=tmp_path / "replays",
                        logs=tmp_path / "logs", web=ROOT / "web", scripts=scripts)
     app = create_app(cfg)

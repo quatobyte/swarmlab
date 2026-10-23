@@ -1,0 +1,269 @@
+{
+ "format": 1,
+ "mode": "blocks",
+ "workspace": {
+  "blocks": {
+   "languageVersion": 0,
+   "blocks": [
+    {
+     "type": "procedures_defreturn",
+     "id": "def_sum",
+     "x": 10,
+     "y": 10,
+     "extraState": {
+      "params": [
+       {
+        "name": "n",
+        "id": "v_n"
+       }
+      ]
+     },
+     "fields": {
+      "NAME": "сумма до"
+     },
+     "inputs": {
+      "STACK": {
+       "block": {
+        "type": "procedures_ifreturn",
+        "id": "base_case",
+        "inputs": {
+         "CONDITION": {
+          "block": {
+           "type": "logic_compare",
+           "id": "n_le_0",
+           "fields": {
+            "OP": "LTE"
+           },
+           "inputs": {
+            "A": {
+             "block": {
+              "type": "variables_get",
+              "id": "get_n1",
+              "fields": {
+               "VAR": {
+                "id": "v_n"
+               }
+              }
+             }
+            },
+            "B": {
+             "block": {
+              "type": "math_number",
+              "id": "zero",
+              "fields": {
+               "NUM": 0
+              }
+             }
+            }
+           }
+          }
+         },
+         "VALUE": {
+          "block": {
+           "type": "math_number",
+           "id": "zero_ret",
+           "fields": {
+            "NUM": 0
+           }
+          }
+         }
+        }
+       }
+      },
+      "RETURN": {
+       "block": {
+        "type": "math_arithmetic",
+        "id": "n_plus_rest",
+        "fields": {
+         "OP": "ADD"
+        },
+        "inputs": {
+         "A": {
+          "block": {
+           "type": "variables_get",
+           "id": "get_n2",
+           "fields": {
+            "VAR": {
+             "id": "v_n"
+            }
+           }
+          }
+         },
+         "B": {
+          "block": {
+           "type": "procedures_callreturn",
+           "id": "self_call",
+           "extraState": {
+            "name": "сумма до",
+            "params": [
+             "n"
+            ]
+           },
+           "inputs": {
+            "ARG0": {
+             "block": {
+              "type": "math_arithmetic",
+              "id": "n_minus_1",
+              "fields": {
+               "OP": "MINUS"
+              },
+              "inputs": {
+               "A": {
+                "block": {
+                 "type": "variables_get",
+                 "id": "get_n3",
+                 "fields": {
+                  "VAR": {
+                   "id": "v_n"
+                  }
+                 }
+                }
+               },
+               "B": {
+                "block": {
+                 "type": "math_number",
+                 "id": "one",
+                 "fields": {
+                  "NUM": 1
+                 }
+                }
+               }
+              }
+             }
+            }
+           }
+          }
+         }
+        }
+       }
+      }
+     }
+    },
+    {
+     "type": "procedures_defnoreturn",
+     "id": "def_ping",
+     "x": 10,
+     "y": 300,
+     "fields": {
+      "NAME": "пинг"
+     },
+     "inputs": {
+      "STACK": {
+       "block": {
+        "type": "procedures_callnoreturn",
+        "id": "ping_calls_pong",
+        "extraState": {
+         "name": "понг",
+         "params": []
+        }
+       }
+      }
+     }
+    },
+    {
+     "type": "procedures_defnoreturn",
+     "id": "def_pong",
+     "x": 10,
+     "y": 400,
+     "fields": {
+      "NAME": "понг"
+     },
+     "inputs": {
+      "STACK": {
+       "block": {
+        "type": "procedures_callnoreturn",
+        "id": "pong_calls_ping",
+        "extraState": {
+         "name": "пинг",
+         "params": []
+        }
+       }
+      }
+     }
+    },
+    {
+     "type": "bees_program_hive",
+     "id": "prog_hive",
+     "x": 10,
+     "y": 600,
+     "inputs": {
+      "DO": {
+       "block": {
+        "type": "text_print",
+        "id": "print_sum",
+        "inputs": {
+         "TEXT": {
+          "block": {
+           "type": "text_join",
+           "id": "join",
+           "extraState": {
+            "itemCount": 2
+           },
+           "inputs": {
+            "ADD0": {
+             "block": {
+              "type": "text",
+              "id": "lbl",
+              "fields": {
+               "TEXT": "сумма="
+              }
+             }
+            },
+            "ADD1": {
+             "block": {
+              "type": "procedures_callreturn",
+              "id": "call_sum",
+              "extraState": {
+               "name": "сумма до",
+               "params": [
+                "n"
+               ]
+              },
+              "inputs": {
+               "ARG0": {
+                "block": {
+                 "type": "math_number",
+                 "id": "ten",
+                 "fields": {
+                  "NUM": 10
+                 }
+                }
+               }
+              }
+             }
+            }
+           }
+          }
+         }
+        },
+        "next": {
+         "block": {
+          "type": "bees_wait",
+          "id": "hive_wait",
+          "inputs": {
+           "seconds": {
+            "block": {
+             "type": "math_number",
+             "id": "w100",
+             "fields": {
+              "NUM": 100
+             }
+            }
+           }
+          }
+         }
+        }
+       }
+      }
+     }
+    }
+   ]
+  },
+  "variables": [
+   {
+    "name": "n",
+    "id": "v_n"
+   }
+  ]
+ }
+}

@@ -13,8 +13,8 @@ REST:
     GET  /api/replays/{id}         файл реплея (распаковывает вьюер)
     GET  /api/profiles             профили `configs/profiles/*.yaml` (имя, описание, YAML)
     GET  /api/scripts              скрипты игроков в папке редактора (`examples/bees/`)
-    GET  /api/scripts/{name}       текст скрипта
-    PUT  /api/scripts/{name}       {text} → сохранить; {ok, errors[{line, col, message}]}
+    GET  /api/scripts/{name}       текст скрипта и файл блоков (`blocks`, если есть)
+    PUT  /api/scripts/{name}       {text, blocks?} → сохранить; {ok, errors[{line, col, …, block}]}
     POST /api/scripts/check        {text} → синтаксические ошибки (`ast.parse`)
     GET  /api/help                 памятка игрока `docs/CHEATSHEET.md` (текст Markdown)
 WS:
@@ -409,6 +409,8 @@ class StartRequest(BaseModel):
 
 class ScriptText(BaseModel):
     text: str
+    #: Файл блоков рядом со скриптом (M7b): `{format, mode, workspace}`.
+    blocks: dict[str, Any] | None = None
 
 
 def _script_call(fn: Any, *args: Any) -> Any:
@@ -540,7 +542,7 @@ def create_app(cfg: ServerConfig | None = None) -> FastAPI:
 
     @app.put("/api/scripts/{name}")
     def write_script(name: str, body: ScriptText) -> dict[str, Any]:
-        return _script_call(scripts.write, name, body.text)
+        return _script_call(scripts.write, name, body.text, body.blocks)
 
     @app.websocket("/ws/matches/{mid}")
     async def stream(ws: WebSocket, mid: str) -> None:

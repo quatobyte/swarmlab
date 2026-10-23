@@ -73,12 +73,12 @@ swarmlab/
       bots/           # встроенный ИИ шершней и пауков (через тот же api, DECISIONS №36)
     server/
       app.py          # FastAPI: REST, WS-стрим, статика web/
-      scripts.py      # скрипты редактора: только examples/bees/, проверка имени, ast.parse
+      scripts.py      # скрипты редактора: только examples/bees/, проверка имени, ast.parse, файл блоков X.blocks.json
       worker.py       # процесс живого матча (python -m swarmlab.server.worker)
     cli.py            # swarmlab run|bench|replay|serve
   web/                # фронтенд без сборки: index.html, js/core/, js/modules/<модуль>/, vendor/
-  examples/bees/      # template.py, example_basic.py, example_smart.py, example_wait.py (только чтение в редакторе); my_bees.py и свои скрипты
-  tools/              # calibrate.py, balance.py, gen_api_hints.py — служебные скрипты разработчика
+  examples/bees/      # template.py, example_basic.py, example_smart.py, example_wait.py, example_blocks.py (+ .blocks.json) — только чтение в редакторе; my_bees.py и свои скрипты
+  tools/              # calibrate.py, balance.py, gen_api_hints.py, gen_blocks_api.py, blocks_to_py.mjs — служебные скрипты разработчика
   tests/
 ```
 
@@ -208,7 +208,7 @@ class PhysicsBackend(Protocol):
   - `POST /api/matches` `{match, seed?, overrides?[], speed?, scripts?[]}` → сведения о матче с `id`; ошибка конфига — 400; `scripts` — имена скриптов редактора, их синтаксис проверяется `ast.parse` до запуска (ошибка — 400 `{script, line, col, message}`, процесс не запускается);
   - `GET /api/matches`, `GET /api/matches/{id}` (состояние, время, скорость, RTF, счёт), `POST /api/matches/{id}/stop`;
   - `GET /api/replays` — `.swr` в `replays/` (кроме пишущихся), `GET /api/replays/{id}` — файл реплея;
-  - редактор (M5, DECISIONS №47): `GET /api/scripts` (имя, путь, `readonly`), `GET /api/scripts/{name}`, `PUT /api/scripts/{name}` `{text}` → `{ok, errors[]}` — только в `examples/bees/`, проверка имени, `template.py` и `example_*.py` только для чтения; `POST /api/scripts/check` `{text}` → синтаксические ошибки; `GET /api/profiles` — профили и их YAML; `GET /api/help` — памятка `docs/CHEATSHEET.md`.
+  - редактор (M5, DECISIONS №47): `GET /api/scripts` (имя, путь, `readonly`, `mode`), `GET /api/scripts/{name}` (`text`, `blocks`), `PUT /api/scripts/{name}` `{text, blocks?}` → `{ok, errors[]}` — только в `examples/bees/`, проверка имени, `template.py` и `example_*.py` только для чтения; `POST /api/scripts/check` `{text}` → синтаксические ошибки `{line, col, end_line, end_col, message, block}`. Блоки (M7b, DECISIONS №62): `blocks` = `{format: 1, mode: "blocks" | "python", workspace}` пишется в `X.blocks.json` рядом с `X.py`; после `mode: "python"` запись блоков — 409; `block` — id из комментария `# block:<id>` на строке ошибки (и в 400 при запуске матча); `GET /api/profiles` — профили и их YAML; `GET /api/help` — памятка `docs/CHEATSHEET.md`.
 - Живой матч — отдельный процесс `python -m swarmlab.server.worker` (DECISIONS №43): канал stdin/stdout как у раннера; реплей пишется в `replays/<матч>-s<seed>-<дата-время>.swr`, логи кода игрока — `logs/<id>/`. Реальное время (`RealtimePacer`), пауза и скорость 0.25–8 — на лету; не успевает — медленнее реального, шаг физики тот же. Одновременно — `--max-matches` матчей, новый вытесняет старый. Закрытая вкладка матч не останавливает; EOF stdin (сервер умер) — воркер дописывает реплей и выходит.
 - WS `/ws/matches/{id}` (сервер → бинарный msgpack, массивы `{"__nd__": [dtype, shape, bytes]}` как в реплее):
 
@@ -222,8 +222,8 @@ class PhysicsBackend(Protocol):
 
   Клиент → JSON: `{t: "pause"}`, `{t: "resume"}`, `{t: "speed", value}`, `{t: "stop"}`. Неизвестный матч — закрытие с кодом 4404. Подключившийся позже получает header, последний status и кадр.
 - Вьюер `web/` — ES-модули без сборщика, библиотеки в `web/vendor/` (версии — `VERSIONS.md`, DECISIONS №44):
-  - `js/core/` — общее: `app.js` (лобби → источник → вьюер модуля по `header.module`; режим `#editor`), `codec.js` + `msgpack.js` (пакеты и `.swr`), `live.js` / `replay.js` (источники кадров), `playback.js`, `stage.js` (рендерер, небо, туман, свет, орбита, «следить»), `ui/` (лобби, FPS по клавише F, `editor.js` — редактор M5: CodeMirror 5, файлы, логи ульев, запуск и стоп; `markdown.js` — памятка);
-  - `js/modules/bees/` — мир (рельеф с цветом по высоте, деревья, камни, ульи с маяками цвета команды, цветы с яркостью по нектару), агенты (InstancedMesh по типам пчёл, шершни, тепловой шар), погода (дождь, небо), HUD (ульи, погода, лента событий, панель пчелы), `editor.js` (подсказки по API из `api_hints.js` — генерирует `tools/gen_api_hints.py`; панель «Матч»: профиль, скрипты ульев, seed, длительность, шершни / пауки / погода, скорость).
+  - `js/core/` — общее: `app.js` (лобби → источник → вьюер модуля по `header.module`; режим `#editor`), `codec.js` + `msgpack.js` (пакеты и `.swr`), `live.js` / `replay.js` (источники кадров), `playback.js`, `stage.js` (рендерер, небо, туман, свет, орбита, «следить»), `ui/` (лобби, FPS по клавише F, `editor.js` — редактор M5: CodeMirror 5, файлы, логи ульев, запуск и стоп; вкладки «Блоки | Python», режим файла, «Перейти на Python», «Новый…» (M7b); `markdown.js` — памятка);
+  - `js/modules/bees/` — мир (рельеф с цветом по высоте, деревья, камни, ульи с маяками цвета команды, цветы с яркостью по нектару), агенты (InstancedMesh по типам пчёл, шершни, тепловой шар), погода (дождь, небо), HUD (ульи, погода, лента событий, панель пчелы), `editor.js` (подсказки по API из `api_hints.js` — генерирует `tools/gen_api_hints.py`; панель «Матч»: профиль, скрипты ульев, seed, длительность, шершни / пауки / погода, скорость); блоки (M7b): `blocks_api.js` (генерирует `tools/gen_blocks_api.py`), `blocks_ru.js` (подписи вручную), `blocks_gen.js` (Python из JSON рабочей области: `# block:<id>`, неподключённые, дубликаты, проверки, процедуры, рекурсия), `blocks_editor.js` (Blockly: определения блоков, панель, ошибки на блоках).
   - Источник кадров — WS (`LiveSource`) или файл (`ReplaySource`: таймлайн, перемотка, скорость); рендер один. Интерполяция по `uid` между соседними кадрами, ориентация по скорости.
 - Отладочный вьюер: `swarmlab run ... --mj-viewer` — `mujoco.viewer.launch_passive`.
 

@@ -35,7 +35,8 @@ export const api = {
   profiles: () => request("GET", "/api/profiles"),
   scripts: () => request("GET", "/api/scripts"),
   script: (name) => request("GET", `/api/scripts/${encodeURIComponent(name)}`),
-  saveScript: (name, text) => request("PUT", `/api/scripts/${encodeURIComponent(name)}`, { text }),
+  saveScript: (name, text, blocks) => request("PUT", `/api/scripts/${encodeURIComponent(name)}`,
+    blocks ? { text, blocks } : { text }),
   checkScript: (text) => request("POST", "/api/scripts/check", { text }),
   help: () => request("GET", "/api/help"),
 };

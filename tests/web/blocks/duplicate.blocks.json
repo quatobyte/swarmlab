@@ -1,0 +1,71 @@
+{
+ "format": 1,
+ "mode": "blocks",
+ "workspace": {
+  "blocks": {
+   "languageVersion": 0,
+   "blocks": [
+    {
+     "type": "bees_program_bee",
+     "id": "forager_first",
+     "x": 10,
+     "y": 10,
+     "fields": {
+      "KIND": "forager"
+     },
+     "inputs": {
+      "DO": {
+       "block": {
+        "type": "bees_Bee_go_home",
+        "id": "first_home",
+        "fields": {
+         "WAIT": false
+        }
+       }
+      }
+     }
+    },
+    {
+     "type": "bees_program_bee",
+     "id": "forager_second",
+     "x": 10,
+     "y": 300,
+     "fields": {
+      "KIND": "forager"
+     },
+     "inputs": {
+      "DO": {
+       "block": {
+        "type": "bees_Bee_hover",
+        "id": "second_hover",
+        "fields": {
+         "WAIT": false
+        }
+       }
+      }
+     }
+    },
+    {
+     "type": "bees_program_bee",
+     "id": "scout_only",
+     "x": 400,
+     "y": 10,
+     "fields": {
+      "KIND": "scout"
+     },
+     "inputs": {
+      "DO": {
+       "block": {
+        "type": "bees_Bee_leave_hive",
+        "id": "scout_leave",
+        "fields": {
+         "WAIT": false
+        }
+       }
+      }
+     }
+    }
+   ]
+  }
+ }
+}

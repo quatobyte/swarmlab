@@ -186,6 +186,21 @@ body.editing .clock { font-size: 20px; }
 .ed-status.bad { color: #ff8a8a; cursor: pointer; }
 .ed-status.dirty { color: #ffd479; }
 .ed-code { flex: 1 1 auto; min-height: 0; }
+.ed-code.generated .CodeMirror { background: #1b1b1b; }
+.ed-blocks { flex: 1 1 auto; min-height: 0; position: relative; }
+.ed-tabs { display: flex; align-items: center; gap: 2px; padding: 3px 8px 0; background: #1a1f26; border-bottom: 1px solid #000; }
+.ed-tab { font: inherit; font-size: 13px; color: var(--muted); background: transparent; border: 0;
+  border-bottom: 2px solid transparent; padding: 4px 14px; cursor: pointer; }
+.ed-tab.active { color: var(--text); border-bottom-color: var(--accent); }
+.ed-tab:disabled { opacity: 0.4; cursor: not-allowed; }
+.ed-tabs-note { margin-left: 8px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+.ed-tabs .btn.small { padding: 2px 10px; font-size: 12px; margin-bottom: 3px; }
+.ed-status.warn { color: #ffb347; cursor: pointer; }
+/* Ошибки и предупреждения на блоках (M7b). */
+.blocklyPath { transition: stroke 0.2s; }
+.sl-error > .blocklyPath { stroke: #ff4d4d !important; stroke-width: 3px; }
+.sl-warning > .blocklyPath { stroke: #ffb347 !important; stroke-width: 2px; }
+.sl-dup > .blocklyPath { stroke: #ff4d4d !important; stroke-width: 3px; stroke-dasharray: 8 5; }
 .ed-code .CodeMirror { height: 100%; font: 14px/1.45 Consolas, "Cascadia Mono", monospace; }
 .ed-foot { padding: 4px 10px; background: #1a1f26; border-top: 1px solid #000; }
 .CodeMirror-hints { z-index: 30; font: 13px Consolas, monospace; max-width: 640px; background: #263238; border-color: #000; }

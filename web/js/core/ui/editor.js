@@ -1,6 +1,10 @@
 // Редактор кода в браузере (M5): CodeMirror 5 слева, вьюер матча справа, внизу — панель
 // матча и логи ульев. Сервер хранит скрипты в examples/bees/ и проверяет синтаксис (ast.parse).
 // Часть, которая знает модуль (подсказки, форма матча), — js/modules/<модуль>/editor.js.
+//
+// Блоки (M7b, DECISIONS №50–56): у скрипта может быть файл блоков `X.blocks.json`. В режиме
+// «Блоки» `.py` генерируется из блоков при каждом изменении (вкладка Python — только чтение);
+// «Перейти на Python» помечает файл блоков `mode: "python"`, и дальше блоки `.py` не трогают.
 
 import { api } from "../api.js";
 import { renderMarkdown } from "./markdown.js";
@@ -26,6 +30,11 @@ function baseName(path) {
   return String(path).split(/[\\/]/).pop();
 }
 
+/** `my_bees.py` → `my_bees.blocks.json` (файл блоков рядом со скриптом). */
+function blocksName(name) {
+  return name.replace(/\.py$/, ".blocks.json");
+}
+
 export class Editor {
   /** handlers: {start(body) → Promise, stop(), exit()} */
   constructor(handlers) {
@@ -44,6 +53,13 @@ export class Editor {
     this.active = false;
     this.running = false;
     this._ready = null;
+    // Блоки: режим открытого файла ("blocks" | "python"), видимая вкладка, редактор блоков.
+    this.mode = "python";
+    this.view = "python";
+    this.blocks = null;
+    this.gen = null; // последний результат генерации из блоков
+    this.savedBlocks = "";
+    this._regenTimer = 0;
   }
 
   // ------------------------------------------------------------ вход и выход
@@ -54,7 +70,8 @@ export class Editor {
     for (const id of ["editor", "dock", "ed-split"]) $(id).hidden = false;
     await (this._ready ||= this._init());
     this.cm.refresh();
-    this.cm.focus();
+    this.blocks?.resize();
+    if (this.view === "python") this.cm.focus();
   }
 
   close() {
@@ -64,7 +81,9 @@ export class Editor {
   }
 
   get dirty() {
-    return this.cm !== null && this.file !== null && this.cm.getValue() !== this.savedText;
+    if (this.cm === null || this.file === null) return false;
+    if (this.mode === "blocks") return JSON.stringify(this.blocks.save()) !== this.savedBlocks;
+    return this.cm.getValue() !== this.savedText;
   }
 
   /** Вьюер пуст (матча нет) — подсказка в правой колонке. */
@@ -109,6 +128,10 @@ export class Editor {
     $("ed-file").onchange = () => this._switchFile($("ed-file").value);
     $("ed-save").onclick = () => this.save();
     $("ed-save-as").onclick = () => this.saveAs();
+    $("ed-new").onclick = () => this.newBlocksScript();
+    $("ed-tab-blocks").onclick = () => this.setView("blocks");
+    $("ed-tab-python").onclick = () => this.setView("python");
+    $("ed-to-python").onclick = () => this.toPython();
     $("ed-menu").onclick = () => this.h.exit();
     $("ed-help").onclick = () => this.showHelp();
     $("help").onclick = (e) => {
@@ -127,9 +150,9 @@ export class Editor {
 
     await this._loadScripts();
     if (!this.scripts.some((s) => s.name === DEFAULT_FILE)) {
-      // Первый вход: свой файл из шаблона.
-      const tpl = await api.script(TEMPLATE_FILE);
-      await api.saveScript(DEFAULT_FILE, tpl.text);
+      // Первый вход: свой файл — из блоков (DECISIONS №51); модуль без блоков — из шаблона.
+      if (mod.BlocksEditor) await this._createBlocksScript(DEFAULT_FILE);
+      else await api.saveScript(DEFAULT_FILE, (await api.script(TEMPLATE_FILE)).text);
       await this._loadScripts();
     }
     let last = null;
@@ -156,7 +179,7 @@ export class Editor {
       for (const s of group) {
         const opt = document.createElement("option");
         opt.value = s.name;
-        opt.textContent = s.readonly ? `${s.name} 🔒` : s.name;
+        opt.textContent = `${s.name}${s.mode === "blocks" ? " 🧩" : ""}${s.readonly ? " 🔒" : ""}`;
         og.appendChild(opt);
       }
       sel.appendChild(og);
@@ -178,9 +201,24 @@ export class Editor {
     const data = await api.script(name);
     this.file = { name: data.name, readonly: data.readonly };
     this.savedText = data.text;
+    const blocks = data.blocks?.mode === "blocks" && this.mod.BlocksEditor;
+    if (blocks) this._ensureBlocks();
+    this.mode = blocks ? "blocks" : "python";
+    this.blocksFile = data.blocks || null;
     this.cm.setValue(data.text);
     this.cm.clearHistory();
-    this.cm.setOption("readOnly", false);
+    this.cm.setOption("readOnly", this.mode === "blocks");
+    if (this.mode === "blocks") {
+      this.blocks.load(data.blocks.workspace);
+      this.savedBlocks = JSON.stringify(this.blocks.save());
+      this._regenerate();
+      // Файл на диске мог устареть (генератор поменялся) — тогда он «грязный», сохранится заново.
+      if (this.gen.code !== data.text) this.savedBlocks = "";
+    } else {
+      this.gen = null;
+    }
+    this._renderMode();
+    this.setView(this.mode === "blocks" ? "blocks" : "python");
     $("ed-file").value = name;
     try {
       localStorage.setItem("swarmlab.editor.file", name);
@@ -196,10 +234,11 @@ export class Editor {
   async save() {
     if (!this.file) return false;
     if (this.file.readonly) return this.saveAs();
-    const text = this.cm.getValue();
+    const { text, blocks } = this._payload(this.file.name);
     try {
-      const res = await api.saveScript(this.file.name, text);
+      const res = await api.saveScript(this.file.name, text, blocks);
       this.savedText = text;
+      if (blocks) this.savedBlocks = JSON.stringify(blocks.workspace);
       this._syntax = res.errors;
       this._updateStatus();
       return true;
@@ -207,6 +246,14 @@ export class Editor {
       this._status(`Не сохранено: ${e.message}`, "bad");
       return false;
     }
+  }
+
+  /** Что сохранять под именем `name`: текст `.py` и (в режиме «Блоки») файл блоков. */
+  _payload(name) {
+    if (this.mode !== "blocks") return { text: this.cm.getValue(), blocks: null };
+    const workspace = this.blocks.save();
+    const gen = this.mod.generateBlocks(workspace, { file: blocksName(name) });
+    return { text: gen.code, blocks: { format: 1, mode: "blocks", workspace } };
   }
 
   async saveAs() {
@@ -225,9 +272,9 @@ export class Editor {
       return false;
     }
     if (existing && existing.name !== this.file?.name && !confirm(`${name} уже есть. Перезаписать?`)) return false;
-    const text = this.cm.getValue();
+    const { text, blocks } = this._payload(name); // в файл, переведённый в Python, сервер блоки не пишет (409)
     try {
-      await api.saveScript(name, text);
+      await api.saveScript(name, text, blocks);
     } catch (e) {
       alert(`Не сохранено: ${e.message}`);
       return false;
@@ -235,6 +282,120 @@ export class Editor {
     await this._loadScripts();
     await this.openFile(name);
     return true;
+  }
+
+  // ------------------------------------------------------------ блоки (M7b)
+
+  _ensureBlocks() {
+    if (this.blocks) return;
+    this.blocks = new this.mod.BlocksEditor($("ed-blocks"), { onChange: () => this._scheduleRegen() });
+  }
+
+  _scheduleRegen() {
+    clearTimeout(this._regenTimer);
+    this._regenTimer = setTimeout(() => this._regenerate(), 150);
+  }
+
+  /** Python из блоков → во вкладку Python (только чтение); ошибки — на блоки. */
+  _regenerate() {
+    if (this.mode !== "blocks" || !this.file) return;
+    clearTimeout(this._regenTimer);
+    this.gen = this.blocks.generate(blocksName(this.file.name));
+    if (this.cm.getValue() !== this.gen.code) {
+      const scroll = this.cm.getScrollInfo();
+      this.cm.setValue(this.gen.code); // вызовет проверку ast на сервере (lint)
+      this.cm.scrollTo(scroll.left, scroll.top);
+    }
+    this.blocks.showProblems(this.gen);
+    this._updateStatus();
+  }
+
+  setView(view) {
+    if (view === "blocks" && this.mode !== "blocks") view = "python";
+    this.view = view;
+    $("ed-blocks").hidden = view !== "blocks";
+    $("ed-code").hidden = view !== "python";
+    $("ed-tab-blocks").classList.toggle("active", view === "blocks");
+    $("ed-tab-python").classList.toggle("active", view === "python");
+    if (view === "blocks") this.blocks.resize();
+    else this.cm.refresh();
+  }
+
+  _renderMode() {
+    const blocks = this.mode === "blocks";
+    const tabBlocks = $("ed-tab-blocks");
+    tabBlocks.disabled = !blocks;
+    tabBlocks.title = blocks ? "Собирать программу из блоков"
+      : this.blocksFile ? "Скрипт переведён в Python — блоки больше не обновляют его"
+        : "Этот скрипт написан на Python. Блоки — в новом скрипте («Новый…»)";
+    $("ed-to-python").hidden = !blocks || this.file?.readonly;
+    $("ed-code").classList.toggle("generated", blocks);
+    $("ed-mode-note").textContent = blocks ? "Python собирается из блоков (только чтение)"
+      : this.blocksFile ? "переведён из блоков в Python" : "";
+  }
+
+  /** Переход в Python (DECISIONS №50): предупреждение, подтверждение; блоки остаются в файле. */
+  async toPython() {
+    if (this.mode !== "blocks" || !this.file || this.file.readonly) return;
+    const name = this.file.name;
+    const ok = confirm(
+      `Перейти на Python?\n\nДальше ${name} пишется только на Python. Блоки больше не будут обновлять этот файл, `
+      + "и вернуться к ним для этого скрипта нельзя (они останутся в "
+      + `${blocksName(name)}, но код из них больше не собирается).\n\nПродолжить?`);
+    if (!ok) return;
+    this._regenerate();
+    const workspace = this.blocks.save();
+    try {
+      await api.saveScript(name, this.gen.code, { format: 1, mode: "python", workspace });
+    } catch (e) {
+      this._status(`Не получилось: ${e.message}`, "bad");
+      return;
+    }
+    this.mode = "python";
+    this.blocksFile = { format: 1, mode: "python", workspace };
+    this.savedText = this.gen.code;
+    this.gen = null;
+    this.cm.setOption("readOnly", false);
+    this._renderMode();
+    this.setView("python");
+    this.cm.focus();
+    await this._loadScripts();
+    this._updateStatus();
+    this.cm.performLint();
+  }
+
+  async _createBlocksScript(name) {
+    const workspace = this.mod.starterWorkspace();
+    const gen = this.mod.generateBlocks(workspace, { file: blocksName(name) });
+    await api.saveScript(name, gen.code, { format: 1, mode: "blocks", workspace });
+  }
+
+  /** Новый скрипт из блоков (режим по умолчанию для новых скриптов, DECISIONS №51). */
+  async newBlocksScript() {
+    if (!this.mod.BlocksEditor) return;
+    if (this.dirty && !confirm(`В ${this.file.name} есть несохранённые правки. Создать новый скрипт без сохранения?`)) return;
+    let name = prompt("Имя нового скрипта из блоков (латиница, цифры и _, в конце .py):", "my_blocks.py");
+    if (name === null) return;
+    name = name.trim();
+    if (!name.endsWith(".py")) name += ".py";
+    if (!NAME_RE.test(name)) {
+      alert("Имя: латинские буквы, цифры и _, начинается с буквы, в конце .py — например, my_blocks.py");
+      return;
+    }
+    const existing = this.scripts.find((s) => s.name === name);
+    if (existing?.readonly) {
+      alert(`${name} — справочный файл, выберите другое имя`);
+      return;
+    }
+    if (existing && !confirm(`${name} уже есть. Заменить его новым скриптом из блоков?`)) return;
+    try {
+      await this._createBlocksScript(name);
+    } catch (e) {
+      alert(`Не создано: ${e.message}`);
+      return;
+    }
+    await this._loadScripts();
+    await this.openFile(name);
   }
 
   // ------------------------------------------------------------ статус и ошибки
@@ -248,7 +409,13 @@ export class Editor {
   _updateStatus() {
     if (!this.file) return;
     const err = this._syntax?.[0];
-    if (err) this._status(`✖ строка ${err.line}: ${err.message}`, "bad");
+    const g = this.mode === "blocks" ? this.gen : null;
+    if (g?.errors.length) this._status(`✖ ${g.errors[0].message}${g.errors.length > 1 ? ` (ещё ${g.errors.length - 1})` : ""}`, "bad");
+    else if (err && g) this._status(`✖ ошибка Python в блоке: ${err.message}`, "bad");
+    else if (err) this._status(`✖ строка ${err.line}: ${err.message}`, "bad");
+    else if (g?.warnings.length) {
+      this._status(`⚠ ${g.warnings[0].message}${this.dirty ? " · ● не сохранено" : ""}`, "warn");
+    }
     else if (this.file.readonly) this._status("🔒 пример — «Сохранить как», чтобы менять", "");
     else if (this.dirty) this._status("● есть несохранённые правки", "dirty");
     else this._status("✓ сохранено, синтаксис в порядке", "ok");
@@ -269,13 +436,18 @@ export class Editor {
       message: e.message,
       severity: "error",
     }));
+    const onBlocks = [];
+    for (const e of errors) if (e.block) onBlocks.push({ block: e.block, message: `Python: ${e.message}` });
     for (const r of this.runErrors) {
       if (r.file !== this.file?.name) continue;
       const line = r.line - 1;
       if (line < 0 || line >= this.cm.lineCount()) continue;
-      out.push({ from: CM.Pos(line, 0), to: CM.Pos(line, this.cm.getLine(line).length), severity: "warning",
-        message: `Ошибка во время матча (${r.team}): ${r.message}` });
+      const message = `Ошибка во время матча (${r.team}): ${r.message}`;
+      out.push({ from: CM.Pos(line, 0), to: CM.Pos(line, this.cm.getLine(line).length), severity: "warning", message });
+      const block = this.mode === "blocks" ? this.mod.blockAtLine(text, r.line) : null;
+      if (block) onBlocks.push({ block, message });
     }
+    if (this.mode === "blocks" && this.gen) this.blocks.showProblems(this.gen, onBlocks);
     cb(out);
   }
 
@@ -291,6 +463,13 @@ export class Editor {
   }
 
   _jumpToError() {
+    if (this.mode === "blocks") {
+      const p = this.gen?.errors[0] || this._syntax?.[0] || this._startError || this.gen?.warnings[0];
+      if (p?.block && this.blocks.focus(p.block)) {
+        this.setView("blocks");
+        return;
+      }
+    }
     const err = this._syntax?.[0] || this._startError;
     if (!err) return;
     if (err.script && err.script !== this.file?.name) {
@@ -299,7 +478,7 @@ export class Editor {
   }
 
   _showStartError(text, data) {
-    this._startError = data && data.line ? data : null;
+    this._startError = data && (data.line || data.block) ? data : null;
     const el = $("match-error");
     el.hidden = !text;
     el.textContent = text ? `${text}${this._startError ? " — нажмите, чтобы перейти к строке" : ""}` : "";
@@ -310,6 +489,15 @@ export class Editor {
   async start() {
     if (!this.file) return;
     this._showStartError(null);
+    if (this.mode === "blocks") {
+      // Проверка по порядку (DECISIONS №56): сначала блоки, потом — ast на сервере.
+      this._regenerate();
+      if (this.gen.errors.length) {
+        this._showStartError(`В блоках есть ошибки: ${this.gen.errors[0].message}`, { block: this.gen.errors[0].block });
+        this._jumpToError();
+        return;
+      }
+    }
     if (this.dirty) {
       const ok = await this.save();
       if (!ok) return;
@@ -555,6 +743,7 @@ export class Editor {
     drag($("ed-split"), (e) => {
       const w = Math.min(Math.max(e.clientX, 320), window.innerWidth - 360);
       root.setProperty("--ew", `${w}px`);
+      this.blocks?.resize();
     });
     drag($("dock-split"), (e) => {
       const h = Math.min(Math.max(window.innerHeight - e.clientY, 160), window.innerHeight - 200);

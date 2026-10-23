@@ -1,0 +1,729 @@
+{
+ "format": 1,
+ "mode": "blocks",
+ "workspace": {
+  "blocks": {
+   "languageVersion": 0,
+   "blocks": [
+    {
+     "type": "bees_program_bee",
+     "id": "prog_forager",
+     "x": 20,
+     "y": 20,
+     "fields": {
+      "KIND": "forager"
+     },
+     "inputs": {
+      "DO": {
+       "block": {
+        "type": "controls_if",
+        "id": "if_in_hive",
+        "extraState": {
+         "hasElse": true
+        },
+        "inputs": {
+         "IF0": {
+          "block": {
+           "type": "bees_Me_in_hive",
+           "id": "in_hive"
+          }
+         },
+         "DO0": {
+          "block": {
+           "type": "procedures_callnoreturn",
+           "id": "call_rest",
+           "extraState": {
+            "name": "отдых_дома",
+            "params": []
+           }
+          }
+         },
+         "ELSE": {
+          "block": {
+           "type": "variables_set",
+           "id": "set_flower",
+           "fields": {
+            "VAR": {
+             "id": "var_flower"
+            }
+           },
+           "inputs": {
+            "VALUE": {
+             "block": {
+              "type": "bees_Sensors_nearest_flower__full",
+              "id": "nearest_flower",
+              "inputs": {
+               "min_nectar": {
+                "block": {
+                 "type": "math_number",
+                 "id": "num_min_nectar",
+                 "fields": {
+                  "NUM": 0.3
+                 }
+                }
+               }
+              }
+             }
+            }
+           },
+           "next": {
+            "block": {
+             "type": "controls_if",
+             "id": "if_flower",
+             "extraState": {
+              "hasElse": true
+             },
+             "inputs": {
+              "IF0": {
+               "block": {
+                "type": "logic_compare",
+                "id": "flower_seen",
+                "fields": {
+                 "OP": "NEQ"
+                },
+                "inputs": {
+                 "A": {
+                  "block": {
+                   "type": "variables_get",
+                   "id": "get_flower",
+                   "fields": {
+                    "VAR": {
+                     "id": "var_flower"
+                    }
+                   }
+                  }
+                 },
+                 "B": {
+                  "block": {
+                   "type": "logic_null",
+                   "id": "null_flower"
+                  }
+                 }
+                }
+               }
+              },
+              "DO0": {
+               "block": {
+                "type": "procedures_callnoreturn",
+                "id": "call_trip",
+                "extraState": {
+                 "name": "рейс",
+                 "params": [
+                  "цветок"
+                 ]
+                },
+                "inputs": {
+                 "ARG0": {
+                  "block": {
+                   "type": "variables_get",
+                   "id": "get_flower_arg",
+                   "fields": {
+                    "VAR": {
+                     "id": "var_flower"
+                    }
+                   }
+                  }
+                 }
+                }
+               }
+              },
+              "ELSE": {
+               "block": {
+                "type": "bees_Bee_fly_to",
+                "id": "fly_search",
+                "fields": {
+                 "WAIT": true
+                },
+                "inputs": {
+                 "x": {
+                  "block": {
+                   "type": "math_arithmetic",
+                   "id": "search_x",
+                   "fields": {
+                    "OP": "ADD"
+                   },
+                   "inputs": {
+                    "A": {
+                     "block": {
+                      "type": "bees_Vec_x",
+                      "id": "home_x",
+                      "inputs": {
+                       "obj": {
+                        "block": {
+                         "type": "bees_Home_pos",
+                         "id": "home_pos_x"
+                        }
+                       }
+                      }
+                     }
+                    },
+                    "B": {
+                     "block": {
+                      "type": "math_random_int",
+                      "id": "rand_x",
+                      "inputs": {
+                       "FROM": {
+                        "block": {
+                         "type": "math_number",
+                         "id": "rand_x_from",
+                         "fields": {
+                          "NUM": -40
+                         }
+                        }
+                       },
+                       "TO": {
+                        "block": {
+                         "type": "math_number",
+                         "id": "rand_x_to",
+                         "fields": {
+                          "NUM": 40
+                         }
+                        }
+                       }
+                      }
+                     }
+                    }
+                   }
+                  }
+                 },
+                 "y": {
+                  "block": {
+                   "type": "math_arithmetic",
+                   "id": "search_y",
+                   "fields": {
+                    "OP": "ADD"
+                   },
+                   "inputs": {
+                    "A": {
+                     "block": {
+                      "type": "bees_Vec_y",
+                      "id": "home_y",
+                      "inputs": {
+                       "obj": {
+                        "block": {
+                         "type": "bees_Home_pos",
+                         "id": "home_pos_y"
+                        }
+                       }
+                      }
+                     }
+                    },
+                    "B": {
+                     "block": {
+                      "type": "math_random_int",
+                      "id": "rand_y",
+                      "inputs": {
+                       "FROM": {
+                        "block": {
+                         "type": "math_number",
+                         "id": "rand_y_from",
+                         "fields": {
+                          "NUM": -40
+                         }
+                        }
+                       },
+                       "TO": {
+                        "block": {
+                         "type": "math_number",
+                         "id": "rand_y_to",
+                         "fields": {
+                          "NUM": 40
+                         }
+                        }
+                       }
+                      }
+                     }
+                    }
+                   }
+                  }
+                 }
+                }
+               }
+              }
+             }
+            }
+           }
+          }
+         }
+        }
+       }
+      }
+     }
+    },
+    {
+     "type": "procedures_defnoreturn",
+     "id": "def_trip",
+     "x": 620,
+     "y": 20,
+     "extraState": {
+      "params": [
+       {
+        "name": "цветок",
+        "id": "var_flower"
+       }
+      ]
+     },
+     "fields": {
+      "NAME": "рейс"
+     },
+     "inputs": {
+      "STACK": {
+       "block": {
+        "type": "bees_Bee_fly_to",
+        "id": "fly_to_flower",
+        "fields": {
+         "WAIT": true
+        },
+        "inputs": {
+         "x": {
+          "block": {
+           "type": "bees_Vec_x",
+           "id": "flower_x",
+           "inputs": {
+            "obj": {
+             "block": {
+              "type": "bees_Flower_pos",
+              "id": "flower_pos_x",
+              "inputs": {
+               "obj": {
+                "block": {
+                 "type": "variables_get",
+                 "id": "get_trip_flower_x",
+                 "fields": {
+                  "VAR": {
+                   "id": "var_flower"
+                  }
+                 }
+                }
+               }
+              }
+             }
+            }
+           }
+          }
+         },
+         "y": {
+          "block": {
+           "type": "bees_Vec_y",
+           "id": "flower_y",
+           "inputs": {
+            "obj": {
+             "block": {
+              "type": "bees_Flower_pos",
+              "id": "flower_pos_y",
+              "inputs": {
+               "obj": {
+                "block": {
+                 "type": "variables_get",
+                 "id": "get_trip_flower_y",
+                 "fields": {
+                  "VAR": {
+                   "id": "var_flower"
+                  }
+                 }
+                }
+               }
+              }
+             }
+            }
+           }
+          }
+         }
+        },
+        "next": {
+         "block": {
+          "type": "bees_Forager_collect",
+          "id": "collect",
+          "fields": {
+           "WAIT": true
+          },
+          "inputs": {
+           "flower": {
+            "block": {
+             "type": "variables_get",
+             "id": "get_trip_flower",
+             "fields": {
+              "VAR": {
+               "id": "var_flower"
+              }
+             }
+            }
+           }
+          },
+          "next": {
+           "block": {
+            "type": "text_print",
+            "id": "print_cargo",
+            "inputs": {
+             "TEXT": {
+              "block": {
+               "type": "text_join",
+               "id": "cargo_text",
+               "extraState": {
+                "itemCount": 2
+               },
+               "inputs": {
+                "ADD0": {
+                 "block": {
+                  "type": "text",
+                  "id": "cargo_label",
+                  "fields": {
+                   "TEXT": "набрала нектара: "
+                  }
+                 }
+                },
+                "ADD1": {
+                 "block": {
+                  "type": "bees_Me_cargo",
+                  "id": "cargo"
+                 }
+                }
+               }
+              }
+             }
+            },
+            "next": {
+             "block": {
+              "type": "bees_Bee_go_home",
+              "id": "go_home",
+              "fields": {
+               "WAIT": true
+              }
+             }
+            }
+           }
+          }
+         }
+        }
+       }
+      }
+     }
+    },
+    {
+     "type": "procedures_defnoreturn",
+     "id": "def_rest",
+     "x": 620,
+     "y": 330,
+     "fields": {
+      "NAME": "отдых_дома"
+     },
+     "inputs": {
+      "STACK": {
+       "block": {
+        "type": "controls_if",
+        "id": "if_cargo",
+        "inputs": {
+         "IF0": {
+          "block": {
+           "type": "logic_compare",
+           "id": "has_cargo",
+           "fields": {
+            "OP": "GT"
+           },
+           "inputs": {
+            "A": {
+             "block": {
+              "type": "bees_Me_cargo",
+              "id": "cargo_home"
+             }
+            },
+            "B": {
+             "block": {
+              "type": "math_number",
+              "id": "num_zero",
+              "fields": {
+               "NUM": 0
+              }
+             }
+            }
+           }
+          }
+         },
+         "DO0": {
+          "block": {
+           "type": "bees_Forager_unload",
+           "id": "unload",
+           "fields": {
+            "WAIT": true
+           }
+          }
+         }
+        },
+        "next": {
+         "block": {
+          "type": "controls_whileUntil",
+          "id": "while_refuel",
+          "fields": {
+           "MODE": "WHILE"
+          },
+          "inputs": {
+           "BOOL": {
+            "block": {
+             "type": "logic_compare",
+             "id": "low_energy",
+             "fields": {
+              "OP": "LT"
+             },
+             "inputs": {
+              "A": {
+               "block": {
+                "type": "bees_Me_energy_percent",
+                "id": "energy"
+               }
+              },
+              "B": {
+               "block": {
+                "type": "math_number",
+                "id": "num_90",
+                "fields": {
+                 "NUM": 90
+                }
+               }
+              }
+             }
+            }
+           },
+           "DO": {
+            "block": {
+             "type": "bees_wait",
+             "id": "wait_tick"
+            }
+           }
+          },
+          "next": {
+           "block": {
+            "type": "bees_Bee_leave_hive",
+            "id": "leave_hive",
+            "fields": {
+             "WAIT": true
+            }
+           }
+          }
+         }
+        }
+       }
+      }
+     }
+    },
+    {
+     "type": "bees_program_bee",
+     "id": "prog_house",
+     "x": 20,
+     "y": 520,
+     "fields": {
+      "KIND": "house"
+     },
+     "inputs": {
+      "DO": {
+       "block": {
+        "type": "controls_if",
+        "id": "if_house",
+        "extraState": {
+         "elseIfCount": 1,
+         "hasElse": true
+        },
+        "inputs": {
+         "IF0": {
+          "block": {
+           "type": "logic_compare",
+           "id": "has_nectar",
+           "fields": {
+            "OP": "GT"
+           },
+           "inputs": {
+            "A": {
+             "block": {
+              "type": "bees_HouseSensors_hive_nectar",
+              "id": "hive_nectar"
+             }
+            },
+            "B": {
+             "block": {
+              "type": "math_number",
+              "id": "num_nectar_min",
+              "fields": {
+               "NUM": 0.05
+              }
+             }
+            }
+           }
+          }
+         },
+         "DO0": {
+          "block": {
+           "type": "bees_HouseBee_process",
+           "id": "process",
+           "fields": {
+            "WAIT": false
+           }
+          }
+         },
+         "IF1": {
+          "block": {
+           "type": "logic_compare",
+           "id": "has_larvae",
+           "fields": {
+            "OP": "GT"
+           },
+           "inputs": {
+            "A": {
+             "block": {
+              "type": "lists_length",
+              "id": "queue_len",
+              "inputs": {
+               "VALUE": {
+                "block": {
+                 "type": "bees_HouseSensors_breeding_queue",
+                 "id": "breeding_queue"
+                }
+               }
+              }
+             }
+            },
+            "B": {
+             "block": {
+              "type": "math_number",
+              "id": "num_no_larvae",
+              "fields": {
+               "NUM": 0
+              }
+             }
+            }
+           }
+          }
+         },
+         "DO1": {
+          "block": {
+           "type": "bees_HouseBee_nurse",
+           "id": "nurse",
+           "fields": {
+            "WAIT": false
+           }
+          }
+         },
+         "ELSE": {
+          "block": {
+           "type": "bees_HouseBee_rest",
+           "id": "rest",
+           "fields": {
+            "WAIT": false
+           }
+          }
+         }
+        }
+       }
+      }
+     }
+    },
+    {
+     "type": "bees_program_hive",
+     "id": "prog_hive",
+     "x": 20,
+     "y": 760,
+     "inputs": {
+      "DO": {
+       "block": {
+        "type": "controls_if",
+        "id": "if_honey",
+        "inputs": {
+         "IF0": {
+          "block": {
+           "type": "logic_compare",
+           "id": "enough_honey",
+           "fields": {
+            "OP": "GT"
+           },
+           "inputs": {
+            "A": {
+             "block": {
+              "type": "bees_Hive_honey",
+              "id": "honey"
+             }
+            },
+            "B": {
+             "block": {
+              "type": "math_arithmetic",
+              "id": "honey_needed",
+              "fields": {
+               "OP": "ADD"
+              },
+              "inputs": {
+               "A": {
+                "block": {
+                 "type": "math_number",
+                 "id": "honey_reserve",
+                 "fields": {
+                  "NUM": 24
+                 }
+                }
+               },
+               "B": {
+                "block": {
+                 "type": "bees_dict_get",
+                 "id": "forager_cost",
+                 "inputs": {
+                  "dict": {
+                   "block": {
+                    "type": "bees_Hive_costs",
+                    "id": "costs"
+                   }
+                  },
+                  "key": {
+                   "block": {
+                    "type": "bees_literal_Kind",
+                    "id": "kind_forager_cost",
+                    "fields": {
+                     "VALUE": "forager"
+                    }
+                   }
+                  }
+                 }
+                }
+               }
+              }
+             }
+            }
+           }
+          }
+         },
+         "DO0": {
+          "block": {
+           "type": "bees_Hive_breed",
+           "id": "breed_forager",
+           "fields": {
+            "kind": "forager"
+           }
+          }
+         }
+        },
+        "next": {
+         "block": {
+          "type": "bees_wait",
+          "id": "hive_wait",
+          "inputs": {
+           "seconds": {
+            "block": {
+             "type": "math_number",
+             "id": "num_20",
+             "fields": {
+              "NUM": 20
+             }
+            }
+           }
+          }
+         }
+        }
+       }
+      }
+     }
+    }
+   ]
+  },
+  "variables": [
+   {
+    "name": "цветок",
+    "id": "var_flower"
+   }
+  ]
+ }
+}

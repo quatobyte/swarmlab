@@ -1,0 +1,40 @@
+{
+ "format": 1,
+ "mode": "blocks",
+ "workspace": {
+  "blocks": {
+   "languageVersion": 0,
+   "blocks": [
+    {
+     "type": "bees_program_bee",
+     "id": "prog_scout",
+     "x": 10,
+     "y": 10,
+     "fields": {
+      "KIND": "scout"
+     },
+     "inputs": {
+      "DO": {
+       "block": {
+        "type": "bees_Bee_hover",
+        "id": "hover_ok",
+        "fields": {
+         "WAIT": false
+        },
+        "next": {
+         "block": {
+          "type": "bees_python_line",
+          "id": "bad_line",
+          "fields": {
+           "CODE": "print(s.time"
+          }
+         }
+        }
+       }
+      }
+     }
+    }
+   ]
+  }
+ }
+}

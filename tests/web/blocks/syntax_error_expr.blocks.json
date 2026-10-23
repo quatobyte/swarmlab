@@ -1,0 +1,45 @@
+{
+ "format": 1,
+ "mode": "blocks",
+ "workspace": {
+  "blocks": {
+   "languageVersion": 0,
+   "blocks": [
+    {
+     "type": "bees_program_hive",
+     "id": "prog_hive",
+     "x": 10,
+     "y": 10,
+     "inputs": {
+      "DO": {
+       "block": {
+        "type": "controls_if",
+        "id": "if_bad",
+        "inputs": {
+         "IF0": {
+          "block": {
+           "type": "bees_python_expr",
+           "id": "bad_expr",
+           "fields": {
+            "CODE": "hive.honey >"
+           }
+          }
+         },
+         "DO0": {
+          "block": {
+           "type": "bees_Hive_breed",
+           "id": "breed",
+           "fields": {
+            "kind": "forager"
+           }
+          }
+         }
+        }
+       }
+      }
+     }
+    }
+   ]
+  }
+ }
+}

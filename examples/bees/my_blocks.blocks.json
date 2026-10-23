@@ -1,0 +1,26 @@
+{
+ "format": 1,
+ "mode": "blocks",
+ "workspace": {
+  "blocks": {
+   "languageVersion": 0,
+   "blocks": [
+    {
+     "type": "bees_program_bee",
+     "id": "start_forager",
+     "x": 30,
+     "y": 30,
+     "fields": {
+      "KIND": "forager"
+     }
+    },
+    {
+     "type": "bees_program_hive",
+     "id": "start_hive",
+     "x": 30,
+     "y": 260
+    }
+   ]
+  }
+ }
+}

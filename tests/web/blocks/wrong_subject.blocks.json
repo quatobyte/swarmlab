@@ -1,0 +1,95 @@
+{
+ "format": 1,
+ "mode": "blocks",
+ "workspace": {
+  "blocks": {
+   "languageVersion": 0,
+   "blocks": [
+    {
+     "type": "bees_program_bee",
+     "id": "prog_scout",
+     "x": 10,
+     "y": 10,
+     "fields": {
+      "KIND": "scout"
+     },
+     "inputs": {
+      "DO": {
+       "block": {
+        "type": "bees_Forager_collect",
+        "id": "scout_collect",
+        "fields": {
+         "WAIT": true
+        },
+        "inputs": {
+         "flower": {
+          "block": {
+           "type": "bees_Sensors_nearest_flower",
+           "id": "nf"
+          }
+         }
+        },
+        "next": {
+         "block": {
+          "type": "procedures_callnoreturn",
+          "id": "scout_calls_unload",
+          "extraState": {
+           "name": "выгрузка",
+           "params": []
+          }
+         }
+        }
+       }
+      }
+     }
+    },
+    {
+     "type": "procedures_defnoreturn",
+     "id": "def_unload",
+     "x": 400,
+     "y": 10,
+     "fields": {
+      "NAME": "выгрузка"
+     },
+     "inputs": {
+      "STACK": {
+       "block": {
+        "type": "bees_Forager_unload",
+        "id": "unload",
+        "fields": {
+         "WAIT": true
+        }
+       }
+      }
+     }
+    },
+    {
+     "type": "bees_program_hive",
+     "id": "prog_hive",
+     "x": 10,
+     "y": 300,
+     "inputs": {
+      "DO": {
+       "block": {
+        "type": "bees_Bee_go_home",
+        "id": "hive_go_home",
+        "fields": {
+         "WAIT": false
+        },
+        "next": {
+         "block": {
+          "type": "bees_Bee_fly_to",
+          "id": "empty_fly",
+          "fields": {
+           "WAIT": false
+          }
+         }
+        }
+       }
+      }
+     }
+    }
+   ]
+  }
+ }
+}

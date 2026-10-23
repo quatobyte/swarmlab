@@ -55,3 +55,7 @@ ignore = [
     "RUF002",
     "RUF003",
 ]
+
+[tool.ruff.lint.per-file-ignores]
+# Сгенерирован из блоков (M7b): длину строк задаёт генератор, а не человек.
+"examples/bees/example_blocks.py" = ["E501"]

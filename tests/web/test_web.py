@@ -26,6 +26,10 @@ _REMOTE = re.compile(
 )
 
 
+#: Пространства имён XML/SVG выглядят как адреса, но браузер по ним не ходит.
+_XML_NAMESPACE = "www.w3.org/"
+
+
 def test_web_loads_nothing_from_network():
     """Демо может быть без интернета: ни один импорт, скрипт или стиль не идёт по сети."""
     offenders = []
@@ -34,6 +38,8 @@ def test_web_loads_nothing_from_network():
             continue
         text = path.read_text(encoding="utf-8")
         for m in _REMOTE.finditer(text):
+            if text.startswith(_XML_NAMESPACE, m.end()):
+                continue  # xmlns="http://www.w3.org/2000/svg" (Blockly) — имя, а не загрузка
             offenders.append(f"{path.relative_to(ROOT)}: {text[m.start():m.end() + 30]!r}")
     assert offenders == []
 
@@ -50,6 +56,22 @@ def test_vendor_files_and_versions_recorded():
     assert "0.186.1" in versions and "0.1.1" in versions
     html = (WEB / "index.html").read_text(encoding="utf-8")
     assert '"three": "./vendor/three/three.module.js"' in html
+
+
+def test_blockly_vendored_offline():
+    """M7b: Blockly — vendored, версия записана, подключён обычными <script>, медиа — свои."""
+    vendor = WEB / "vendor"
+    versions = (vendor / "VERSIONS.md").read_text(encoding="utf-8")
+    for rel in ("blockly/blockly_compressed.js", "blockly/blocks_compressed.js",
+                "blockly/msg/ru.js", "blockly/media/sprites.svg", "blockly/LICENSE"):
+        assert (vendor / rel).is_file(), rel
+    assert "| Blockly | 13.4.0 |" in versions and "blockly-13.4.0.tgz" in versions
+    html = (WEB / "index.html").read_text(encoding="utf-8")
+    for rel in ("blockly_compressed.js", "blocks_compressed.js", "msg/ru.js"):
+        assert f'<script src="vendor/blockly/{rel}"></script>' in html
+    # Без media Blockly пошёл бы за картинками на static.blockly.com.
+    editor = (WEB / "js/modules/bees/blocks_editor.js").read_text(encoding="utf-8")
+    assert 'media: "vendor/blockly/media/"' in editor
 
 
 @pytest.fixture(scope="module")

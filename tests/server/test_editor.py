@@ -174,6 +174,30 @@ def _airborne_after(packets, t_min):
     return max(len(f["arrays"]["bee_uid"]) for f in frames)
 
 
+def test_blocks_over_http_error_points_to_block(server):
+    """M7b: файл блоков через PUT/GET; ошибка ast — с id блока и в проверке, и при запуске."""
+    blocks = {"format": 1, "mode": "blocks", "workspace": {"blocks": {"blocks": []}}}
+    text = "def hive_step(hive):  # block:prog\n    print(hive.time  # block:bad_line\n"
+    code, res = server.json("PUT", "/api/scripts/my_blocks.py", {"text": text, "blocks": blocks})
+    assert code == 200 and not res["ok"] and res["mode"] == "blocks"
+    assert res["errors"][0]["block"] == "bad_line"
+    code, data = server.json("GET", "/api/scripts/my_blocks.py")
+    assert code == 200 and data["blocks"] == blocks
+    code, res = server.json("POST", "/api/scripts/check", {"text": text})
+    assert res["errors"][0]["block"] == "bad_line" and res["errors"][0]["line"] == 2
+    code, err = _start_with_script(server, "my_blocks.py", duration=2)
+    assert code == 400 and err["detail"]["block"] == "bad_line"
+    # Переход в Python: дальше блоки этот файл не пишут.
+    to_python = {**blocks, "mode": "python"}
+    server.json("PUT", "/api/scripts/my_blocks.py", {"text": text, "blocks": to_python})
+    code, err = server.json("PUT", "/api/scripts/my_blocks.py", {"text": text, "blocks": blocks})
+    assert code == 409
+    code, items = server.json("GET", "/api/scripts")
+    by_name = {s["name"]: s for s in items}
+    assert by_name["my_blocks.py"]["mode"] == "python"
+    assert by_name["example_blocks.py"]["mode"] == "blocks"
+
+
 def test_edit_restart_changes_behaviour(server):
     """Правка кода → перезапуск → поведение пчёл меняется (критерий M5)."""
     server.json("PUT", "/api/scripts/my_bees.py", {"text": SCRIPT_STAY})

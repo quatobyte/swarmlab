@@ -387,3 +387,8 @@ export class MatchPanel {
     delete this.choice["0"]; // первый улей — всегда файл из редактора
   }
 }
+
+// ------------------------------------------------------------------ блоки (M7b)
+
+export { BlocksEditor, starterWorkspace } from "./blocks_editor.js";
+export { blockAtLine, generate as generateBlocks } from "./blocks_gen.js";
