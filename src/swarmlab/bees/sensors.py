@@ -15,7 +15,6 @@
  "home": {"pos", "dir", "dist"}, "ground_z", "airspeed", "weather",
  "flowers": [{"id", "rel_pos", "nectar"(, "spider")}],
  "bees": [{"id", "rel_pos", "vel", "kind", "team"}],
- "enemies": [{"id", "kind", "rel_pos", "vel"}],
  "obstacles": [{"rel_pos", "radius"}],
  "messages": [{"from_id", "rel_pos", "values"}],
  "pheromones": {"values": [3][3][C], "gradient": [C][2]}}
@@ -28,7 +27,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Any
 
 import numpy as np
@@ -59,10 +58,6 @@ class SensorInputs:
     weather: str
     rain: bool
     messages: Delivery
-    #: Живые враги (шершни): uid `(E,)`, позиции и скорости `(E,3)`.
-    enemy_uid: np.ndarray = field(default_factory=lambda: np.zeros(0, np.int64))
-    enemy_pos: np.ndarray = field(default_factory=lambda: np.zeros((0, 3)))
-    enemy_vel: np.ndarray = field(default_factory=lambda: np.zeros((0, 3)))
 
 
 class SensorBuilder:
@@ -90,7 +85,6 @@ class SensorBuilder:
         self.obstacle_grid = UniformGrid(half, params.grid_cell)
         self.obstacle_grid.build(obstacles.xy)
         self._obstacle_r_max = float(obstacles.radius.max()) if len(obstacles) else 0.0
-        self.enemy_grid = UniformGrid(half, params.grid_cell)
 
     def _noisy(self, values: np.ndarray, sigma: float) -> np.ndarray:
         if self.noise is None or sigma == 0 or values.size == 0:
@@ -123,8 +117,6 @@ class SensorBuilder:
         bee_pairs = inp.bee_grid.within(inp.pos, view, exclude_self=True)
         flower_pairs = self.flower_grid.within(inp.pos, view)
         obstacle_pairs = self.obstacle_pairs(inp.pos, view)
-        self.enemy_grid.build(inp.enemy_pos)
-        enemy_pairs = self.enemy_grid.within(inp.pos, view)
         pher_values, pher_grad = self.pheromones.sample(hive, inp.pos)
 
         # Шум сенсоров — в фиксированном порядке массивов.
@@ -134,8 +126,6 @@ class SensorBuilder:
         bee_vel = self._noisy(inp.vel[bee_pairs.point], p.noise_vel_sigma)
         flower_rel = self._noisy(flower_pairs.delta, p.noise_pos_sigma)
         obstacle_rel = self._noisy(obstacle_pairs.delta, p.noise_pos_sigma)
-        enemy_rel = self._noisy(enemy_pairs.delta, p.noise_pos_sigma)
-        enemy_vel = self._noisy(inp.enemy_vel[enemy_pairs.point], p.noise_vel_sigma)
 
         entrance = self.world.hive_entrance[hive]
         to_home = entrance - inp.pos
@@ -178,16 +168,6 @@ class SensorBuilder:
                 strict=True,
             )
         ]
-        enemy_rows = [
-            {"id": i, "kind": "hornet", "rel_pos": r, "vel": v}
-            for i, r, v in zip(
-                inp.enemy_uid[enemy_pairs.point].tolist(),
-                enemy_rel.tolist(),
-                enemy_vel.tolist(),
-                strict=True,
-            )
-        ]
-        eb = _bounds(enemy_pairs.query, k)
         inbox = _messages_by_receiver(inp.messages, self._pos_of(inp))
         bb = _bounds(bee_pairs.query, k)
         fb = _bounds(flower_pairs.query, k)
@@ -237,7 +217,6 @@ class SensorBuilder:
                 "weather": inp.weather,
                 "flowers": flower_rows[fb[i] : fb[i + 1]],
                 "bees": bee_rows[bb[i] : bb[i + 1]],
-                "enemies": enemy_rows[eb[i] : eb[i + 1]],
                 "obstacles": obstacle_rows[ob[i] : ob[i + 1]],
                 "messages": inbox.get(slot, []),
                 "pheromones": {"values": pv, "gradient": pg},
@@ -279,7 +258,6 @@ class SensorBuilder:
             "weather": inp.weather,
             "flowers": [],
             "bees": [],
-            "enemies": [],
             "obstacles": [],
             "messages": [],
             "pheromones": {"values": values[0].tolist(), "gradient": grad[0].tolist()},

@@ -1,13 +1,14 @@
-"""Простой улей: сборщики носят нектар, домашние делают мёд, улей выводит сборщиков.
+"""Простой улей: сборщики носят нектар, улей выводит сборщиков.
 
-Разведчики и охранники здесь не переопределены — они ведут себя по умолчанию.
+Разведчики здесь не переопределены — они ведут себя по умолчанию. Домашние пчёлы
+работают сами: перерабатывают нектар в мёд и нянчат личинки.
 Запуск:  swarmlab run configs/matches/m2_economy.yaml --headless
 """
 
 import math
 import random
 
-from swarmlab.bees.api import Forager, Hive, HouseBee, HouseSensors, Sensors, Vec
+from swarmlab.bees.api import Forager, Hive, Sensors, Vec
 
 #: Не тратить мёд на выведение, пока его меньше — запас на заправку и еду.
 HONEY_RESERVE = 24.0
@@ -19,16 +20,12 @@ class BasicForager(Forager):
     def step(self, s: Sensors):
         me = s.me
 
-        # В улье: выгрузить нектар, заправиться и снова лететь.
-        if me.in_hive:
-            if me.cargo > 0:
-                self.unload()
-            elif me.energy_percent > 80:
-                self.leave_hive()
+        # В улье нектар уже выгружен; ждём, пока заправимся.
+        if me.in_hive and me.energy_percent <= 80:
             return
 
         # Полный груз или мало энергии — домой.
-        if me.is_full or me.energy_percent < 30:
+        if not me.in_hive and (me.is_full or me.energy_percent < 30):
             self.go_home()
             return
 
@@ -38,7 +35,7 @@ class BasicForager(Forager):
             self.collect(flower)
             return
 
-        # Цветов не видно — летим в случайную точку вокруг улья.
+        # Цветов не видно — летим в случайную точку вокруг улья (из улья — сразу вылет).
         target = getattr(self, "search", None)
         if target is None or me.pos.dist_xy(target) < 3.0:
             angle = random.uniform(0, 2 * math.pi)
@@ -46,16 +43,6 @@ class BasicForager(Forager):
             target = s.home.pos + Vec(math.cos(angle), math.sin(angle)) * dist
             self.search = target
         self.fly_to(target.x, target.y)
-
-
-class BasicHouse(HouseBee):
-    """Есть нектар — перерабатываем, иначе нянчим личинки."""
-
-    def step(self, s: HouseSensors):
-        if s.hive_nectar > 0.05:
-            self.process()
-        else:
-            self.nurse()
 
 
 def hive_step(hive: Hive):

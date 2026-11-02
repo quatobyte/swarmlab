@@ -2,12 +2,13 @@
 
 Раннер присылает для каждой пчелы, которая что-то решила, словарь
 `{"move": [op, *args] | None, "signal": [числа] | None, "marks": [[канал, сила], …]}`
-и для улья `{"breed": [[kind, n], …], "cancel": [kind, …], "signal": […]}`.
+и для улья `{"breed": [[kind, n], …], "signal": […]}`. Домашние пчёлы команд не
+получают — они работают сами (`economy.py`, DECISIONS №82).
 API игрока проверяет аргументы в момент вызова; здесь — повторная защитная
 проверка (раннер — чужой процесс): битая команда отбрасывается и считается.
 
 Режим движения пчелы хранится массивами по слотам (SoA). Режимы, которым нужна
-свежая цель каждый тик (`fly_dir`, `go_home`, `collect`, `intercept`), модуль
+свежая цель каждый тик (`go_home`, `collect`), модуль
 пересчитывает векторно на тике решений.
 
 Команда с полем `"wait": seq` — программа игрока ждёт её выполнения (`step()` с
@@ -26,30 +27,19 @@ import numpy as np
 from swarmlab.bees.params import BEE_KINDS, FLYING_KINDS
 
 #: Режимы движения слота.
-HOVER, FLY_TO, FLY_DIR, GO_HOME, COLLECT, INTERCEPT, THRUST = range(7)
-MODE_NAMES = ("hover", "fly_to", "fly_dir", "go_home", "collect", "intercept", "thrust")
+HOVER, FLY_TO, GO_HOME, COLLECT = range(4)
 
 _FORAGER = FLYING_KINDS.index("forager")
-_GUARD = FLYING_KINDS.index("guard")
 #: Сколько аргументов у операции и кому она разрешена (None — всем летающим).
 _FLYING_OPS: dict[str, tuple[int, int | None]] = {
     "fly_to": (5, None),
-    "fly_dir": (4, None),
     "hover": (0, None),
     "go_home": (0, None),
-    "leave_hive": (0, None),
     "collect": (1, _FORAGER),
-    "unload": (0, _FORAGER),
-    "intercept": (1, _GUARD),
-    "thrust": (3, None),
 }
-HOUSE_OPS = ("rest", "process", "nurse")
 #: Условие выполнения команды, которую ждёт программа игрока (DECISIONS №61).
-ARRIVE, ENTER, EXIT, COLLECTED, LOST, NOW = range(6)
-WAIT_COND = {
-    "fly_to": ARRIVE, "hover": ARRIVE, "go_home": ENTER, "leave_hive": EXIT,
-    "collect": COLLECTED, "intercept": LOST, "unload": NOW,
-}
+ARRIVE, ENTER, COLLECTED = range(3)
+WAIT_COND = {"fly_to": ARRIVE, "hover": ARRIVE, "go_home": ENTER, "collect": COLLECTED}
 #: Не больше стольких `mark` за тик от одной пчелы.
 MAX_MARKS_PER_TICK = 8
 
@@ -59,12 +49,8 @@ class Control:
 
     def __init__(self, n: int) -> None:
         self.mode = np.full(n, HOVER, dtype=np.int8)
-        #: Цель режима: номер цветка (`collect`) или uid цели (`intercept`).
+        #: Цель режима: номер цветка (`collect`).
         self.target = np.full(n, -1, dtype=np.int64)
-        #: Направление `fly_dir` (длина 1).
-        self.direction = np.zeros((n, 3))
-        #: Скорость `fly_dir`/`intercept`; NaN — крейсерская.
-        self.speed = np.full(n, np.nan)
         #: Пчела в улье хочет вылететь.
         self.exit_pending = np.zeros(n, dtype=bool)
         #: Ожидание программы игрока: номер (0 — не ждёт), условие, начало, состояние
@@ -77,8 +63,6 @@ class Control:
     def reset(self, slots: np.ndarray) -> None:
         self.mode[slots] = HOVER
         self.target[slots] = -1
-        self.direction[slots] = 0.0
-        self.speed[slots] = np.nan
         self.exit_pending[slots] = False
         self.wait_seq[slots] = 0
         self.wait_state[slots] = 0
@@ -90,12 +74,9 @@ class Parsed:
 
     #: op → список (слот, аргументы…); аргументы уже проверены и приведены к float.
     moves: dict[str, list[tuple[Any, ...]]] = field(default_factory=dict)
-    #: задача домашней → слоты домашних пчёл.
-    house: dict[str, list[int]] = field(default_factory=dict)
     signals: list[tuple[int, list[float]]] = field(default_factory=list)
     marks: list[tuple[int, int, float]] = field(default_factory=list)
     breed: list[tuple[str, int]] = field(default_factory=list)
-    cancel: list[str] = field(default_factory=list)
     hive_signal: list[float] | None = None
     #: Команды, выполнения которых ждёт программа: (слот, seq, op, разобрана ли команда).
     waits: list[tuple[int, int, str, bool]] = field(default_factory=list)
@@ -122,12 +103,17 @@ def _values(v: Any, limit: int) -> list[float]:
 
 
 def _wait_seq(cmd: dict[str, Any]) -> int:
-    """Номер ожидания команды (0 — не ждут, команда без движения или битый номер)."""
+    """Номер ожидания команды (0 — не ждут, команда без движения или битый номер).
+
+    Ждать можно любую команду движения: у всех есть условие выполнения (`WAIT_COND`).
+    Неизвестная команда (в том числе удалённая, DECISIONS №82) с ожиданием не разберётся
+    и сразу получит «не вышло» — иначе раннер слал бы её снова каждый тик.
+    """
     seq = cmd.get("wait")
     if isinstance(seq, bool) or not isinstance(seq, int) or seq <= 0:
         return 0
     move = cmd.get("move")
-    return seq if isinstance(move, list) and move and move[0] in WAIT_COND else 0
+    return seq if isinstance(move, list) and move else 0
 
 
 def parse(
@@ -136,12 +122,10 @@ def parse(
     *,
     flying: dict[int, int],
     flying_kind: np.ndarray,
-    house: dict[int, int],
-    advanced_control: bool,
     max_values: int,
     channels: int,
 ) -> Parsed:
-    """Разобрать команды улья. `flying`/`house` — uid → слот живых пчёл этого улья."""
+    """Разобрать команды улья. `flying` — uid → слот живых летающих пчёл этого улья."""
     out = Parsed()
     for uid in sorted(commands):  # фиксированный порядок — детерминизм
         cmd = commands[uid]
@@ -150,20 +134,13 @@ def parse(
                 slot = flying[uid]
                 wait = _wait_seq(cmd)
                 try:
-                    _parse_flying(out, slot, int(flying_kind[slot]), cmd, advanced_control,
-                                  max_values, channels)
+                    _parse_flying(out, slot, int(flying_kind[slot]), cmd, max_values, channels)
                 except (TypeError, ValueError, KeyError, IndexError):
                     if wait:  # битая команда, которую ждут: сразу «не вышло»
                         out.waits.append((slot, wait, "", False))
                     raise
                 if wait:
                     out.waits.append((slot, wait, cmd["move"][0], True))
-            elif uid in house:
-                move = cmd.get("move")
-                if move is not None:
-                    if not isinstance(move, list) or len(move) != 1 or move[0] not in HOUSE_OPS:
-                        raise ValueError
-                    out.house.setdefault(move[0], []).append(house[uid])
             # Команда погибшей (или чужой) пчеле молча пропускается.
         except (TypeError, ValueError, KeyError, IndexError):
             out.invalid += 1
@@ -174,10 +151,6 @@ def parse(
                 if kind not in BEE_KINDS or isinstance(n, bool) or not isinstance(n, int):
                     raise ValueError
                 out.breed.append((kind, max(0, min(n, 1000))))
-            for kind in team_command.get("cancel") or []:
-                if kind not in BEE_KINDS:
-                    raise ValueError
-                out.cancel.append(kind)
             if team_command.get("signal") is not None:
                 out.hive_signal = _values(team_command["signal"], max_values)
         except (TypeError, ValueError):
@@ -190,7 +163,6 @@ def _parse_flying(
     slot: int,
     kind: int,
     cmd: dict[str, Any],
-    advanced: bool,
     max_values: int,
     channels: int,
 ) -> None:
@@ -202,22 +174,16 @@ def _parse_flying(
         n_args, only = _FLYING_OPS[op]
         if len(args) != n_args or (only is not None and kind != only):
             raise ValueError
-        if op == "thrust" and not advanced:
-            raise ValueError
         if op == "fly_to":
             parsed: tuple[Any, ...] = (
                 _num(args[0]), _num(args[1]), _opt(args[2]), _opt(args[3]), bool(args[4])
             )
-        elif op == "fly_dir":
-            parsed = (_num(args[0]), _num(args[1]), _num(args[2]), _opt(args[3]))
-            if parsed[0] == parsed[1] == parsed[2] == 0.0:
-                raise ValueError
-        elif op in ("collect", "intercept"):
+        elif op == "collect":
             if isinstance(args[0], bool) or not isinstance(args[0], int):
                 raise TypeError
             parsed = (int(args[0]),)
         else:
-            parsed = tuple(_num(a) for a in args)
+            parsed = ()
         out.moves.setdefault(op, []).append((slot, *parsed))
     if cmd.get("signal") is not None:
         out.signals.append((slot, _values(cmd["signal"], max_values)))

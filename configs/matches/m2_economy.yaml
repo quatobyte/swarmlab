@@ -15,7 +15,6 @@ weather:
   initial: clear
 
 enemies:
-  hornets: {enabled: false}
   spiders: {enabled: false}
 
 overrides: {}

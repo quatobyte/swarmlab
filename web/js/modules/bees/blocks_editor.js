@@ -97,7 +97,7 @@ function customDefs() {
   add("bees_dict_set", "lists", (n) => ({ type: "input_value", name: n }), { previousStatement: null, nextStatement: null });
   for (const lit of Object.keys(LITERALS)) {
     const type = `bees_literal_${lit}`;
-    add(type, lit === "Task" ? "house" : lit === "Weather" ? "sense" : "hive", () => ({
+    add(type, lit === "Weather" ? "sense" : "hive", () => ({
       type: "field_dropdown", name: "VALUE", options: Object.entries(LITERALS[lit]).map(([v, ru]) => [ru, v]),
     }), { output: "String" });
   }
@@ -159,9 +159,8 @@ export function toolbox() {
     if (ru.full && ru.full !== ru.label) push(advanced, cat, `${desc.type}__full`);
     if (desc.waitable) push(advanced, cat, desc.type.replace(/^bees_/, "bees_ask_"));
   }
-  for (const lit of ["Kind", "Weather", "Task"]) {
-    push(lit === "Kind" ? beginner : advanced, lit === "Task" ? "house" : lit === "Weather" ? "sense" : "hive",
-      `bees_literal_${lit}`);
+  for (const lit of ["Kind", "Weather"]) {
+    push(lit === "Kind" ? beginner : advanced, lit === "Weather" ? "sense" : "hive", `bees_literal_${lit}`);
   }
   for (const [cat, types] of Object.entries(BUILTIN_BEGINNER)) for (const t of types) push(beginner, cat, t);
   for (const [cat, types] of Object.entries(BUILTIN_ADVANCED)) for (const t of types) push(advanced, cat, t);
@@ -174,7 +173,7 @@ export function toolbox() {
   const category = (cat, contents, id = cat) => ({
     kind: "category", name: CATEGORIES[cat][0], colour: hue(cat), contents, toolboxitemid: id,
   });
-  const order = ["programs", "move", "sense", "objects", "house", "hive", "logic", "loops", "math", "text", "lists"];
+  const order = ["programs", "move", "sense", "talk", "objects", "hive", "logic", "loops", "math", "text", "lists"];
   const contents = [{
     kind: "category", name: SEARCH_RU.category, colour: "#f5b700", custom: SEARCH_CATEGORY,
     toolboxitemid: SEARCH_CATEGORY, hidden: "true",

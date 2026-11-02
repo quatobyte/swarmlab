@@ -39,24 +39,19 @@ def _hints_module() -> Any:
 
 _H = _hints_module()
 
-FLYERS = ["scout", "forager", "guard"]
-EVERYONE = ["scout", "forager", "guard", "house", "hive"]
+FLYERS = ["scout", "forager"]
+EVERYONE = ["scout", "forager", "hive"]
 
 #: Классы, у которых есть блоки: класс → (к чему обращается блок, какие программы его видят,
-#: внутренние базы, чьи члены считаются своими). Шершень и паук — боты, не игрок.
+#: внутренние базы, чьи члены считаются своими). Паук — бот, не игрок.
 CLASSES: dict[str, tuple[str, list[str], tuple[str, ...]]] = {
-    "Bee": ("self", FLYERS, ("_Flyer", "_Agent")),
+    "Bee": ("self", FLYERS, ("_Agent",)),
     "Forager": ("self", ["forager"], ()),
-    "Guard": ("self", ["guard"], ()),
-    "HouseBee": ("self", ["house"], ("_Agent",)),
     "Hive": ("hive", ["hive"], ()),
     "Sensors": ("s", FLYERS, ()),
     "Me": ("s.me", FLYERS, ()),
     "Home": ("s.home", FLYERS, ()),
-    "HouseSensors": ("s", ["house"], ()),
-    "HouseMe": ("s.me", ["house"], ()),
     "Flower": ("obj", EVERYONE, ()),
-    "Enemy": ("obj", EVERYONE, ()),
     "BeeInfo": ("obj", EVERYONE, ()),
     "Obstacle": ("obj", EVERYONE, ()),
     "Message": ("obj", EVERYONE, ()),
@@ -98,7 +93,7 @@ def _check(ann: str | None, classes: set[str]) -> list[str] | None:
             t = "Number"
         elif head == "bool":
             t = "Boolean"
-        elif head in ("str", "Kind", "Weather", "Task"):
+        elif head in ("str", "Kind", "Weather"):
             t = "String"
         elif head in ("list", "tuple"):
             t = "Array"

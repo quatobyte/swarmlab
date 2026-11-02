@@ -30,60 +30,42 @@
          },
          "DO0": {
           "block": {
-           "type": "bees_Forager_unload",
-           "id": "unload",
+           "type": "controls_whileUntil",
+           "id": "while_refuel",
            "fields": {
-            "WAIT": true
+            "MODE": "WHILE"
            },
-           "next": {
-            "block": {
-             "type": "controls_whileUntil",
-             "id": "while_refuel",
-             "fields": {
-              "MODE": "WHILE"
-             },
-             "inputs": {
-              "BOOL": {
-               "block": {
-                "type": "logic_compare",
-                "id": "cmp_energy",
-                "fields": {
-                 "OP": "LT"
-                },
-                "inputs": {
-                 "A": {
-                  "block": {
-                   "type": "bees_Me_energy_percent",
-                   "id": "energy"
-                  }
-                 },
-                 "B": {
-                  "block": {
-                   "type": "math_number",
-                   "id": "n90",
-                   "fields": {
-                    "NUM": 90
-                   }
-                  }
+           "inputs": {
+            "BOOL": {
+             "block": {
+              "type": "logic_compare",
+              "id": "cmp_energy",
+              "fields": {
+               "OP": "LT"
+              },
+              "inputs": {
+               "A": {
+                "block": {
+                 "type": "bees_Me_energy_percent",
+                 "id": "energy"
+                }
+               },
+               "B": {
+                "block": {
+                 "type": "math_number",
+                 "id": "n90",
+                 "fields": {
+                  "NUM": 90
                  }
                 }
                }
-              },
-              "DO": {
-               "block": {
-                "type": "bees_wait",
-                "id": "wait_tick"
-               }
               }
-             },
-             "next": {
-              "block": {
-               "type": "bees_Bee_leave_hive",
-               "id": "leave",
-               "fields": {
-                "WAIT": true
-               }
-              }
+             }
+            },
+            "DO": {
+             "block": {
+              "type": "bees_wait",
+              "id": "wait_tick"
              }
             }
            }

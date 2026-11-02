@@ -26,8 +26,7 @@ from swarmlab.core.sim import Simulation
 #: Частота перерисовки отладочного вьюера, Гц.
 _VIEWER_FPS = 60.0
 #: Эти события печатаются во время показа реплея (рождения, доставки — слишком часты).
-_LOUD_EVENTS = ("weather", "hornet_spawn", "heat_ball", "hornet_death", "hornet_left",
-                "rob", "eliminated")
+_LOUD_EVENTS = ("weather", "eliminated")
 
 
 def main(argv: Sequence[str] | None = None) -> int:
@@ -69,7 +68,7 @@ def _build_parser() -> argparse.ArgumentParser:
         action="append",
         default=[],
         metavar="ПУТЬ=ЗНАЧЕНИЕ",
-        help="переопределить параметр, например --set enemies.hornets.rob=false",
+        help="переопределить параметр, например --set enemies.spiders.enabled=false",
     )
     run.add_argument("--configs", type=Path, help="папка configs/ (по умолчанию — рядом с матчем)")
     run.add_argument(

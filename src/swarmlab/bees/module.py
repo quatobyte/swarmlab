@@ -8,41 +8,28 @@ from typing import TYPE_CHECKING, Any
 import numpy as np
 from pydantic import ValidationError
 
-from swarmlab.bees.autopilot import Autopilot, limit_thrust
+from swarmlab.bees.autopilot import Autopilot
 from swarmlab.bees.comms import Delivery, MessageBoard
 from swarmlab.bees.control import (
     ARRIVE,
     COLLECT,
     COLLECTED,
     ENTER,
-    EXIT,
-    FLY_DIR,
     FLY_TO,
     GO_HOME,
     HOVER,
-    INTERCEPT,
-    LOST,
-    THRUST,
     WAIT_COND,
     Control,
     Parsed,
     parse,
 )
 from swarmlab.bees.demo import RandomWaypoints, WaypointPilot
-from swarmlab.bees.economy import HOUSE_TASKS, NURSE, PROCESS, REST, HiveEconomy
+from swarmlab.bees.economy import HiveEconomy
 from swarmlab.bees.enemies import Enemies
 from swarmlab.bees.params import FLYING_KINDS, BeeKind, BeesParams, FlyingKind
 from swarmlab.bees.pheromones import PheromoneField
 from swarmlab.bees.physics import forces
-from swarmlab.bees.physics.mjcf import (
-    DEFAULT_HIVE_COLORS,
-    HORNET_CONAFFINITY,
-    HORNET_CONTYPE,
-    HORNET_RGBA,
-    BodySlot,
-    build_mjcf,
-    hex_to_rgba,
-)
+from swarmlab.bees.physics.mjcf import DEFAULT_HIVE_COLORS, BodySlot, build_mjcf, hex_to_rgba
 from swarmlab.bees.sensors import AgentSensors, SensorBuilder, SensorInputs
 from swarmlab.bees.state import FALLING, FLYING, FREE, IN_HIVE, STATE_NAMES, BeeState
 from swarmlab.bees.weather import Weather
@@ -62,21 +49,16 @@ if TYPE_CHECKING:
 _SPAWN_COLUMNS, _SPAWN_ROWS, _SPAWN_STEP = 5, 5, 1.0
 #: Слоёв решётки для вылета из улья.
 _EXIT_LAYERS = 2
-#: `fly_dir`: цель автопилота — точка на столько метров впереди по направлению.
-_FLY_DIR_LOOKAHEAD = 20.0
 #: `collect`: высота цели над цветком (автопилот всё равно держит просвет над рельефом), м.
 _COLLECT_HOVER = 1.0
-#: `intercept`: упреждение не дальше стольких секунд.
-_INTERCEPT_MAX_LEAD_S = 2.0
 #: `from_id` сообщений улья (`hive.signal`), как в `api.HIVE_ID`.
 HIVE_SENDER = -1
-_TASK_CODES = {"rest": REST, "process": PROCESS, "nurse": NURSE}
 #: Запас рамки квантования позиций за краем карты и под нулём, м.
 _POS_MARGIN = 10.0
 _WEATHER_STATES = ("clear", "windy", "rain")
 _U16 = 65535.0
 #: Причины гибели пчёл (`cause` события `death`), по которым ведётся счёт.
-DEATH_CAUSES = ("energy", "hornet", "spider")
+DEATH_CAUSES = ("energy", "spider")
 
 
 class BeesModule:
@@ -147,7 +129,6 @@ class BeesModule:
                 script=_resolve_script(h.script, cfg.source),
                 color=self.hive_colors[i],
                 options={
-                    "advanced_control": p.advanced_control,
                     "channels": p.pheromones.channels,
                     "max_values": p.comms.max_values,
                 },
@@ -167,9 +148,7 @@ class BeesModule:
         self.economy = HiveEconomy(world.n_hives, p.economy, p.pool.max_bees_per_hive)
         self.invalid_commands = [0] * world.n_hives
         self._notes = [[] for _ in range(world.n_hives)]
-        hornets = p.enemies.hornets
-        n_hornets = hornets.max if hornets.enabled else 0
-        self._park_pos = self._parking_positions(bees.n + n_hornets)
+        self._park_pos = self._parking_positions(bees.n)
         placeholder = p.bee_types.forager
         slots = [
             BodySlot(
@@ -180,17 +159,6 @@ class BeesModule:
                 hex_to_rgba(self.hive_colors[int(bees.hive[i])]),
             )
             for i in range(bees.n)
-        ] + [
-            BodySlot(
-                f"hornet{i}",
-                hornets.radius,
-                hornets.mass,
-                tuple(self._park_pos[bees.n + i]),
-                HORNET_RGBA,
-                HORNET_CONTYPE,
-                HORNET_CONAFFINITY,
-            )
-            for i in range(n_hornets)
         ]
         xml = build_mjcf(
             world,
@@ -271,19 +239,7 @@ class BeesModule:
 
         # Враги — после стартового состава (id пчёл не зависят от включения врагов).
         self.enemies = Enemies(
-            p,
-            world,
-            bees,
-            self.backend,
-            body_offset=bees.n,
-            park_pos=self._park_pos[bees.n:],
-            rng=rng,
-            obstacles=self.obstacles,
-            obstacle_pairs=self.sensors.obstacle_pairs,
-            economy=self.economy,
-            emit=self._emit,
-            kill_bees=self.kill,
-            decision_dt=self._decision_dt,
+            p, world, bees, rng=rng, kill_bees=self.kill, decision_dt=self._decision_dt
         )
         #: Время выбывания ульев со скриптом (NaN — в игре), BEES_SPEC §8.
         self.eliminated_at = np.full(world.n_hives, np.nan)
@@ -402,11 +358,6 @@ class BeesModule:
         b.cargo[slots] = np.clip(cargo, 0.0, b.cargo_max[slots])
         self.backend.set_mass(slots, b.mass[slots], b.radius[slots])
 
-    def set_thrust(self, slots: np.ndarray, thrust: np.ndarray | None) -> None:
-        """Прямая тяга мимо автопилота (`thrust()` §3.3); `None` — вернуть автопилот."""
-        slots = np.atleast_1d(np.asarray(slots, dtype=np.int64))
-        self.bees.thrust_cmd[slots] = np.nan if thrust is None else thrust
-
     # --------------------------------------------------------------- связь
 
     def signal(self, slot: int, values: list[float]) -> None:
@@ -479,7 +430,10 @@ class BeesModule:
         c.mode[slots[done]] = HOVER  # висит над цветком, ждёт нового решения
 
     def _enter_hives(self, a: np.ndarray, pos: np.ndarray) -> None:
-        """`go_home`: пчёлы у летка входят в улей — тело паркуется."""
+        """`go_home`: пчёлы у летка входят в улей — тело паркуется, нектар выгружается.
+
+        Выгрузка автоматическая (DECISIONS №82): весь груз сборщика сразу на склад.
+        """
         b, c = self.bees, self.control
         entrance = self.world.hive_entrance[b.hive[a]]
         near = np.linalg.norm(pos - entrance, axis=1) <= self.params.hive.enter_radius
@@ -489,9 +443,16 @@ class BeesModule:
         self.backend.park(enter, self._park_pos[enter])
         b.set_state(enter, IN_HIVE)
         b.thrust[enter] = 0.0
-        b.thrust_cmd[enter] = np.nan
         c.mode[enter] = HOVER
         c.exit_pending[enter] = False
+        loaded = enter[b.cargo[enter] > 0]
+        for s in loaded.tolist():
+            amount, h = float(b.cargo[s]), int(b.hive[s])
+            self.economy.deliver(h, amount)
+            self.events.append({"type": "delivery", "time": self.time, "bee": int(b.uid[s]),
+                                "hive": h, "nectar": amount})
+        if loaded.size:
+            self.set_cargo(loaded, 0.0)
 
     def _exit_hives(self) -> None:
         """Пчёлы, которые хотят вылететь, появляются в свободных точках перед летком."""
@@ -537,12 +498,6 @@ class BeesModule:
         b, c, w, ap = self.bees, self.control, self.world, self.autopilot
         mode = c.mode[slots]
 
-        m = mode == FLY_DIR
-        if np.any(m):
-            ids = slots[m]
-            goal = pos[m] + c.direction[ids] * _FLY_DIR_LOOKAHEAD
-            ap.fly_to(ids, goal[:, :2], z=goal[:, 2], speed=c.speed[ids])
-
         m = mode == GO_HOME
         if np.any(m):
             ids = slots[m]
@@ -568,25 +523,6 @@ class BeesModule:
             fpos = w.flower_pos[c.target[ids]]
             ap.fly_to(ids, fpos[:, :2], z=fpos[:, 2] + _COLLECT_HOVER)
 
-        m = mode == INTERCEPT
-        if np.any(m):
-            ids = slots[m]
-            found, tpos, tvel = self._find_targets(c.target[ids])
-            if np.any(found):
-                mine = pos[m][found]
-                speed = np.where(np.isnan(c.speed[ids[found]]), b.cruise_empty[ids[found]],
-                                 c.speed[ids[found]])
-                lead = np.minimum(
-                    np.linalg.norm(tpos - mine, axis=1) / np.maximum(speed, 0.1),
-                    _INTERCEPT_MAX_LEAD_S,
-                )
-                goal = tpos + tvel * lead[:, None]
-                ap.fly_to(ids[found], goal[:, :2], z=goal[:, 2], speed=c.speed[ids[found]])
-            lost = ids[~found]
-            if lost.size:  # цели нет (погибла, в улье) — зависнуть
-                c.mode[lost] = HOVER
-                ap.hover(lost, pos[m][~found])
-
     # --------------------------------------------------------------- ожидание команд
 
     def _wait_snapshot(self, parsed: Parsed) -> dict[int, tuple[int, int, float, bool]]:
@@ -604,7 +540,7 @@ class BeesModule:
         """Любая команда движения снимает старое ожидание; ждущие команды ставят новое.
 
         Повтор той же команды (раннер не увидел подтверждения) не сбрасывает отсчёт
-        таймаута. `unload` выполняется сразу: «выполнено», если пчела была в улье.
+        таймаута.
         """
         c = self.control
         if not parsed.moves and not parsed.waits:
@@ -616,7 +552,7 @@ class BeesModule:
         n_flowers = self.world.flower_pos.shape[0]
         flower_of = {r[0]: r[1] for r in parsed.moves.get("collect", [])}
         for slot, seq, op, valid in parsed.waits:
-            old_seq, old_state, old_since, in_hive = prev[slot]
+            old_seq, old_state, old_since, _ = prev[slot]
             c.wait_seq[slot] = seq
             c.wait_state[slot] = RUNNING
             c.wait_since[slot] = (
@@ -626,17 +562,15 @@ class BeesModule:
                 c.wait_state[slot] = FAILED
                 continue
             c.wait_cond[slot] = WAIT_COND[op]
-            if op == "unload":
-                c.wait_state[slot] = DONE if in_hive else FAILED
-            elif op == "collect" and not 0 <= flower_of.get(slot, -1) < n_flowers:
+            if op == "collect" and not 0 <= flower_of.get(slot, -1) < n_flowers:
                 c.wait_state[slot] = FAILED  # такого цветка нет
 
     def _check_waits(self) -> None:
         """Тик решений: какие ждущие команды выполнены, а какие вышли по таймауту.
 
         Условия — DECISIONS №61: `fly_to`/`hover` — ближе `arrive_tolerance` к цели
-        автопилота и медленнее `arrive_max_speed`; `go_home` — в улье; `leave_hive` —
-        снаружи; `collect` — набор закончен; `intercept` — цели больше нет в воздухе.
+        автопилота и медленнее `arrive_max_speed`; `go_home` — в улье; `collect` —
+        набор закончен.
         """
         c, b = self.control, self.bees
         w = np.flatnonzero((c.wait_seq > 0) & (c.wait_state == RUNNING))
@@ -647,9 +581,7 @@ class BeesModule:
         air = (state == FLYING) | (state == FALLING)
         done = np.zeros(w.size, dtype=bool)
         done |= (cond == ENTER) & (state == IN_HIVE)
-        done |= (cond == EXIT) & air
         done |= (cond == COLLECTED) & (c.mode[w] != COLLECT)
-        done |= (cond == LOST) & (c.mode[w] != INTERCEPT)
         arrive = cond == ARRIVE
         done |= arrive & (state == IN_HIVE) & (c.mode[w] == HOVER) & ~c.exit_pending[w]
         check = arrive & air
@@ -689,21 +621,6 @@ class BeesModule:
                 if st is not None:
                     me["wait"] = st
 
-    def _find_targets(self, uids: np.ndarray) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
-        """Цели `intercept` по uid среди пчёл в воздухе и шершней: найдена, позиция, скорость."""
-        b = self.bees
-        bodies = np.concatenate([b.airborne, self.enemies.body[self.enemies.active]])
-        all_uid = np.concatenate([b.uid[b.airborne], self.enemies.uid[self.enemies.active]])
-        uids = np.asarray(uids, dtype=np.int64)
-        if all_uid.size == 0 or uids.size == 0:
-            return np.zeros(uids.size, dtype=bool), np.zeros((0, 3)), np.zeros((0, 3))
-        order = np.argsort(all_uid, kind="stable")
-        sorted_uid = all_uid[order]
-        k = np.minimum(np.searchsorted(sorted_uid, uids), sorted_uid.size - 1)
-        found = sorted_uid[k] == uids
-        tpos, tvel = self.backend.body_state(bodies[order][k[found]])
-        return found, tpos, tvel
-
     # --------------------------------------------------------------- Module
 
     def physics(self) -> PhysicsBackend:
@@ -724,14 +641,12 @@ class BeesModule:
         if dt > 0:
             self._economy_tick(dt, a, pos, vel)
 
-        # Погода (§6) и враги (§7): волны, атаки, тепловой шар, грабёж, боты.
+        # Погода (§6) и пауки (§7).
         prev = self.weather.state
         if tick > 0 and self.weather.update(self._decision_dt) is not None:
             self._emit({"type": "weather", "time": self.time, "state": self.weather.state,
                         "prev": prev, "wind": self.weather.w_ref, "rain": self.weather.rain})
-        rain_view = self.params.sensors.rain_view_multiplier if self.weather.rain else 1.0
-        self.enemies.decide(tick, self.time, a, pos, vel, weather=self.weather,
-                            rain_view=rain_view)
+        self.enemies.decide(tick, self.time, a, pos, vel)
 
         a = b.airborne
         pos, vel = self.backend.body_state(a)
@@ -743,7 +658,6 @@ class BeesModule:
         pos, vel = self.backend.body_state(a)
         self._refresh_targets(a, pos, vel)
         self._check_waits()
-        self.enemies.refresh_targets(self._find_targets)
         self.bee_grid.build(pos)
         self._decide_pos, self._decide_vel, self._decide_slots = pos, vel, a
 
@@ -762,9 +676,8 @@ class BeesModule:
         self.pheromones.decay(self._decision_dt)
         self._sensor_cache = None
 
-        n = b.n  # тела пчёл — первые в пуле, за ними шершни
-        full_pos = self.backend.poses()[0][:n]
-        full_vel = self.backend.velocities()[:n, :3]
+        full_pos = self.backend.poses()[0]
+        full_vel = self.backend.velocities()[:, :3]
         self.pilot.decide(full_pos, full_vel, self._decision_dt)
         if self.swarm is not None:
             for h in range(self.world.n_hives):
@@ -783,7 +696,6 @@ class BeesModule:
             a = self._decide_slots
             pos = self._decide_pos
             ground = self.world.ground_height(pos[:, :2])
-            _, e_uid, e_pos, e_vel = self.enemies.hornet_state()
             self._sensor_cache = self.sensors.build(
                 SensorInputs(
                     tick=self._tick,
@@ -797,9 +709,6 @@ class BeesModule:
                     weather=self.weather.state,
                     rain=self.weather.rain,
                     messages=self._delivery,
-                    enemy_uid=e_uid,
-                    enemy_pos=e_pos,
-                    enemy_vel=e_vel,
                 )
             )
             self._attach_waits(self._sensor_cache)
@@ -849,31 +758,11 @@ class BeesModule:
             "notes": notes,
         }
 
-    def house_sensors(self, hive: int, counts: dict[str, Any]) -> list[AgentSensors]:
-        """Сенсоры домашних пчёл улья (§5.3)."""
-        e = self.economy
-        slots = e.house_slots(hive)
-        queue = e.queue_view(hive)
-        common = {
-            "tick": self._tick,
-            "time": self.time,
-            "hive_nectar": float(e.nectar[hive]),
-            "hive_honey": float(e.honey[hive]),
-            "breeding_queue": queue,
-            "counts": counts,
-        }
-        return [
-            {**common, "me": {"id": uid, "kind": "house", "task": HOUSE_TASKS[task]}}
-            for uid, task in zip(
-                e.house_uid[slots].tolist(), e.house_task[slots].tolist(), strict=True
-            )
-        ]
-
     def collect_sensors(self, team: TeamId) -> SensorBatch:
         view = self.team_view(team)
-        agents = self.hive_sensors(team) + self.house_sensors(team, view["counts"])
         return SensorBatch(
-            tick=self._tick, team=team, budget_ms=self._budget_ms, team_view=view, agents=agents
+            tick=self._tick, team=team, budget_ms=self._budget_ms, team_view=view,
+            agents=self.hive_sensors(team),
         )
 
     def apply_commands(self, team: TeamId, cmds: CommandBatch) -> None:
@@ -881,17 +770,11 @@ class BeesModule:
         sl = b.hive_slots(team)
         slots = np.arange(sl.start, sl.stop)
         alive = slots[b.state[sl] != FREE]
-        house_slots = self.economy.house_slots(team)
         parsed = parse(
             cmds.commands,
             cmds.team_command,
             flying=dict(zip(b.uid[alive].tolist(), alive.tolist(), strict=True)),
             flying_kind=b.kind,
-            house=dict(
-                zip(self.economy.house_uid[house_slots].tolist(), house_slots.tolist(),
-                    strict=True)
-            ),
-            advanced_control=self.params.advanced_control,
             max_values=self.params.comms.max_values,
             channels=self.params.pheromones.channels,
         )
@@ -899,8 +782,6 @@ class BeesModule:
         prev = self._wait_snapshot(parsed)
         self._apply_moves(parsed)
         self._register_waits(parsed, prev)
-        for task, task_slots in parsed.house.items():
-            self.economy.set_task(np.array(task_slots, dtype=np.int64), _TASK_CODES[task])
         for slot, values in parsed.signals:
             self.signal(slot, values)
         for slot, channel, amount in parsed.marks:
@@ -918,36 +799,17 @@ class BeesModule:
                 if err is not None:
                     self._notes[team].append(f"breed({kind!r}) не получилось: {err}")
                     break
-        for kind in parsed.cancel:
-            if not e.cancel(team, kind):
-                self._notes[team].append(f"cancel_breeding({kind!r}): таких личинок нет")
         if parsed.hive_signal is not None:
             self.comms.post(-1, HIVE_SENDER, team, self.world.hive_entrance[team],
                             parsed.hive_signal)
 
     def _apply_moves(self, parsed: Parsed) -> None:
-        """Команды движения: режимы, цели автопилота, вылет из улья, выгрузка."""
+        """Команды движения: режимы, цели автопилота, вылет из улья."""
         b, c, ap = self.bees, self.control, self.autopilot
         changed: list[np.ndarray] = []
         for op, rows in parsed.moves.items():
             slots = np.array([r[0] for r in rows], dtype=np.int64)
             in_hive = b.state[slots] == IN_HIVE
-            if op == "unload":
-                for s in slots[in_hive].tolist():
-                    amount = float(b.cargo[s])
-                    if amount > 0:
-                        h = int(b.hive[s])
-                        self.economy.deliver(h, amount)
-                        self.set_cargo(np.array([s]), 0.0)
-                        self.events.append({"type": "delivery", "time": self.time,
-                                            "bee": int(b.uid[s]), "hive": h, "nectar": amount})
-                continue
-            if op == "leave_hive":
-                c.exit_pending[slots[in_hive]] = True
-                c.mode[slots[in_hive]] = HOVER
-                continue
-            # Любая другая команда движения отменяет прямую тягу.
-            b.thrust_cmd[slots] = np.nan
             if op == "hover":
                 c.mode[slots] = HOVER
                 c.exit_pending[slots] = False
@@ -973,29 +835,15 @@ class BeesModule:
                 if np.any(~has_z):
                     ap.fly_to(slots[~has_z], xy[~has_z], speed=speed[~has_z],
                               avoid=avoid[~has_z].astype(bool))
-            elif op == "fly_dir":
-                d = np.array([r[1:4] for r in rows], dtype=np.float64)
-                c.mode[slots] = FLY_DIR
-                c.direction[slots] = d / np.linalg.norm(d, axis=1)[:, None]
-                c.speed[slots] = np.array([r[4] for r in rows])
-                ap.avoid[slots] = True
-                changed.append(slots[~in_hive])
-            elif op in ("collect", "intercept"):
+            elif op == "collect":
                 target = np.array([r[1] for r in rows], dtype=np.int64)
-                if op == "collect":
-                    ok = (target >= 0) & (target < self.world.flower_pos.shape[0])
-                    self.invalid_commands[int(b.hive[slots[0]])] += int(np.sum(~ok))
-                    slots, target = slots[ok], target[ok]
-                    c.mode[slots] = COLLECT
-                else:
-                    c.mode[slots] = INTERCEPT
+                ok = (target >= 0) & (target < self.world.flower_pos.shape[0])
+                self.invalid_commands[int(b.hive[slots[0]])] += int(np.sum(~ok))
+                slots, target = slots[ok], target[ok]
+                c.mode[slots] = COLLECT
                 c.target[slots] = target
-                c.speed[slots] = np.nan
                 ap.avoid[slots] = True
                 changed.append(slots[b.state[slots] != IN_HIVE])
-            elif op == "thrust":
-                c.mode[slots] = THRUST
-                b.thrust_cmd[slots] = np.array([r[1:4] for r in rows], dtype=np.float64)
         if changed:
             air = np.concatenate(changed)
             if air.size:
@@ -1017,7 +865,6 @@ class BeesModule:
         return self._local_pairs
 
     def pre_physics(self, dt: float) -> None:
-        self.enemies.pre_physics(self.gravity, self.weather.rain)
         b = self.bees
         a = b.airborne
         if a.shape[0] == 0:
@@ -1063,10 +910,6 @@ class BeesModule:
             neighbors=neighbors,
             obstacles=obstacles,
         )
-        cmd = b.thrust_cmd[a]
-        manual = ~np.isnan(cmd[:, 0])
-        if np.any(manual):
-            thrust[manual] = limit_thrust(cmd[manual], thrust_max[manual])
         thrust[b.state[a] == FALLING] = 0.0  # энергия кончилась — винты стоят
         b.thrust[a] = thrust
         self.backend.set_forces(a, thrust + external + walls)
@@ -1138,27 +981,22 @@ class BeesModule:
         """Кадр реплея и стрима (DECISIONS №39): только тела в воздухе, компактные типы.
 
         Позиции — `uint16` с фиксированной точкой в рамке `scene()["pos_lo"/"pos_hi"]`,
-        скорости — `float16`, энергия, груз, HP и нектар цветов — доли в `uint8` (0–255).
+        скорости — `float16`, энергия, груз и нектар цветов — доли в `uint8` (0–255).
+        Столбцы `hive_counts` — `scene()["hive_counts"]`: летающие по типам, домашние, в улье.
         """
-        b, e, en = self.bees, self.economy, self.enemies
+        b, e = self.bees, self.economy
         lo, hi = self._pos_box()
         a = b.airborne
         pos, vel = self.backend.body_state(a)
-        h = en.active
-        hpos, hvel = self.backend.body_state(en.body[h])
-        counts = np.zeros((self.world.n_hives, 5), dtype=np.uint16)
+        nk = len(FLYING_KINDS)
+        counts = np.zeros((self.world.n_hives, nk + 2), dtype=np.uint16)
         for hv in range(self.world.n_hives):
             sl = b.hive_slots(hv)
             st, kd = b.state[sl], b.kind[sl]
-            for k in range(len(FLYING_KINDS)):
+            for k in range(nk):
                 counts[hv, k] = np.count_nonzero((st != FREE) & (kd == k))
-            counts[hv, 3] = e.house_count(hv)
-            counts[hv, 4] = np.count_nonzero(st == IN_HIVE)
-        flags = (
-            en.fleeing[h].astype(np.uint8)
-            | (en.in_ball[h].astype(np.uint8) << 1)
-            | ((en.robbing[h] >= 0).astype(np.uint8) << 2)
-        )
+            counts[hv, nk] = e.house_count(hv)
+            counts[hv, nk + 1] = np.count_nonzero(st == IN_HIVE)
         wind = self.weather.w_ref * self.weather.base_direction(self.time)
         nectar_max = max(self.params.world.flowers.nectar_max, 1e-9)
         frame = Frame(
@@ -1173,12 +1011,6 @@ class BeesModule:
                 "bee_vel": vel.astype(np.float16),
                 "bee_energy": _fraction_u8(b.energy[a], b.energy_max[a]),
                 "bee_cargo": _fraction_u8(b.cargo[a], b.cargo_max[a]),
-                "hornet_slot": h.astype(np.uint16),
-                "hornet_uid": en.uid[h].astype(np.int32),
-                "hornet_pos": quantize(hpos, lo, hi),
-                "hornet_vel": hvel.astype(np.float16),
-                "hornet_hp": _fraction_u8(en.hp[h], np.full(h.size, en.hp_params.hp)),
-                "hornet_flags": flags,
                 "hive_honey": e.honey.astype(np.float32),
                 "hive_nectar": e.nectar.astype(np.float32),
                 "hive_counts": counts,
@@ -1205,15 +1037,11 @@ class BeesModule:
             "pos_hi": hi,
             "bee_slots": self.bees.n,
             "per_hive": self.bees.per_hive,
-            "hornet_slots": self.enemies.n,
             "kinds": list(FLYING_KINDS),
             "states": list(STATE_NAMES),
             "weather_states": list(_WEATHER_STATES),
-            "hornet_flags": ["fleeing", "heat_ball", "robbing"],
-            "hive_counts": ["scout", "forager", "guard", "house", "in_hive"],
+            "hive_counts": [*FLYING_KINDS, "house", "in_hive"],
             "bee_radius": {k: p.bee_types.of(k).radius for k in FLYING_KINDS},
-            "hornet_radius": p.enemies.hornets.radius,
-            "hornet_hp": p.enemies.hornets.hp,
             "nectar_max": p.world.flowers.nectar_max,
             "hive_colors": list(self.hive_colors),
             "playing": list(self._playing),
@@ -1264,10 +1092,6 @@ class BeesModule:
         if ids.size:
             radius = np.array([self.params.bee_types.of(k).radius for k in FLYING_KINDS])
             be.place(ids, pos, radius[frame.arrays["bee_kind"].astype(np.int64)])
-        ids, pos = lerp("hornet")
-        if ids.size:
-            be.place(self.enemies.body[ids], pos,
-                     np.full(ids.size, self.params.enemies.hornets.radius))
         be.forward()
 
     # --------------------------------------------------------------- счёт (§8)
@@ -1290,7 +1114,6 @@ class BeesModule:
                 "nectar": float(e.nectar[h]),
                 "delivered": float(e.delivered[h]),
                 "processed": float(e.processed[h]),
-                "stolen": float(e.stolen[h]),
             }
             row.update(
                 {k: float(np.sum(alive & (b.kind[sl] == i))) for i, k in enumerate(FLYING_KINDS)}
@@ -1322,7 +1145,6 @@ class BeesModule:
             ScoreColumn("delivered", "доставлено нектара"),
             ScoreColumn("alive", "живых пчёл"),
             ScoreColumn("deaths_energy", "гибели: энергия"),
-            ScoreColumn("deaths_hornet", "гибели: шершень"),
             ScoreColumn("deaths_spider", "гибели: паук"),
         ]
 
@@ -1336,7 +1158,7 @@ class BeesModule:
     def describe(self) -> list[str]:
         """Какие эффекты включены (переключатели BEES_SPEC §6–7, DECISIONS №38)."""
         p = self.params
-        w, h, sp = p.weather, p.enemies.hornets, p.enemies.spiders
+        w, sp = p.weather, p.enemies.spiders
 
         def on(flag: bool) -> str:
             return "вкл" if flag else "выкл"
@@ -1346,15 +1168,11 @@ class BeesModule:
             + (f" (ветер {on(w.wind)}, дождь {on(w.rain)}, старт {self.weather.state})"
                if w.enabled else "")
         )
-        hornets = f"шершни: {on(h.enabled)}" + (
-            f" (до {h.max}; укусы {on(h.attack)}, грабёж {on(h.rob)}, "
-            f"тепловой шар {on(h.heat_ball)})" if h.enabled else ""
-        )
         spiders = f"пауки: {on(sp.enabled)}" + (
             f" ({self.enemies.spider_flower.size} цветков из {self.world.flower_pos.shape[0]})"
             if sp.enabled else ""
         )
-        return [weather, hornets, spiders]
+        return [weather, spiders]
 
     # --------------------------------------------------------------- DebugViewable
 

@@ -71,10 +71,8 @@ class BeesViewer {
   onEvents(events) {
     this.hud.onEvents(events);
     for (const e of events) {
-      if (e.type === "death") this.lost.set(e.bee, `погиб(ла): ${e.cause === "hornet" ? "шершень" : e.cause === "spider" ? "паук" : "кончилась энергия"}`);
+      if (e.type === "death") this.lost.set(e.bee, `погиб(ла): ${e.cause === "spider" ? "паук" : "кончилась энергия"}`);
       if (e.type === "delivery") this.lost.set(e.bee, "вернулась в улей с нектаром");
-      if (e.type === "hornet_death") this.lost.set(e.hornet, "погиб в тепловом шаре");
-      if (e.type === "hornet_left") this.lost.set(e.hornet, "улетел с поля");
     }
     if (this.lost.size > 2000) this.lost.clear();
   }
@@ -113,9 +111,7 @@ class BeesViewer {
   _followLost() {
     const uid = this.followUid;
     const why = this.lost.get(uid) || "залетела в улей или исчезла";
-    const info = this.agents.info.get(uid);
-    const who = info?.type === "hornet" ? "Шершень" : "Пчела";
-    this.hud.feed(this._lastTime || 0, `👁 ${who} #${uid}: ${why}`);
+    this.hud.feed(this._lastTime || 0, `👁 Пчела #${uid}: ${why}`);
     this.followUid = null;
     this.hud.showFollow(null);
   }

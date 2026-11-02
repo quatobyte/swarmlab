@@ -3,7 +3,7 @@
 import numpy as np
 import pytest
 
-from swarmlab.bees.economy import NURSE, PROCESS, HiveEconomy
+from swarmlab.bees.economy import HiveEconomy
 
 from .helpers import bees_params
 
@@ -20,12 +20,6 @@ def _economy(honey: float = 20.0, nectar: float = 0.0, house: int = 0, max_bees:
     return e
 
 
-def _set_tasks(e: HiveEconomy, process: int = 0, nurse: int = 0) -> None:
-    slots = e.house_slots(0)
-    e.set_task(slots[:process], PROCESS)
-    e.set_task(slots[process : process + nurse], NURSE)
-
-
 def test_processing_has_diminishing_returns():
     e = _economy()
     k = ECON.processing.k_proc
@@ -39,7 +33,6 @@ def test_processing_has_diminishing_returns():
 
 def test_processing_converts_one_nectar_to_half_honey():
     e = _economy(honey=20.0, nectar=100.0, house=4)
-    _set_tasks(e, process=4)
     dt = 0.1
     for _ in range(100):  # 10 с
         e.step(dt)
@@ -50,22 +43,38 @@ def test_processing_converts_one_nectar_to_half_honey():
     assert e.nectar[0] == pytest.approx(100.0 - processed)
 
 
-def test_processing_stops_without_nectar():
-    e = _economy(honey=20.0, nectar=0.05, house=9)
-    _set_tasks(e, process=9)
+def test_processing_stops_at_min_nectar():
+    """Домашние перерабатывают сами, пока нектара больше `min_nectar` (DECISIONS №82)."""
+    e = _economy(honey=20.0, nectar=1.0, house=9)
+    for _ in range(100):
+        e.step(0.1)
+    left = e.nectar[0]
+    assert 0.0 < left <= ECON.processing.min_nectar
+    assert e.processed[0] == pytest.approx(1.0 - left)
     for _ in range(50):
         e.step(0.1)
-    assert e.nectar[0] == 0.0
-    assert e.processed[0] == pytest.approx(0.05)
+    assert e.nectar[0] == left  # остаток не трогают
+
+
+def test_house_bees_process_first_then_nurse():
+    """Все домашние улья работают по одному правилу: нектар → переработка, иначе личинки."""
+    e = _economy(honey=50.0, nectar=10.0, house=4)
+    assert e.breed(0, "forager", flying_alive=0) is None
+    base = ECON.breeding["forager"].time_s
+    e.step(1.0)  # нектар есть — все перерабатывают, личинка растёт без нянек
+    assert e.processed[0] == pytest.approx(ECON.processing.k_proc * 2 * 1.0)
+    assert e.queue[0][0].left_s == pytest.approx(base - 1.0)
+    e.nectar[0] = 0.0
+    e.step(1.0)  # нектара нет — все четверо нянчат: вдвое быстрее
+    assert e.queue[0][0].left_s == pytest.approx(base - 1.0 - 2.0)
 
 
 def test_breeding_costs_honey_immediately_and_time_scales_with_nurses():
-    e = _economy(honey=20.0, house=4)
-    _set_tasks(e, nurse=4)
+    e = _economy(honey=20.0, house=4)  # нектара нет — домашние нянчат сами
     assert e.breed(0, "forager", flying_alive=0) is None
     assert e.honey[0] == pytest.approx(20.0 - ECON.breeding["forager"].cost)
     assert e.breeding_time("forager", 4) == pytest.approx(ECON.breeding["forager"].time_s / 2)
-    assert e.breeding_time("guard", 0) == pytest.approx(ECON.breeding["guard"].time_s)
+    assert e.breeding_time("scout", 0) == pytest.approx(ECON.breeding["scout"].time_s)
 
     t, births = 0.0, []
     while not births:
@@ -75,28 +84,29 @@ def test_breeding_costs_honey_immediately_and_time_scales_with_nurses():
     assert t == pytest.approx(ECON.breeding["forager"].time_s / 2, abs=0.11)
 
 
-@pytest.mark.parametrize("kind", ["scout", "forager", "guard", "house"])
+@pytest.mark.parametrize("kind", ["scout", "forager", "house"])
 def test_breeding_prices(kind):
     e = _economy(honey=10.0)
     assert e.breed(0, kind, flying_alive=0) is None
     assert e.honey[0] == pytest.approx(10.0 - ECON.breeding[kind].cost)
 
 
-def test_breeding_queue_is_sequential_and_cancel_refunds():
+def test_breeding_queue_is_sequential():
     e = _economy(honey=20.0)
-    for kind in ("scout", "guard", "scout"):
+    for kind in ("scout", "house", "scout"):
         assert e.breed(0, kind, flying_alive=0) is None
-    spent = 2 * ECON.breeding["scout"].cost + ECON.breeding["guard"].cost
+    spent = 2 * ECON.breeding["scout"].cost + ECON.breeding["house"].cost
     assert e.honey[0] == pytest.approx(20.0 - spent)
-    assert e.cancel(0, "scout")
-    assert [lv.kind for lv in e.queue[0]] == ["scout", "guard"]  # снята последняя
-    assert e.honey[0] == pytest.approx(20.0 - spent + ECON.breeding["scout"].cost)
-    assert not e.cancel(0, "forager")
+    births = []
+    for _ in range(int(ECON.breeding["scout"].time_s * 10) + 1):
+        births += e.step(0.1)
+    assert [b.kind for b in births] == ["scout"]  # растёт только голова очереди
+    assert [lv.kind for lv in e.queue[0]] == ["house", "scout"]
 
 
 def test_breeding_refused_without_honey_or_space():
     e = _economy(honey=1.0, max_bees=5)
-    assert e.breed(0, "guard", flying_alive=0) is not None
+    assert e.breed(0, "forager", flying_alive=0) is not None
     assert e.honey[0] == 1.0  # отказ ничего не списывает
     e.honey[0] = 100.0
     assert e.breed(0, "scout", flying_alive=5) is not None  # улей полон
@@ -124,7 +134,6 @@ def test_refuel_shares_last_honey_and_stops_at_zero():
 
 def test_house_bees_eat_and_stop_working_without_honey():
     e = _economy(honey=1.0, nectar=50.0, house=10)
-    _set_tasks(e, process=10)
     e.step(1.0)
     assert e.honey[0] == pytest.approx(
         1.0 - 10 * ECON.feeding.house_consumption + 0.5 * e.processed[0]
@@ -140,21 +149,16 @@ def test_honey_never_appears_from_nothing_random_operations():
     """Инвариант: мёд ≤ старт + 0.5·переработанный нектар после любой операции."""
     gen = np.random.default_rng(7)
     e = _economy(honey=20.0, nectar=0.0, house=6, max_bees=60)
-    kinds = ("scout", "forager", "guard", "house")
+    kinds = ("scout", "forager", "house")
     for _ in range(5000):
-        op = gen.integers(0, 6)
+        op = gen.integers(0, 4)
         if op == 0:
             e.deliver(0, float(gen.uniform(0, 1.0)))
         elif op == 1:
-            e.breed(0, kinds[gen.integers(0, 4)], flying_alive=int(gen.integers(0, 40)))
+            e.breed(0, kinds[gen.integers(0, 3)], flying_alive=int(gen.integers(0, 40)))
         elif op == 2:
-            e.cancel(0, kinds[gen.integers(0, 4)])
-        elif op == 3:
             k = int(gen.integers(1, 5))
             e.refuel(np.zeros(k, dtype=np.int64), gen.uniform(0, 2000, k), 0.1)
-        elif op == 4:
-            slots = e.house_slots(0)
-            e.set_task(slots, gen.integers(0, 3, slots.size))
         else:
             for b in e.step(float(gen.uniform(0.01, 0.5))):
                 if b.kind == "house" and e.house_count(0) < 60:

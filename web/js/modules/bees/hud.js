@@ -3,25 +3,19 @@
 
 const $ = (id) => document.getElementById(id);
 
-export const KIND_RU = { scout: "разведчик", forager: "сборщик", guard: "охранник", house: "домашняя" };
-const KIND_SHORT = [["scout", "Р", "разведчики"], ["forager", "С", "сборщики"], ["guard", "О", "охранники"], ["house", "Д", "домашние"]];
+export const KIND_RU = { scout: "разведчик", forager: "сборщик", house: "домашняя" };
+const KIND_SHORT = [["scout", "Р", "разведчики"], ["forager", "С", "сборщики"], ["house", "Д", "домашние"]];
 const WEATHER_RU = {
   clear: ["☀️", "Ясно"],
   windy: ["🌬️", "Ветрено"],
   rain: ["🌧️", "Дождь"],
 };
-const CAUSE_RU = { energy: "без сил", hornet: "шершень", spider: "паук" };
+const CAUSE_RU = { energy: "без сил", spider: "паук" };
 const FEED_MAX = 7;
 const FEED_TTL_MS = 14000;
 
 function esc(s) {
   return String(s).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c]);
-}
-
-function plural(n, one, few, many) {
-  const m10 = n % 10, m100 = n % 100;
-  const w = m10 === 1 && m100 !== 11 ? one : m10 >= 2 && m10 <= 4 && (m100 < 12 || m100 > 14) ? few : many;
-  return `${n} ${w}`;
 }
 
 function fmtT(t) {
@@ -95,12 +89,13 @@ export class BeesHud {
     const A = frame.arrays;
     const honey = A.hive_honey;
     const nectar = A.hive_nectar;
-    const counts = A.hive_counts; // (H, 5): scout, forager, guard, house, in_hive
-    const width = counts.shape ? counts.shape[1] : 5;
+    const counts = A.hive_counts; // (H, столбцы scene.hive_counts): scout, forager, house, in_hive
+    const cols = this.scene.hive_counts;
+    const width = cols.length;
     const rows = [];
     for (let h = 0; h < this.nHives; h++) {
-      const c = (k) => counts[h * width + k];
-      const alive = c(0) + c(1) + c(2) + c(3);
+      let alive = 0;
+      for (const [k] of KIND_SHORT) alive += counts[h * width + cols.indexOf(k)];
       if (alive === 0 && this.playing.has(h)) this.eliminated.add(h);
       rows.push({ h, honey: honey[h], alive });
     }
@@ -117,7 +112,7 @@ export class BeesHud {
       card.honey.textContent = honey[h].toFixed(1);
       card.nectar.textContent = nectar[h].toFixed(1);
       card.alive.textContent = String(r.alive);
-      KIND_SHORT.forEach(([k], i) => { card.kinds[k].textContent = String(counts[h * width + i]); });
+      for (const [k] of KIND_SHORT) card.kinds[k].textContent = String(counts[h * width + cols.indexOf(k)]);
       card.bar.style.width = `${(100 * honey[h]) / maxHoney}%`;
       const out = this.eliminated.has(h);
       card.el.classList.toggle("out", out);
@@ -158,16 +153,9 @@ export class BeesHud {
     const kind = KIND_RU[e.kind] || e.kind;
     switch (e.type) {
       case "death":
-        if (e.cause === "hornet") return { text: `🐝 Шершень убил: ${kind}, ${this.teamTag(e.hive)}`, hot: true };
         if (e.cause === "spider") return { text: `🕷️ Паук поймал: ${kind}, ${this.teamTag(e.hive)}` };
         if (e.cause === "energy") return { text: `💤 Без сил упал(а): ${kind}, ${this.teamTag(e.hive)}` };
         return { text: `Погиб(ла): ${kind}, ${this.teamTag(e.hive)} (${esc(CAUSE_RU[e.cause] || e.cause)})` };
-      case "hornet_spawn": return { text: "⚠️ Прилетел шершень!", hot: true };
-      case "heat_ball": return { text: `🔥 Тепловой шар: ${plural(e.guards, "охранник", "охранника", "охранников")} — ${this.teamTag(e.hive)} — окружили шершня`, hot: true };
-      case "hornet_flee": return { text: "🩹 Шершень ранен и спасается бегством" };
-      case "hornet_death": return { text: "💀 Шершень погиб в тепловом шаре!", hot: true };
-      case "hornet_left": return { text: "Шершень улетел с поля" };
-      case "rob": return { text: `💰 Шершень грабит ${this.teamTag(e.hive)}!`, hot: true };
       case "eliminated": return { text: `🏳️ ${this.teamTag(e.hive)} выбыл из матча`, hot: true };
       case "weather": {
         const [icon, text] = WEATHER_RU[e.state] || ["", e.state];
@@ -217,21 +205,12 @@ export class BeesHud {
     }
     el.hidden = false;
     const meter = (cls, f) => `<span class="meter ${cls}"><i style="width:${(100 * f).toFixed(0)}%"></i></span>`;
-    if (info.type === "bee") {
-      el.innerHTML = `<h3>${this.teamTag(info.hive)} · ${KIND_RU[info.kind]} <span class="muted small">#${uid}</span></h3>
-        <div class="kv">
-          <span>Энергия</span>${meter("", info.energy)}
-          ${info.kind === "forager" ? `<span>Груз</span>${meter("cargo", info.cargo)}` : ""}
-          <span>Скорость</span><span>${info.speed.toFixed(1)} м/с</span>
-          <span>Состояние</span><span>${info.falling ? "падает!" : "летит"}</span>
-        </div>`;
-    } else {
-      el.innerHTML = `<h3>Шершень <span class="muted small">#${uid}</span></h3>
-        <div class="kv">
-          <span>Здоровье</span>${meter("hp", info.hp)}
-          <span>Скорость</span><span>${info.speed.toFixed(1)} м/с</span>
-          <span>Состояние</span><span>${info.heatBall ? "в тепловом шаре" : info.fleeing ? "убегает" : info.robbing ? "грабит улей" : "охотится"}</span>
-        </div>`;
-    }
+    el.innerHTML = `<h3>${this.teamTag(info.hive)} · ${KIND_RU[info.kind]} <span class="muted small">#${uid}</span></h3>
+      <div class="kv">
+        <span>Энергия</span>${meter("", info.energy)}
+        ${info.kind === "forager" ? `<span>Груз</span>${meter("cargo", info.cargo)}` : ""}
+        <span>Скорость</span><span>${info.speed.toFixed(1)} м/с</span>
+        <span>Состояние</span><span>${info.falling ? "падает!" : "летит"}</span>
+      </div>`;
   }
 }

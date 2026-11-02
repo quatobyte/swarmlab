@@ -3,7 +3,7 @@
 // он генерируется из api.py. Здесь — только текст для человека.
 //
 // Подпись блока: `{имя_параметра}` — место для значения, `{obj}` — объект, у которого берём поле
-// (цветок, враг, точка…). Команды, которые можно ждать, сами получают галочку «ждать».
+// (цветок, пчела, точка…). Команды, которые можно ждать, сами получают галочку «ждать».
 // `full` — подпись варианта со всеми необязательными параметрами (он — в «Продвинутых»).
 // `beginner: true` — блок в стартовом наборе; остальные — в категории «Продвинутые».
 
@@ -15,9 +15,9 @@ export const CATEGORIES = {
   programs: ["Программы", 45, "▶", "С этого начинается всё: перетащите «Программу пчелы» и вложите в неё команды."],
   move: ["Движение", 200, "✈", "Куда лететь: к цветку, домой, к точке, зависнуть на месте."],
   sense: ["Пчела видит", 170, "👁", "Что пчела знает о себе и вокруг: энергия, груз, цветы рядом, погода."],
-  objects: ["Цветы, враги, точки", 140, "✿", "Свойства того, что пчела видит: где цветок, сколько в нём нектара, кто враг."],
-  house: ["Домашняя пчела", 20, "⌂", "Работа внутри улья: переработка нектара в мёд и уход за личинками."],
-  hive: ["Улей", 30, "⬢", "Решения улья: каких пчёл выводить, какие сообщения слать."],
+  talk: ["Связь", 310, "📡", "Как пчёлы договариваются: сообщения соседям и запахи на месте. Общего командира нет."],
+  objects: ["Цветы, пчёлы, точки", 140, "✿", "Свойства того, что пчела видит: где цветок, сколько в нём нектара, своя ли пчела."],
+  hive: ["Улей", 30, "⬢", "Решения улья: каких пчёл выводить, какие сообщения слать. Домашние пчёлы работают сами."],
   logic: ["Логика", 210, "⑂", "«Если … то …», сравнения, «и», «или», «не»."],
   loops: ["Циклы", 120, "↻", "Повторить несколько раз, «пока», перебрать все цветы."],
   math: ["Математика", 230, "±", "Числа, арифметика, случайное число."],
@@ -39,19 +39,17 @@ export const SEARCH_RU = {
 
 /** Категория по умолчанию для блоков API — по классу. */
 export const CLASS_CATEGORY = {
-  Bee: "move", Forager: "move", Guard: "move", "": "move",
+  Bee: "move", Forager: "move", "": "move",
   Sensors: "sense", Me: "sense", Home: "sense",
-  Flower: "objects", Enemy: "objects", BeeInfo: "objects", Obstacle: "objects", Message: "objects",
-  Pheromones: "objects", Vec: "objects", Counts: "objects", Larva: "objects",
-  HouseBee: "house", HouseSensors: "house", HouseMe: "house",
+  Flower: "objects", BeeInfo: "objects", Obstacle: "objects", Message: "talk",
+  Pheromones: "talk", Vec: "objects", Counts: "objects", Larva: "objects",
   Hive: "hive",
 };
 
 /** Значения `Literal` из api.py для выпадающих списков. */
 export const LITERALS = {
-  Kind: { scout: "разведчик", forager: "сборщик", guard: "охранник", house: "домашняя пчела" },
+  Kind: { scout: "разведчик", forager: "сборщик", house: "домашняя пчела" },
   Weather: { clear: "ясно", windy: "ветер", rain: "дождь" },
-  Task: { rest: "отдых", process: "переработка", nurse: "уход за личинками" },
 };
 
 /** Подписи блоков API: ключ — `Класс.член` из api.py (или имя глобальной функции). */
@@ -61,30 +59,23 @@ export const API_RU = {
     label: "лететь к x {x} y {y}", full: "лететь к x {x} y {y} высота {z} скорость {speed} облетать {avoid}",
     tip: "Лететь к точке на карте. Высота не задана — 5 м над землёй.", beginner: true,
   },
-  "Bee.fly_dir": {
-    label: "лететь в направлении dx {dx} dy {dy}", full: "лететь в направлении dx {dx} dy {dy} dz {dz} скорость {speed}",
-    tip: "Лететь в сторону (dx, dy), пока не скажут другое.",
-  },
   "Bee.hover": { label: "зависнуть", tip: "Висеть на месте.", beginner: true },
-  "Bee.go_home": { label: "лететь домой", tip: "К летку и внутрь улья: там заправка и выгрузка.", beginner: true },
-  "Bee.leave_hive": { label: "вылететь из улья", tip: "Выйти из улья наружу.", beginner: true },
-  "Bee.thrust": {
-    label: "тяга fx {fx} fy {fy} fz {fz}",
-    tip: "Прямая сила тяги, Н; автопилот выключается. Только в матче с advanced_control.",
+  "Bee.go_home": {
+    label: "лететь домой", tip: "К летку и внутрь улья: нектар выгрузится сам, пчела заправится.", beginner: true,
   },
-  "Bee.signal": { label: "сообщить своим {values}", tip: "Отправить список до 8 чисел пчёлам своего улья рядом (15 м)." },
+  "Bee.signal": {
+    cat: "talk", label: "сообщить своим {values}",
+    tip: "Отправить список до 8 чисел пчёлам своего улья рядом (15 м). Дойдёт на следующем тике.", beginner: true,
+  },
   "Bee.mark": {
-    label: "оставить запах канала {channel}", full: "оставить запах канала {channel} силой {amount}",
-    tip: "Феромон (канал 0–3) в клетке под пчелой; его чувствуют только свои.",
+    cat: "talk", label: "оставить запах канала {channel}", full: "оставить запах канала {channel} силой {amount}",
+    tip: "Феромон (канал 0–3) в клетке под пчелой; его чувствуют только свои. Слабеет вдвое за минуту.",
+    beginner: true,
   },
   "Forager.collect": {
     label: "собирать нектар с {flower}",
     tip: "Подлететь к цветку и набирать нектар, пока груз не полный или цветок не пуст. Только сборщик.",
     beginner: true,
-  },
-  "Forager.unload": { label: "выгрузить нектар", tip: "Сдать нектар на склад. Только в улье.", beginner: true },
-  "Guard.intercept": {
-    label: "перехватить {target}", tip: "Преследовать врага с упреждением. Только охранник.", beginner: true,
   },
 
   // ------------------------------------------------------------ ожидание
@@ -104,20 +95,18 @@ export const API_RU = {
   "Sensors.weather": { label: "погода", tip: "\"clear\", \"windy\" или \"rain\"." },
   "Sensors.flowers": { label: "цветы рядом", tip: "Список видимых цветов, ближние — первыми.", beginner: true },
   "Sensors.bees": { label: "пчёлы рядом", tip: "Список видимых пчёл (свои и чужие)." },
-  "Sensors.enemies": { label: "враги рядом", tip: "Список видимых врагов.", beginner: true },
   "Sensors.obstacles": { label: "препятствия рядом", tip: "Деревья и камни рядом." },
-  "Sensors.messages": { label: "сообщения", tip: "Сообщения от своих пчёл с прошлого тика." },
-  "Sensors.pheromones": { label: "запахи", tip: "Феромоны своего улья вокруг меня." },
+  "Sensors.messages": {
+    cat: "talk", label: "сообщения", tip: "Сообщения от своих пчёл с прошлого тика.", beginner: true,
+  },
+  "Sensors.pheromones": { cat: "talk", label: "запахи", tip: "Феромоны своего улья вокруг меня.", beginner: true },
   "Sensors.nearest_flower": {
     label: "ближайший цветок", full: "ближайший цветок, где нектара не меньше {min_nectar}",
     tip: "Ближайший видимый цветок; «ничего», если цветов не видно.", beginner: true,
   },
-  "Sensors.nearest_enemy": {
-    label: "ближайший враг", tip: "Ближайший видимый враг; «ничего», если врагов нет.", beginner: true,
-  },
 
   "Me.id": { label: "мой номер", tip: "У каждой пчелы свой номер." },
-  "Me.kind": { label: "мой тип", tip: "\"scout\", \"forager\" или \"guard\"." },
+  "Me.kind": { label: "мой тип", tip: "\"scout\" или \"forager\"." },
   "Me.pos": { label: "где я", tip: "Моя позиция (точка)." },
   "Me.vel": { label: "моя скорость", tip: "Скорость (вектор), м/с." },
   "Me.energy": { label: "моя энергия, Дж", tip: "Сколько энергии осталось." },
@@ -141,17 +130,10 @@ export const API_RU = {
   "Flower.nectar": { label: "нектар в цветке {obj}", tip: "Сколько нектара (максимум 3).", beginner: true },
   "Flower.spider": { label: "паук на цветке {obj}", tip: "Да / нет / «ничего» — не знаю (видит только разведчик вблизи)." },
 
-  "Enemy.id": { label: "номер врага {obj}", tip: "Его передают в «перехватить»." },
-  "Enemy.kind": { label: "вид врага {obj}", tip: "\"hornet\" — шершень." },
-  "Enemy.pos": { label: "где враг {obj}", tip: "Точка врага." },
-  "Enemy.rel_pos": { label: "где враг {obj} от меня", tip: "Точка относительно меня." },
-  "Enemy.dist": { label: "расстояние до врага {obj}", tip: "Метры.", beginner: true },
-  "Enemy.vel": { label: "скорость врага {obj}", tip: "Вектор, м/с." },
-
   "BeeInfo.id": { label: "номер пчелы {obj}", tip: "Номер другой пчелы." },
-  "BeeInfo.kind": { label: "тип пчелы {obj}", tip: "\"scout\", \"forager\", \"guard\"." },
+  "BeeInfo.kind": { label: "тип пчелы {obj}", tip: "\"scout\" или \"forager\"." },
   "BeeInfo.team": { label: "улей пчелы {obj}", tip: "Номер улья." },
-  "BeeInfo.friend": { label: "своя пчела {obj}", tip: "Да, если из моего улья." },
+  "BeeInfo.friend": { label: "своя пчела {obj}", tip: "Да, если из моего улья.", beginner: true },
   "BeeInfo.pos": { label: "где пчела {obj}", tip: "Точка пчелы." },
   "BeeInfo.rel_pos": { label: "где пчела {obj} от меня", tip: "Точка относительно меня." },
   "BeeInfo.dist": { label: "расстояние до пчелы {obj}", tip: "Метры." },
@@ -165,12 +147,16 @@ export const API_RU = {
   "Message.from_id": { label: "от кого сообщение {obj}", tip: "Номер пчелы; -1 — сам улей." },
   "Message.pos": { label: "откуда сообщение {obj}", tip: "Точка, где его отправили." },
   "Message.rel_pos": { label: "откуда сообщение {obj} от меня", tip: "Точка относительно меня." },
-  "Message.values": { label: "числа сообщения {obj}", tip: "Список до 8 чисел." },
+  "Message.values": { label: "числа сообщения {obj}", tip: "Список до 8 чисел.", beginner: true },
 
   "Pheromones.values": { label: "запахи по клеткам {obj}", tip: "values[i][j][канал] в клетках 3×3 вокруг." },
   "Pheromones.gradient": { label: "куда усиливаются запахи {obj}", tip: "gradient[канал] = [gx, gy]." },
-  "Pheromones.strength": { label: "сила запаха канала {channel} в {obj}", tip: "Сила запаха прямо под пчелой." },
-  "Pheromones.direction": { label: "куда сильнее запах канала {channel} в {obj}", tip: "Направление длиной 1." },
+  "Pheromones.strength": {
+    label: "сила запаха канала {channel} в {obj}", tip: "Сила запаха прямо под пчелой.", beginner: true,
+  },
+  "Pheromones.direction": {
+    label: "куда сильнее запах канала {channel} в {obj}", tip: "Направление длиной 1.", beginner: true,
+  },
 
   "Vec.x": { label: "x точки {obj}", tip: "Координата x, м.", beginner: true },
   "Vec.y": { label: "y точки {obj}", tip: "Координата y, м.", beginner: true },
@@ -183,7 +169,6 @@ export const API_RU = {
 
   "Counts.scout": { label: "разведчиков в {obj}", tip: "Все живые разведчики." },
   "Counts.forager": { label: "сборщиков в {obj}", tip: "Все живые сборщики.", beginner: true },
-  "Counts.guard": { label: "охранников в {obj}", tip: "Все живые охранники." },
   "Counts.house": { label: "домашних пчёл в {obj}", tip: "Все живые домашние пчёлы." },
   "Counts.total": { label: "всего пчёл в {obj}", tip: "Все живые пчёлы.", beginner: true },
   "Counts.in_hive": { label: "сидят в улье (по типам) {obj}", tip: "Словарь: тип → сколько в улье." },
@@ -192,27 +177,11 @@ export const API_RU = {
   "Larva.kind": { label: "тип личинки {obj}", tip: "Кто из неё выведется." },
   "Larva.left_s": { label: "сколько расти личинке {obj}", tip: "Секунды при одной няньке." },
 
-  // ------------------------------------------------------------ домашняя пчела
-  "HouseBee.process": { label: "перерабатывать нектар", tip: "Нектар → мёд.", beginner: true },
-  "HouseBee.nurse": { label: "нянчить личинки", tip: "Чем больше нянек, тем быстрее выведение.", beginner: true },
-  "HouseBee.rest": { label: "отдыхать", tip: "Мёд всё равно ест.", beginner: true },
-  "HouseSensors.tick": { label: "номер тика (дома)", tip: "10 тиков в секунду." },
-  "HouseSensors.time": { label: "время матча, с (дома)", tip: "Сколько секунд прошло." },
-  "HouseSensors.me": { label: "я (домашняя)", tip: "Номер, тип и занятие." },
-  "HouseSensors.hive_nectar": { label: "нектар на складе", tip: "Ещё не переработан.", beginner: true },
-  "HouseSensors.hive_honey": { label: "мёд на складе", tip: "Единицы мёда.", beginner: true },
-  "HouseSensors.breeding_queue": { label: "очередь личинок", tip: "Список личинок.", beginner: true },
-  "HouseSensors.counts": { label: "сколько пчёл (дома)", tip: "Счётчики по типам." },
-  "HouseMe.id": { label: "мой номер (дома)", tip: "Номер домашней пчелы." },
-  "HouseMe.kind": { label: "мой тип (дома)", tip: "Всегда \"house\"." },
-  "HouseMe.task": { label: "чем я занята", tip: "\"rest\", \"process\" или \"nurse\"." },
-
   // ------------------------------------------------------------ улей
   "Hive.breed": {
     label: "вывести {kind}", full: "вывести {kind} штук {n}",
     tip: "Мёд списывается сразу. Не хватает мёда или улей полон — личинки не будет.", beginner: true,
   },
-  "Hive.cancel_breeding": { label: "отменить личинку {kind}", tip: "Последняя такая личинка; мёд вернётся." },
   "Hive.signal": { label: "улей сообщает {values}", tip: "Список до 8 чисел пчёлам у летка (15 м)." },
   "Hive.tick": { label: "номер тика (улей)", tip: "10 тиков в секунду." },
   "Hive.time": { label: "время матча, с (улей)", tip: "Сколько секунд прошло.", beginner: true },
@@ -236,7 +205,6 @@ export const CUSTOM_RU = {
   bees_dict_set: { label: "в словаре {dict} записать {key} = {value}", tip: "Запомнить значение по ключу." },
   bees_literal_Kind: { label: "тип {value}", tip: "Тип пчелы." },
   bees_literal_Weather: { label: "погода {value}", tip: "Значение погоды для сравнения." },
-  bees_literal_Task: { label: "занятие {value}", tip: "Занятие домашней пчелы." },
 };
 
 /** Поправки к русскому словарю Blockly: имена по умолчанию — сразу годные имена Python. */
@@ -286,7 +254,7 @@ export const MESSAGES = {
   unsetVariable: "Переменная «{name}» здесь ещё не задана.",
   unknownBlock: "Неизвестный блок {type}.",
   emptyCode: "Пустая строка Python.",
-  programWhere: { scout: "разведчик", forager: "сборщик", guard: "охранник", house: "домашняя пчела", hive: "улей" },
+  programWhere: { scout: "разведчик", forager: "сборщик", hive: "улей" },
   inputNames: { obj: "объект", other: "точка", CONDITION: "условие", IF0: "условие", TIMES: "сколько раз", BOOL: "условие",
     LIST: "список", A: "левая часть", B: "правая часть", VALUE: "значение", NUM: "число", FROM: "от", TO: "до",
     dict: "словарь", key: "ключ", value: "значение", DIVIDEND: "делимое", DIVISOR: "делитель", LOW: "от", HIGH: "до" },

@@ -4,7 +4,7 @@
 
 import random
 
-from swarmlab.bees.api import Forager, HouseBee, wait
+from swarmlab.bees.api import Forager, wait
 
 
 def рейс(self, s, цветок):  # block:def_trip
@@ -15,11 +15,9 @@ def рейс(self, s, цветок):  # block:def_trip
 
 
 def отдых_дома(self, s):  # block:def_rest
-    if s.me.cargo > 0:  # block:if_cargo
-        yield self.unload()  # block:unload
     while s.me.energy_percent < 90:  # block:while_refuel
         yield wait()  # block:wait_tick
-    yield self.leave_hive()  # block:leave_hive
+    yield self.fly_to(s.home.pos.x + random.randint(-40, 40), s.home.pos.y + random.randint(-40, 40))  # block:out_fly_search
 
 
 class MyForager(Forager):  # block:prog_forager
@@ -32,16 +30,6 @@ class MyForager(Forager):  # block:prog_forager
                 yield from рейс(self, s, цветок)  # block:call_trip
             else:  # block:if_flower
                 yield self.fly_to(s.home.pos.x + random.randint(-40, 40), s.home.pos.y + random.randint(-40, 40))  # block:fly_search
-
-
-class MyHouse(HouseBee):  # block:prog_house
-    def step(self, s):  # block:prog_house
-        if s.hive_nectar > 0.05:  # block:if_house
-            self.process()  # block:process
-        elif len(s.breeding_queue) > 0:  # block:if_house
-            self.nurse()  # block:nurse
-        else:  # block:if_house
-            self.rest()  # block:rest
 
 
 def hive_step(hive):  # block:prog_hive

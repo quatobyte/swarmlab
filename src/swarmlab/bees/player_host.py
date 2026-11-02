@@ -15,7 +15,7 @@
 обновляется на месте — после `yield` в нём свежие сенсоры. Пчела погибла —
 генератор закрывается (`finally` выполняется); конец матча — `close()`.
 
-Тот же хост без процесса исполняет встроенных ботов врагов (шершни, пауки,
+Тот же хост без процесса исполняет встроенных ботов врагов (пауки,
 DECISIONS №36): модуль передаёт классы ботов в `use_classes` и вызывает `step`
 у себя — протокол и классы API те же, что у игрока.
 
@@ -40,9 +40,6 @@ from swarmlab.core.protocol import CommandBatch, SensorBatch
 _BASES: dict[str, type] = {
     "scout": api.Scout,
     "forager": api.Forager,
-    "guard": api.Guard,
-    "house": api.HouseBee,
-    "hornet": api.Hornet,
     "spider": api.Spider,
 }
 #: Одинаковая ошибка повторно пишется в лог на 1-й, 10-й, 100-й… раз.
@@ -81,7 +78,7 @@ class HiveHost:
 
     def load(self, hello: dict[str, Any]) -> dict[str, Any]:
         options = hello.get("options") or {}
-        for key in ("advanced_control", "channels", "max_values"):
+        for key in ("channels", "max_values"):
             if key in options:
                 api._RULES[key] = options[key]
         self.team = int(hello.get("team", 0))
@@ -164,8 +161,8 @@ class HiveHost:
                     if inspect.isgenerator(result):
                         cmd = self._start(uid, Program(result), sensors, float(raw["time"]))
             except Exception as e:
-                # Летающий агент зависает; домашняя пчела и паук продолжают как было.
-                cmd = {"move": ["hover"]} if kind not in ("house", "spider") else {}
+                # Пчела зависает; паук продолжает как было.
+                cmd = {"move": ["hover"]} if kind != "spider" else {}
                 errors.append(uid)
                 self._forget_program(uid)  # генератор с исключением уже закончен
                 self._report(e, f"Пчела {kind} id={uid}, тик {batch.tick}")
@@ -344,10 +341,6 @@ class HiveHost:
     # --------------------------------------------------------------- сенсоры
 
     def _sensors(self, raw: dict[str, Any], kind: str) -> Any:
-        if kind == "house":
-            return _house_sensors(raw)
-        if kind == "hornet":
-            return _hornet_sensors(raw)
         if kind == "spider":
             return _spider_sensors(raw)
         return _flying_sensors(raw, self.team)
@@ -376,7 +369,7 @@ def _vec(v: list[float]) -> api.Vec:
 
 def _counts(c: dict[str, Any]) -> api.Counts:
     out = api.Counts()
-    for kind in ("scout", "forager", "guard"):
+    for kind in ("scout", "forager"):
         entry = c.get(kind) or {}
         in_hive, flying = int(entry.get("in_hive", 0)), int(entry.get("flying", 0))
         setattr(out, kind, in_hive + flying)
@@ -386,19 +379,6 @@ def _counts(c: dict[str, Any]) -> api.Counts:
     out.in_hive["house"] = out.house
     out.flying["house"] = 0
     return out
-
-
-def _house_sensors(raw: dict[str, Any]) -> api.HouseSensors:
-    me = raw["me"]
-    return api.HouseSensors(
-        tick=raw["tick"],
-        time=raw["time"],
-        me=api.HouseMe(me["id"], "house", me.get("task", "rest")),
-        hive_nectar=raw["hive_nectar"],
-        hive_honey=raw["hive_honey"],
-        breeding_queue=[api.Larva(q["kind"], q["left_s"]) for q in raw["breeding_queue"]],
-        counts=_counts(raw["counts"]),
-    )
 
 
 def _flying_sensors(raw: dict[str, Any], team: int) -> api.Sensors:
@@ -430,11 +410,6 @@ def _flying_sensors(raw: dict[str, Any], team: int) -> api.Sensors:
         for b in raw["bees"]
         for r in (b["rel_pos"],)
     ]
-    enemies = [
-        api.Enemy(e["id"], e["kind"], absolute(r), Vec(*r), dist(r), _vec(e["vel"]))
-        for e in raw["enemies"]
-        for r in (e["rel_pos"],)
-    ]
     obstacles = [
         api.Obstacle(absolute(r), Vec(*r), dist(r), o["radius"])
         for o in raw["obstacles"]
@@ -456,7 +431,6 @@ def _flying_sensors(raw: dict[str, Any], team: int) -> api.Sensors:
         weather=raw["weather"],
         flowers=flowers,
         bees=bees,
-        enemies=enemies,
         obstacles=obstacles,
         messages=messages,
         pheromones=api.Pheromones(ph["values"], ph["gradient"]),
@@ -478,28 +452,6 @@ def _bee_infos(rows: list[dict[str, Any]], origin: api.Vec, team: int) -> list[a
         )
     out.sort(key=lambda b: b.dist)
     return out
-
-
-def _hornet_sensors(raw: dict[str, Any]) -> api.HornetSensors:
-    m = raw["me"]
-    pos = _vec(m["pos"])
-    me = api.HornetMe(
-        m["id"], "hornet", pos, _vec(m["vel"]), m["hp"], m["hp_max"], m["fleeing"]
-    )
-    hives = []
-    for h in raw["hives"]:
-        hp = _vec(h["pos"])
-        rel = hp - pos
-        hives.append(api.HiveInfo(h["team"], hp, rel, rel.length()))
-    return api.HornetSensors(
-        tick=raw["tick"],
-        time=raw["time"],
-        me=me,
-        ground_z=raw["ground_z"],
-        bees=_bee_infos(raw["bees"], pos, -1),
-        hives=hives,
-        map_half_size=raw["map_half_size"],
-    )
 
 
 def _spider_sensors(raw: dict[str, Any]) -> api.SpiderSensors:

@@ -94,10 +94,9 @@ def _public_api() -> set[str]:
                 out.add(item.target.id)
         return out
 
-    names = {f"Bee.{m}" for m in own("Bee", False) | own("_Flyer", False)}
-    for cls in ("Forager", "Guard", "HouseBee"):
-        names |= {f"{cls}.{m}" for m in own(cls, False)}
-    for cls in ("Hive", "Sensors", "Me", "Home", "HouseSensors", "HouseMe", "Flower", "Enemy",
+    names = {f"Bee.{m}" for m in own("Bee", False)}
+    names |= {f"Forager.{m}" for m in own("Forager", False)}
+    for cls in ("Hive", "Sensors", "Me", "Home", "Flower",
                 "BeeInfo", "Obstacle", "Message", "Pheromones", "Vec", "Counts", "Larva"):
         names |= {f"{cls}.{m}" for m in own(cls, True)}
     return names | {"wait", "HIVE_ID"}
@@ -108,10 +107,13 @@ def test_block_set_matches_public_api():
     blocks = {b["api"] for b in _gen_module().build_blocks()["blocks"]}
     api = _public_api()
     assert blocks == api, f"нет блоков: {sorted(api - blocks)}; лишние: {sorted(blocks - api)}"
-    # Команды пчёл и улья — на месте; боты (шершень, паук) — не игрок.
-    assert {"Bee.fly_to", "Forager.collect", "Guard.intercept", "HouseBee.nurse", "Hive.breed",
-            "Sensors.nearest_flower", "Me.energy_percent", "wait"} <= blocks
-    assert not any(b.startswith(("Hornet.", "Spider.")) for b in blocks)
+    # Команды пчёл и улья — на месте; бот (паук) — не игрок; удалённых команд нет.
+    assert {"Bee.fly_to", "Bee.hover", "Bee.go_home", "Bee.signal", "Bee.mark",
+            "Forager.collect", "Hive.breed", "Sensors.nearest_flower", "Sensors.messages",
+            "Pheromones.strength", "Me.energy_percent", "wait"} <= blocks
+    assert not any(b.startswith(("Spider.", "Guard.", "HouseBee.", "Enemy.")) for b in blocks)
+    assert not {"Bee.fly_dir", "Bee.leave_hive", "Bee.thrust", "Forager.unload",
+                "Hive.cancel_breeding"} & blocks
 
 
 @needs_node

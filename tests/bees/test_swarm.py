@@ -22,7 +22,7 @@ def test_crowd_keeps_distance():
     sim = make_sim(*FLAT, *CALM, "pool.max_bees_per_hive=100")
     m = sim.module
     target = np.array([40.0, 40.0])
-    kinds = [FLYING_KINDS[i % 3] for i in range(100)]
+    kinds = [FLYING_KINDS[i % len(FLYING_KINDS)] for i in range(100)]
     # Старт — квадрат 10×10 с шагом 3 м в 20–50 м от цели.
     grid = np.stack(np.meshgrid(np.arange(10), np.arange(10)), -1).reshape(-1, 2) * 3.0
     slots = np.array(
@@ -195,7 +195,14 @@ def test_crosswind_drifts_without_correction_autopilot_compensates():
     start = [_ground_point(m, c, 10.0) for c in (30.0 * across[:2], [0.0, 0.0])]
     passive = m.spawn(0, "forager", start[0])  # тяга = вес, без коррекции
     holder = m.spawn(0, "forager", start[1])  # автопилот висит на месте
-    m.set_thrust(np.array([passive]), np.array([[0.0, 0.0, m.bees.mass[passive] * m.gravity]]))
+    pilot = m.autopilot.thrust
+
+    def thrust(slots, *args, **kwargs):
+        out = pilot(slots, *args, **kwargs)
+        out[slots == passive] = [0.0, 0.0, m.bees.mass[passive] * m.gravity]
+        return out
+
+    m.autopilot.thrust = thrust
     run_for(sim, 15.0)
     pos, _ = m.backend.body_state(np.array([passive, holder]))
     drift = pos[0] - start[0]
@@ -251,10 +258,10 @@ def test_zero_energy_falls_dies_and_slot_returns_to_pool():
     # Упала почти вертикально и погибла у земли.
     assert sim.time - t0 < 2.0
     # Слот снова выдаётся, у новой пчелы новый id.
-    s2 = m.spawn(0, "guard")
+    s2 = m.spawn(0, "scout")
     assert s2 == s and m.bees.uid[s2] != uid
-    assert m.bees.radius[s2] == pytest.approx(m.params.bee_types.guard.radius)
-    assert m.backend.model.geom_size[m.backend.geom_id(s2), 0] == pytest.approx(0.35)
+    assert m.bees.radius[s2] == pytest.approx(m.params.bee_types.scout.radius)
+    assert m.backend.model.geom_size[m.backend.geom_id(s2), 0] == pytest.approx(0.20)
 
 
 # ------------------------------------------------------------------ возвращение домой

@@ -1,4 +1,4 @@
-"""Умный улей: разведка, общая карта полян и пауков, тепловой шар, расчёт мёда.
+"""Умный улей: разведка, общая карта полян и пауков, расчёт мёда.
 
 Как он устроен (BEES_SPEC §11):
 
@@ -8,12 +8,9 @@
 * **Улей** собирает рассказы в память (`hive.memory`) — это «карта» улья — и
   пересказывает её каждой пчеле, которая вылетает: по очереди поляны и пауков.
 * **Сборщики** помнят карту, выбирают цветок «побольше нектара, поближе»,
-  обходят цветы с пауками, а увидев шершня — летят домой, к охране.
-* **Охранники** держатся позади улья, не загораживая леток (шершень не может
-  грабить, пока они рядом), и бросаются на шершня только втроём и больше —
-  тепловой шар.
-* **Домашние пчёлы** перерабатывают нектар и нянчат личинок.
-* **Улей** выводит пчёл, пока это окупается, и держит охрану.
+  обходят цветы с пауками и делят поляны между собой.
+* **Домашние пчёлы** работают сами: перерабатывают нектар и нянчат личинок.
+* **Улей** выводит пчёл, пока это окупается.
 
 Сообщения (до 8 чисел):
     (FIELD, x, y, нектар)              — поляна
@@ -22,17 +19,7 @@
 
 import math
 
-from swarmlab.bees.api import (
-    HIVE_ID,
-    Forager,
-    Guard,
-    Hive,
-    HouseBee,
-    HouseSensors,
-    Scout,
-    Sensors,
-    Vec,
-)
+from swarmlab.bees.api import HIVE_ID, Forager, Hive, Scout, Sensors, Vec
 
 FIELD, SPIDER = 1.0, 2.0
 
@@ -44,10 +31,6 @@ SAME_FIELD = 12.0
 HONEY_RESERVE = 16.0
 #: После этой секунды матча новые пчёлы уже не успеют окупиться.
 BREED_UNTIL_S = 150.0
-#: Сколько охранников держать.
-GUARDS_WANTED = 5
-#: Охранники атакуют, когда рядом столько своих охранников (вместе со мной).
-BALL_SIZE = 3
 
 
 def _golden_angle(n: int) -> float:
@@ -97,14 +80,17 @@ class SmartScout(Scout):
         self.plan = []  # точки облёта поляны
         self.news = False  # есть что рассказать улью
         self.trip = 0  # номер вылета — каждый раз в новую сторону
+        self.inside = False  # был в улье на прошлом тике
 
     def step(self, s: Sensors):
         me = s.me
         if me.in_hive:
-            if me.energy_percent > 90:
-                self.trip += 1
-                self.leave_hive()
-            return
+            if not self.inside:
+                self.trip += 1  # вернулся — следующий вылет в новую сторону
+            self.inside = True
+            if me.energy_percent <= 90:
+                return  # заправляюсь
+        self.inside = me.in_hive
 
         # Всё, что вижу: пауков — на карту.
         for f in s.flowers:
@@ -169,7 +155,7 @@ class SmartScout(Scout):
 
 
 class SmartForager(Forager):
-    """Собирает с выгодных цветов, обходит пауков, от шершня — к охране."""
+    """Собирает с выгодных цветов и обходит пауков."""
 
     def __init__(self):
         self.fields = []  # карта полян, которую рассказал улей
@@ -181,15 +167,9 @@ class SmartForager(Forager):
         me = s.me
         _read_map(s.messages, self.fields, self.spiders)
         if me.in_hive:
-            if me.cargo > 0:
-                self.unload()
-            elif me.energy_percent > 70:
-                self.leave_hive()
-            return
-
-        # Шершень рядом — домой, к охранникам.
-        enemy = s.nearest_enemy()
-        if me.is_full or me.energy_percent < 30 or (enemy is not None and enemy.dist < 8):
+            if me.energy_percent <= 70:
+                return  # нектар выгружен, заправляюсь
+        elif me.is_full or me.energy_percent < 30:
             self.go_home()
             return
 
@@ -233,55 +213,6 @@ class SmartForager(Forager):
         return (i, p)
 
 
-# ===================================================================== охранник
-
-
-class SmartGuard(Guard):
-    """Кольцо у летка; на шершня — только тепловым шаром (3 охранника и больше)."""
-
-    def step(self, s: Sensors):
-        me = s.me
-        if me.in_hive:
-            if me.energy_percent > 90:
-                self.leave_hive()
-            return
-        if me.energy_percent < 35:
-            self.go_home()
-            return
-
-        enemy = s.nearest_enemy()
-        if enemy is not None and enemy.pos.dist_xy(s.home.pos) < 30.0:
-            guards = 1 + sum(1 for b in s.bees if b.friend and b.kind == "guard" and b.dist < 10)
-            if guards >= BALL_SIZE:
-                self.intercept(enemy)
-                return
-
-        # Своё место на дуге позади улья: леток смотрит на +x, вход не загораживаем,
-        # но шершень у летка окажется рядом с охраной.
-        angle = math.pi / 2 + (_golden_angle(me.id) % math.pi)
-        center = s.home.pos - Vec(2.5, 0.0)
-        p = center + Vec(math.cos(angle), math.sin(angle)) * 3.5
-        self.fly_to(p.x, p.y, s.home.pos.z + 3.0)
-
-
-# ===================================================================== домашние
-
-
-class SmartHouse(HouseBee):
-    """Двое нянчат личинок, если они есть; остальные перерабатывают нектар."""
-
-    def step(self, s: HouseSensors):
-        index = s.me.id % max(1, s.counts.house)
-        if s.breeding_queue and index < 2:
-            self.nurse()
-        elif s.hive_nectar > 0.05:
-            self.process()
-        elif s.breeding_queue:
-            self.nurse()
-        else:
-            self.rest()
-
-
 # ===================================================================== улей
 
 
@@ -305,11 +236,9 @@ def hive_step(hive: Hive):
     if hive.queue:
         return
     c = hive.counts
-    if c.guard < GUARDS_WANTED:
-        kind = "guard"  # охрану восполняем всегда
-    elif hive.time > BREED_UNTIL_S:
+    if hive.time > BREED_UNTIL_S:
         return  # поздно: пчела не успеет принести больше, чем стоит
-    elif c.house < 6 + c.forager // 4:
+    if c.house < 6 + c.forager // 4:
         kind = "house"
     else:
         kind = "forager"

@@ -11,7 +11,7 @@ from swarmlab.server.scripts import check_syntax
 
 #: Пчёлы сидят в улье: ни одной команды, вылетать некому.
 SCRIPT_STAY = '''
-from swarmlab.bees.api import Forager, Guard, Scout
+from swarmlab.bees.api import Forager, Scout
 
 _said = False
 
@@ -31,20 +31,12 @@ class MyScout(Scout):
 class MyForager(Forager):
     def step(self, s):
         pass
-
-
-class MyGuard(Guard):
-    def step(self, s):
-        pass
 '''
 
 #: Те же классы, но все вылетают и летят на восток от улья.
 SCRIPT_FLY = SCRIPT_STAY.replace("ВЕРСИЯ A: все сидят в улье", "ВЕРСИЯ B: все летят").replace(
     "        pass\n",
-    "        if s.me.in_hive:\n"
-    "            self.leave_hive()\n"
-    "        else:\n"
-    "            self.fly_to(s.home.pos.x + 30, s.home.pos.y)\n",
+    "        self.fly_to(s.home.pos.x + 30, s.home.pos.y)\n",
 )
 
 #: Бесконечный цикл в step() сборщика.
@@ -140,8 +132,8 @@ def test_check_syntax_reports_line_and_column():
 
 
 def test_syntax_error_shown_with_line_server_alive(server):
-    text = SCRIPT_STAY.replace("class MyGuard(Guard):", "class MyGuard(Guard)")
-    line = text.splitlines().index("class MyGuard(Guard)") + 1
+    text = SCRIPT_STAY.replace("class MyForager(Forager):", "class MyForager(Forager)")
+    line = text.splitlines().index("class MyForager(Forager)") + 1
     code, res = server.json("POST", "/api/scripts/check", {"text": text})
     assert code == 200 and not res["ok"] and res["errors"][0]["line"] == line
 
@@ -243,18 +235,18 @@ def test_infinite_loop_match_goes_on_with_budget_warning(server):
     assert pkt["team"] == 0 and pkt["name"] == "hive0" and isinstance(pkt["time"], float)
 
 
-def test_hornets_toggle_off_removes_hornets(server):
-    """Переключатель «шершни» выключен → шершней нет (тело запроса — как у панели «Матч»)."""
+def test_spiders_toggle_off_removes_spiders(server):
+    """Переключатель «пауки» выключен → пауков нет (тело запроса — как у панели «Матч»).
+
+    Шершней в игре нет совсем (DECISIONS №82): ни в кадрах, ни в событиях.
+    """
     path = (server.cfg.scripts / "example_basic.py").as_posix()
 
-    def run(hornets: bool) -> tuple[dict, list[dict]]:
+    def run(spiders: bool) -> tuple[dict, list[dict]]:
         body = {"match": "demo.yaml", "speed": 8.0, "seed": 3, "scripts": ["example_basic.py"],
                 "overrides": [
                     "profile=small", "duration_s=12", f'hives=[{{script: "{path}"}}]',
-                    f"enemies.hornets.enabled={str(hornets).lower()}",
-                    "enemies.spiders.enabled=true", "weather.enabled=true",
-                    # Шершни прилетают сразу и часто, чтобы включённые точно появились.
-                    "enemies.hornets.first_wave_s=1", "enemies.hornets.wave_interval_s=3",
+                    f"enemies.spiders.enabled={str(spiders).lower()}", "weather.enabled=true",
                 ]}
         code, info = server.json("POST", "/api/matches", body)
         assert code == 200, info
@@ -264,17 +256,18 @@ def test_hornets_toggle_off_removes_hornets(server):
         assert frames[-1]["time"] >= 11.0
         return header, frames
 
-    def hornets_seen(frames: list[dict]) -> int:
-        return max(len(f["arrays"]["hornet_uid"]) for f in frames)
+    def spider_flowers(header: dict) -> int:
+        return int(sum(bool(x) for x in header["scene"]["world"]["flower_spider"]))
 
     header_on, frames_on = run(True)
-    assert header_on["config"]["params"]["enemies"]["hornets"]["enabled"] is True
-    assert hornets_seen(frames_on) > 0
+    assert header_on["config"]["params"]["enemies"]["spiders"]["enabled"] is True
+    assert spider_flowers(header_on) > 0
     header_off, frames_off = run(False)
-    assert header_off["config"]["params"]["enemies"]["hornets"]["enabled"] is False
-    assert hornets_seen(frames_off) == 0
-    assert not any(str(e.get("type", "")).startswith("hornet")
-                   for f in frames_off for e in f["events"])
+    assert header_off["config"]["params"]["enemies"]["spiders"]["enabled"] is False
+    assert spider_flowers(header_off) == 0
+    for f in frames_on + frames_off:
+        assert not [k for k in f["arrays"] if "hornet" in k]
+        assert not any(str(e.get("type", "")).startswith("hornet") for e in f["events"])
 
 
 def test_late_viewer_gets_log_history(server):

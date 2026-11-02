@@ -154,8 +154,8 @@ def test_m1_swarm_is_deterministic_and_flies():
     m = a.module
     assert len(m.bees.airborne) == 300
     row = m.score().teams[0]
-    counts = {k: row[k] for k in ("scout", "forager", "guard", "house", "alive")}
-    assert counts == {"scout": 20.0, "forager": 60.0, "guard": 20.0, "house": 0.0, "alive": 100.0}
+    counts = {k: row[k] for k in ("scout", "forager", "house", "alive")}
+    assert counts == {"scout": 20.0, "forager": 80.0, "house": 0.0, "alive": 100.0}
     _, vel = m.backend.body_state(m.bees.airborne)
     assert np.median(np.linalg.norm(vel, axis=1)) > 2.0  # рой разлетается по точкам
 

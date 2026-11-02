@@ -10,9 +10,9 @@ import { BLOCKS_API } from "./blocks_api.js";
 import { MESSAGES as M } from "./blocks_ru.js";
 
 /** Типы программ пчёл (порядок в коде) и их классы в api.py. */
-export const BEE_KINDS = ["scout", "forager", "guard", "house"];
-const BASE_CLASS = { scout: "Scout", forager: "Forager", guard: "Guard", house: "HouseBee" };
-const USER_CLASS = { scout: "MyScout", forager: "MyForager", guard: "MyGuard", house: "MyHouse" };
+export const BEE_KINDS = ["scout", "forager"];
+const BASE_CLASS = { scout: "Scout", forager: "Forager" };
+const USER_CLASS = { scout: "MyScout", forager: "MyForager" };
 const ALL_SUBJECTS = [...BEE_KINDS, "hive"];
 
 const API = new Map(BLOCKS_API.blocks.map((b) => [b.type, b]));
@@ -43,8 +43,8 @@ const PY_KEYWORDS = new Set([
 /** Имена, которые генератор использует сам, — переменной или процедуре их не дать. */
 const RESERVED = new Set([
   "self", "s", "hive", "wait", "math", "random", "print", "len", "range", "int", "float", "str", "abs",
-  "min", "max", "round", "list", "dict", "hive_step", "HIVE_ID", "_", "Scout", "Forager", "Guard",
-  "HouseBee", "Hive", "Sensors", "HouseSensors", ...Object.values(USER_CLASS),
+  "min", "max", "round", "list", "dict", "hive_step", "HIVE_ID", "_", "Scout", "Forager",
+  "Hive", "Sensors", ...Object.values(USER_CLASS),
 ]);
 const IDENT = /^[\p{L}_][\p{L}\p{N}_]*$/u;
 
@@ -664,7 +664,6 @@ class Gen {
         return [`${this.val(ctx, b, "dict", O.MEMBER)}.get(${this.val(ctx, b, "key", O.NONE)})`, O.MEMBER];
       case "bees_literal_Kind":
       case "bees_literal_Weather":
-      case "bees_literal_Task":
         return [pyString(field(b, "VALUE")), O.ATOMIC];
       default:
         this.error(b, fmt(M.unknownBlock, { type: b.type }));

@@ -31,8 +31,8 @@ def test_api_hints_js_in_sync_with_api_py():
 def test_api_hints_cover_player_api():
     hints = _gen().build_hints()["classes"]
     forager = {m["name"]: m for m in hints["Forager"]["members"]}
-    # Команды сборщика — свои и унаследованные от Bee и внутреннего _Flyer.
-    for name in ("collect", "unload", "go_home", "leave_hive", "fly_to", "hover", "signal", "mark"):
+    # Команды сборщика — свои и унаследованные от Bee.
+    for name in ("collect", "go_home", "fly_to", "hover", "signal", "mark"):
         assert forager[name]["kind"] == "method" and forager[name]["doc"], name
     assert forager["fly_to"]["sig"].startswith("(x, y")
     assert forager["step"]["kind"] == "override"
@@ -44,7 +44,10 @@ def test_api_hints_cover_player_api():
     assert sensors["nearest_flower"]["type"] == "Flower | None"
     hive = {m["name"]: m for m in hints["Hive"]["members"]}
     assert {"honey", "counts", "memory", "breed"} <= set(hive)
-    assert "_Flyer" not in hints and "_Agent" not in hints
+    assert "_Agent" not in hints
+    # Удалённые команды и классы (DECISIONS №82) в подсказки не попадают.
+    assert not {"unload", "leave_hive", "fly_dir", "thrust"} & set(forager)
+    assert not {"Guard", "HouseBee", "Enemy", "Hornet"} & set(hints)
 
 
 @pytest.mark.skipif(shutil.which("node") is None, reason="нет Node.js — JS-проверка пропущена")
@@ -54,18 +57,15 @@ def test_editor_hints_infer_types():
     assert out.returncode == 0, out.stderr
     js = json.loads(out.stdout)
     assert {"energy_percent", "pos", "cargo", "in_hive"} <= set(js["s.me."])
-    assert {"collect", "unload", "fly_to", "go_home"} <= set(js["self."])
+    assert {"collect", "fly_to", "go_home", "signal", "mark"} <= set(js["self."])
     assert "step" not in js["self."]
     assert js["self.co"] == ["collect"]
     assert {"nectar", "pos", "dist", "id"} <= set(js["flower="])
-    assert "kind" in js["for"] and "nectar" not in js["for"]  # Enemy, не Flower
+    assert "friend" in js["for"] and "nectar" not in js["for"]  # BeeInfo, не Flower
     assert {"x", "y", "z", "length", "dist"} <= set(js["index"])  # Vec
     assert "nectar" in js["selfattr"]
     assert {"honey", "breed", "counts", "memory"} <= set(js["hive"])
     assert {"forager", "total"} <= set(js["counts"])
-    # HouseSensors — через свой базовый класс игрока.
-    assert {"hive_nectar", "breeding_queue"} <= set(js["house"])
-    assert {"process", "nurse", "rest"} <= set(js["houseself"])
     assert "Forager" in js["global"]
     assert "step" in js["super"]
     md = js["markdown"]

@@ -54,10 +54,18 @@
      "inputs": {
       "STACK": {
        "block": {
-        "type": "bees_Forager_unload",
+        "type": "bees_Forager_collect",
         "id": "unload",
         "fields": {
          "WAIT": true
+        },
+        "inputs": {
+         "flower": {
+          "block": {
+           "type": "bees_Sensors_nearest_flower",
+           "id": "nf2"
+          }
+         }
         }
        }
       }

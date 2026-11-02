@@ -69,7 +69,7 @@ def test_series_writes_replays_json_with_sha256_and_csv(tmp_path):
     rows = list(csv.reader(raw.decode("utf-8-sig").splitlines(), delimiter=";"))
     head = rows[0]
     for title in ("seed", "место", "мёд", "доставлено нектара", "живых пчёл", "гибели: энергия",
-                  "гибели: шершень", "гибели: паук", "ошибки кода: исключения",
+                  "гибели: паук", "ошибки кода: исключения",
                   "ошибки кода: пропущено тиков", "ошибки кода: сверх бюджета"):
         assert title in head, title
     assert [r[0] for r in rows[1:]] == ["3", "4", "среднее"]

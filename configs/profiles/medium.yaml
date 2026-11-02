@@ -20,5 +20,3 @@ bees:
     rocks: {per_ha: 2.0}
   pool:
     max_bees_per_hive: 100
-  enemies:
-    hornets: {max: 8}

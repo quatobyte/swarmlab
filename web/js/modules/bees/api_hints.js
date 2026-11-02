@@ -113,7 +113,7 @@ export const API_HINTS = {
      "name": "in_hive",
      "kind": "field",
      "type": "bool",
-     "doc": "я внутри улья (там заправляюсь и выгружаю нектар)"
+     "doc": "я внутри улья (там заправляюсь; нектар выгружается сам при входе)"
     },
     {
      "name": "is_full",
@@ -125,7 +125,7 @@ export const API_HINTS = {
      "name": "kind",
      "kind": "field",
      "type": "Kind",
-     "doc": "тип: \"scout\", \"forager\", \"guard\""
+     "doc": "тип: \"scout\" или \"forager\""
     },
     {
      "name": "pos",
@@ -261,48 +261,6 @@ export const API_HINTS = {
     }
    ]
   },
-  "Enemy": {
-   "doc": "Враг рядом (шершень).",
-   "bases": [],
-   "members": [
-    {
-     "name": "dist",
-     "kind": "field",
-     "type": "float",
-     "doc": ""
-    },
-    {
-     "name": "id",
-     "kind": "field",
-     "type": "int",
-     "doc": "номер врага — его передают в `intercept()`"
-    },
-    {
-     "name": "kind",
-     "kind": "field",
-     "type": "str",
-     "doc": "\"hornet\""
-    },
-    {
-     "name": "pos",
-     "kind": "field",
-     "type": "Vec",
-     "doc": ""
-    },
-    {
-     "name": "rel_pos",
-     "kind": "field",
-     "type": "Vec",
-     "doc": ""
-    },
-    {
-     "name": "vel",
-     "kind": "field",
-     "type": "Vec",
-     "doc": ""
-    }
-   ]
-  },
   "Obstacle": {
    "doc": "Препятствие рядом: дерево, камень, улей.",
    "bases": [],
@@ -412,12 +370,6 @@ export const API_HINTS = {
      "doc": "пчёлы рядом"
     },
     {
-     "name": "enemies",
-     "kind": "field",
-     "type": "list[Enemy]",
-     "doc": "враги рядом"
-    },
-    {
      "name": "flowers",
      "kind": "field",
      "type": "list[Flower]",
@@ -446,13 +398,6 @@ export const API_HINTS = {
      "kind": "field",
      "type": "list[Message]",
      "doc": "сообщения от своих"
-    },
-    {
-     "name": "nearest_enemy",
-     "kind": "method",
-     "sig": "()",
-     "type": "Enemy | None",
-     "doc": "Ближайший видимый враг; `None` — врагов не видно."
     },
     {
      "name": "nearest_flower",
@@ -490,139 +435,6 @@ export const API_HINTS = {
      "kind": "field",
      "type": "Weather",
      "doc": "погода: \"clear\", \"windy\", \"rain\""
-    }
-   ]
-  },
-  "HornetMe": {
-   "doc": "Что шершень знает о себе.",
-   "bases": [],
-   "members": [
-    {
-     "name": "fleeing",
-     "kind": "field",
-     "type": "bool",
-     "doc": "Здоровья мало (меньше порога) — шершень больше не нападает и должен улетать за край."
-    },
-    {
-     "name": "hp",
-     "kind": "field",
-     "type": "float",
-     "doc": "здоровье (0 — шершень погиб)"
-    },
-    {
-     "name": "hp_max",
-     "kind": "field",
-     "type": "float",
-     "doc": ""
-    },
-    {
-     "name": "id",
-     "kind": "field",
-     "type": "int",
-     "doc": "номер шершня (пчёлы видят его в `enemies`)"
-    },
-    {
-     "name": "kind",
-     "kind": "field",
-     "type": "str",
-     "doc": "всегда \"hornet\""
-    },
-    {
-     "name": "pos",
-     "kind": "field",
-     "type": "Vec",
-     "doc": ""
-    },
-    {
-     "name": "vel",
-     "kind": "field",
-     "type": "Vec",
-     "doc": ""
-    }
-   ]
-  },
-  "HiveInfo": {
-   "doc": "Улей на карте (шершни знают, где ульи).",
-   "bases": [],
-   "members": [
-    {
-     "name": "dist",
-     "kind": "field",
-     "type": "float",
-     "doc": ""
-    },
-    {
-     "name": "pos",
-     "kind": "field",
-     "type": "Vec",
-     "doc": "леток"
-    },
-    {
-     "name": "rel_pos",
-     "kind": "field",
-     "type": "Vec",
-     "doc": ""
-    },
-    {
-     "name": "team",
-     "kind": "field",
-     "type": "int",
-     "doc": "номер улья"
-    }
-   ]
-  },
-  "HornetSensors": {
-   "doc": "Сенсоры шершня. Приходят в `step(self, s)` класса `Hornet`.",
-   "bases": [],
-   "members": [
-    {
-     "name": "bees",
-     "kind": "field",
-     "type": "list[BeeInfo]",
-     "doc": "пчёлы рядом (ближние — первыми); `friend` всегда False"
-    },
-    {
-     "name": "ground_z",
-     "kind": "field",
-     "type": "float",
-     "doc": "высота земли подо мной, м"
-    },
-    {
-     "name": "hives",
-     "kind": "field",
-     "type": "list[HiveInfo]",
-     "doc": "все ульи карты"
-    },
-    {
-     "name": "map_half_size",
-     "kind": "field",
-     "type": "float",
-     "doc": "карта — квадрат от -map_half_size до +map_half_size по x и y"
-    },
-    {
-     "name": "me",
-     "kind": "field",
-     "type": "HornetMe",
-     "doc": ""
-    },
-    {
-     "name": "nearest_bee",
-     "kind": "method",
-     "sig": "()",
-     "type": "BeeInfo | None",
-     "doc": "Ближайшая видимая пчела; `None` — пчёл не видно."
-    },
-    {
-     "name": "tick",
-     "kind": "field",
-     "type": "int",
-     "doc": ""
-    },
-    {
-     "name": "time",
-     "kind": "field",
-     "type": "float",
-     "doc": ""
     }
    ]
   },
@@ -703,12 +515,6 @@ export const API_HINTS = {
      "doc": ""
     },
     {
-     "name": "guard",
-     "kind": "field",
-     "type": "int",
-     "doc": ""
-    },
-    {
      "name": "house",
      "kind": "field",
      "type": "int",
@@ -752,122 +558,36 @@ export const API_HINTS = {
     }
    ]
   },
-  "HouseMe": {
-   "doc": "Что домашняя пчела знает о себе.",
-   "bases": [],
-   "members": [
-    {
-     "name": "id",
-     "kind": "field",
-     "type": "int",
-     "doc": ""
-    },
-    {
-     "name": "kind",
-     "kind": "field",
-     "type": "Kind",
-     "doc": "всегда \"house\""
-    },
-    {
-     "name": "task",
-     "kind": "field",
-     "type": "Task",
-     "doc": "чем занята сейчас: \"rest\", \"process\", \"nurse\""
-    }
-   ]
-  },
-  "HouseSensors": {
-   "doc": "Сенсоры домашней пчелы: она живёт в улье и видит его склад.",
-   "bases": [],
-   "members": [
-    {
-     "name": "breeding_queue",
-     "kind": "field",
-     "type": "list[Larva]",
-     "doc": "очередь выведения"
-    },
-    {
-     "name": "counts",
-     "kind": "field",
-     "type": "Counts",
-     "doc": "сколько пчёл в улье"
-    },
-    {
-     "name": "hive_honey",
-     "kind": "field",
-     "type": "float",
-     "doc": "мёда на складе, ед."
-    },
-    {
-     "name": "hive_nectar",
-     "kind": "field",
-     "type": "float",
-     "doc": "нектара на складе, ед."
-    },
-    {
-     "name": "me",
-     "kind": "field",
-     "type": "HouseMe",
-     "doc": ""
-    },
-    {
-     "name": "tick",
-     "kind": "field",
-     "type": "int",
-     "doc": ""
-    },
-    {
-     "name": "time",
-     "kind": "field",
-     "type": "float",
-     "doc": ""
-    }
-   ]
-  },
   "Bee": {
-   "doc": "Летающая пчела. Общие команды разведчика, сборщика и охранника.",
+   "doc": "Летающая пчела. Общие команды разведчика и сборщика.",
    "bases": [],
    "members": [
-    {
-     "name": "fly_dir",
-     "kind": "method",
-     "sig": "(dx, dy, dz=0.0, speed=None)",
-     "type": "Order",
-     "doc": "Лететь в направлении `(dx, dy, dz)` (длина неважна), пока не скажут другое."
-    },
     {
      "name": "fly_to",
      "kind": "method",
      "sig": "(x, y, z=None, speed=None, avoid=True)",
      "type": "Order",
-     "doc": "Лететь к точке `(x, y)`."
+     "doc": "Лететь к точке `(x, y)`. Из улья пчела сначала вылетает."
     },
     {
      "name": "go_home",
      "kind": "method",
      "sig": "()",
      "type": "Order",
-     "doc": "Лететь к летку и войти в улей (там заправка и выгрузка нектара)."
+     "doc": "Лететь к летку и войти в улей: там нектар выгрузится сам, а пчела заправится."
     },
     {
      "name": "hover",
      "kind": "method",
      "sig": "()",
      "type": "Order",
-     "doc": "Зависнуть на месте."
+     "doc": "Зависнуть на месте (в улье — остаться внутри)."
     },
     {
      "name": "kind",
      "kind": "field",
      "type": "Kind",
      "doc": ""
-    },
-    {
-     "name": "leave_hive",
-     "kind": "method",
-     "sig": "()",
-     "type": "Order",
-     "doc": "Вылететь из улья (если пчела внутри)."
     },
     {
      "name": "mark",
@@ -882,13 +602,6 @@ export const API_HINTS = {
      "sig": "(*values)",
      "type": "None",
      "doc": "Сообщение до 8 чисел своим пчёлам в радиусе 15 м (дойдёт на следующем тике)."
-    },
-    {
-     "name": "thrust",
-     "kind": "method",
-     "sig": "(fx, fy, fz)",
-     "type": "Order",
-     "doc": "Продвинутый режим: прямая сила тяги, Н. Автопилот выключается."
     },
     {
      "name": "step",
@@ -906,45 +619,31 @@ export const API_HINTS = {
    ],
    "members": [
     {
-     "name": "fly_dir",
-     "kind": "method",
-     "sig": "(dx, dy, dz=0.0, speed=None)",
-     "type": "Order",
-     "doc": "Лететь в направлении `(dx, dy, dz)` (длина неважна), пока не скажут другое."
-    },
-    {
      "name": "fly_to",
      "kind": "method",
      "sig": "(x, y, z=None, speed=None, avoid=True)",
      "type": "Order",
-     "doc": "Лететь к точке `(x, y)`."
+     "doc": "Лететь к точке `(x, y)`. Из улья пчела сначала вылетает."
     },
     {
      "name": "go_home",
      "kind": "method",
      "sig": "()",
      "type": "Order",
-     "doc": "Лететь к летку и войти в улей (там заправка и выгрузка нектара)."
+     "doc": "Лететь к летку и войти в улей: там нектар выгрузится сам, а пчела заправится."
     },
     {
      "name": "hover",
      "kind": "method",
      "sig": "()",
      "type": "Order",
-     "doc": "Зависнуть на месте."
+     "doc": "Зависнуть на месте (в улье — остаться внутри)."
     },
     {
      "name": "kind",
      "kind": "field",
      "type": "Kind",
      "doc": ""
-    },
-    {
-     "name": "leave_hive",
-     "kind": "method",
-     "sig": "()",
-     "type": "Order",
-     "doc": "Вылететь из улья (если пчела внутри)."
     },
     {
      "name": "mark",
@@ -959,13 +658,6 @@ export const API_HINTS = {
      "sig": "(*values)",
      "type": "None",
      "doc": "Сообщение до 8 чисел своим пчёлам в радиусе 15 м (дойдёт на следующем тике)."
-    },
-    {
-     "name": "thrust",
-     "kind": "method",
-     "sig": "(fx, fy, fz)",
-     "type": "Order",
-     "doc": "Продвинутый режим: прямая сила тяги, Н. Автопилот выключается."
     },
     {
      "name": "step",
@@ -990,45 +682,31 @@ export const API_HINTS = {
      "doc": "Подлететь к цветку, зависнуть над ним и набирать нектар (0.25 ед./с)."
     },
     {
-     "name": "fly_dir",
-     "kind": "method",
-     "sig": "(dx, dy, dz=0.0, speed=None)",
-     "type": "Order",
-     "doc": "Лететь в направлении `(dx, dy, dz)` (длина неважна), пока не скажут другое."
-    },
-    {
      "name": "fly_to",
      "kind": "method",
      "sig": "(x, y, z=None, speed=None, avoid=True)",
      "type": "Order",
-     "doc": "Лететь к точке `(x, y)`."
+     "doc": "Лететь к точке `(x, y)`. Из улья пчела сначала вылетает."
     },
     {
      "name": "go_home",
      "kind": "method",
      "sig": "()",
      "type": "Order",
-     "doc": "Лететь к летку и войти в улей (там заправка и выгрузка нектара)."
+     "doc": "Лететь к летку и войти в улей: там нектар выгрузится сам, а пчела заправится."
     },
     {
      "name": "hover",
      "kind": "method",
      "sig": "()",
      "type": "Order",
-     "doc": "Зависнуть на месте."
+     "doc": "Зависнуть на месте (в улье — остаться внутри)."
     },
     {
      "name": "kind",
      "kind": "field",
      "type": "Kind",
      "doc": ""
-    },
-    {
-     "name": "leave_hive",
-     "kind": "method",
-     "sig": "()",
-     "type": "Order",
-     "doc": "Вылететь из улья (если пчела внутри)."
     },
     {
      "name": "mark",
@@ -1045,196 +723,11 @@ export const API_HINTS = {
      "doc": "Сообщение до 8 чисел своим пчёлам в радиусе 15 м (дойдёт на следующем тике)."
     },
     {
-     "name": "thrust",
-     "kind": "method",
-     "sig": "(fx, fy, fz)",
-     "type": "Order",
-     "doc": "Продвинутый режим: прямая сила тяги, Н. Автопилот выключается."
-    },
-    {
-     "name": "unload",
-     "kind": "method",
-     "sig": "()",
-     "type": "Order",
-     "doc": "Выгрузить весь нектар на склад. Работает, только когда сборщик в улье."
-    },
-    {
      "name": "step",
      "kind": "override",
      "sig": "(s)",
      "type": "None",
      "doc": "Решение пчелы на этом тике. Переопределите в своём классе."
-    }
-   ]
-  },
-  "Guard": {
-   "doc": "Охранник: крупный и сильный (≈6 м/с), видит 12 м, летает ≈3 минуты.",
-   "bases": [
-    "Bee"
-   ],
-   "members": [
-    {
-     "name": "fly_dir",
-     "kind": "method",
-     "sig": "(dx, dy, dz=0.0, speed=None)",
-     "type": "Order",
-     "doc": "Лететь в направлении `(dx, dy, dz)` (длина неважна), пока не скажут другое."
-    },
-    {
-     "name": "fly_to",
-     "kind": "method",
-     "sig": "(x, y, z=None, speed=None, avoid=True)",
-     "type": "Order",
-     "doc": "Лететь к точке `(x, y)`."
-    },
-    {
-     "name": "go_home",
-     "kind": "method",
-     "sig": "()",
-     "type": "Order",
-     "doc": "Лететь к летку и войти в улей (там заправка и выгрузка нектара)."
-    },
-    {
-     "name": "hover",
-     "kind": "method",
-     "sig": "()",
-     "type": "Order",
-     "doc": "Зависнуть на месте."
-    },
-    {
-     "name": "intercept",
-     "kind": "method",
-     "sig": "(target)",
-     "type": "Order",
-     "doc": "Преследовать цель с упреждением (лететь туда, где она будет)."
-    },
-    {
-     "name": "kind",
-     "kind": "field",
-     "type": "Kind",
-     "doc": ""
-    },
-    {
-     "name": "leave_hive",
-     "kind": "method",
-     "sig": "()",
-     "type": "Order",
-     "doc": "Вылететь из улья (если пчела внутри)."
-    },
-    {
-     "name": "mark",
-     "kind": "method",
-     "sig": "(channel, amount=1.0)",
-     "type": "None",
-     "doc": "Оставить запах (феромон) канала `channel` (0–3) в клетке под пчелой."
-    },
-    {
-     "name": "signal",
-     "kind": "method",
-     "sig": "(*values)",
-     "type": "None",
-     "doc": "Сообщение до 8 чисел своим пчёлам в радиусе 15 м (дойдёт на следующем тике)."
-    },
-    {
-     "name": "thrust",
-     "kind": "method",
-     "sig": "(fx, fy, fz)",
-     "type": "Order",
-     "doc": "Продвинутый режим: прямая сила тяги, Н. Автопилот выключается."
-    },
-    {
-     "name": "step",
-     "kind": "override",
-     "sig": "(s)",
-     "type": "None",
-     "doc": "Решение пчелы на этом тике. Переопределите в своём классе."
-    }
-   ]
-  },
-  "HouseBee": {
-   "doc": "Домашняя пчела: не летает, живёт в улье.",
-   "bases": [],
-   "members": [
-    {
-     "name": "kind",
-     "kind": "field",
-     "type": "Kind",
-     "doc": ""
-    },
-    {
-     "name": "nurse",
-     "kind": "method",
-     "sig": "()",
-     "type": "Order",
-     "doc": "Ухаживать за личинками: чем больше нянек, тем быстрее выведение."
-    },
-    {
-     "name": "process",
-     "kind": "method",
-     "sig": "()",
-     "type": "Order",
-     "doc": "Перерабатывать нектар в мёд (1 ед. нектара → 0.5 ед. мёда)."
-    },
-    {
-     "name": "rest",
-     "kind": "method",
-     "sig": "()",
-     "type": "Order",
-     "doc": "Отдыхать (мёд всё равно ест)."
-    },
-    {
-     "name": "step",
-     "kind": "override",
-     "sig": "(s)",
-     "type": "None",
-     "doc": ""
-    }
-   ]
-  },
-  "Hornet": {
-   "doc": "Шершень: крупный (≈7 м/с), охотится на пчёл и грабит ульи.",
-   "bases": [],
-   "members": [
-    {
-     "name": "fly_dir",
-     "kind": "method",
-     "sig": "(dx, dy, dz=0.0, speed=None)",
-     "type": "Order",
-     "doc": "Лететь в направлении `(dx, dy, dz)` (длина неважна), пока не скажут другое."
-    },
-    {
-     "name": "fly_to",
-     "kind": "method",
-     "sig": "(x, y, z=None, speed=None, avoid=True)",
-     "type": "Order",
-     "doc": "Лететь к точке `(x, y)`."
-    },
-    {
-     "name": "hover",
-     "kind": "method",
-     "sig": "()",
-     "type": "Order",
-     "doc": "Зависнуть на месте."
-    },
-    {
-     "name": "intercept",
-     "kind": "method",
-     "sig": "(target)",
-     "type": "Order",
-     "doc": "Преследовать пчелу с упреждением (лететь туда, где она будет)."
-    },
-    {
-     "name": "kind",
-     "kind": "field",
-     "type": "Kind",
-     "doc": ""
-    },
-    {
-     "name": "step",
-     "kind": "override",
-     "sig": "(s)",
-     "type": "None",
-     "doc": "Решение шершня на этом тике. Переопределите в своём классе."
     }
    ]
   },
@@ -1273,14 +766,7 @@ export const API_HINTS = {
      "kind": "method",
      "sig": "(kind, n=1)",
      "type": "None",
-     "doc": "Вывести `n` пчёл типа `kind` (\"scout\", \"forager\", \"guard\", \"house\")."
-    },
-    {
-     "name": "cancel_breeding",
-     "kind": "method",
-     "sig": "(kind)",
-     "type": "None",
-     "doc": "Отменить последнюю личинку типа `kind` в очереди (мёд вернётся)."
+     "doc": "Вывести `n` пчёл типа `kind` (\"scout\", \"forager\", \"house\")."
     },
     {
      "name": "costs",
@@ -1364,11 +850,6 @@ export const API_HINTS = {
    "doc": "Погода."
   },
   {
-   "name": "Task",
-   "kind": "const",
-   "doc": "Задача домашней пчелы."
-  },
-  {
    "name": "HIVE_ID",
    "kind": "const",
    "doc": "`from_id` сообщений, которые отправил сам улей (`hive.signal`)."
@@ -1404,11 +885,6 @@ export const API_HINTS = {
    "doc": "Другая пчела, которую я вижу (своя или чужая)."
   },
   {
-   "name": "Enemy",
-   "kind": "class",
-   "doc": "Враг рядом (шершень)."
-  },
-  {
    "name": "Obstacle",
    "kind": "class",
    "doc": "Препятствие рядом: дерево, камень, улей."
@@ -1427,21 +903,6 @@ export const API_HINTS = {
    "name": "Sensors",
    "kind": "class",
    "doc": "Всё, что пчела знает на этом тике. Приходит в `step(self, s)`."
-  },
-  {
-   "name": "HornetMe",
-   "kind": "class",
-   "doc": "Что шершень знает о себе."
-  },
-  {
-   "name": "HiveInfo",
-   "kind": "class",
-   "doc": "Улей на карте (шершни знают, где ульи)."
-  },
-  {
-   "name": "HornetSensors",
-   "kind": "class",
-   "doc": "Сенсоры шершня. Приходят в `step(self, s)` класса `Hornet`."
   },
   {
    "name": "SpiderMe",
@@ -1464,19 +925,9 @@ export const API_HINTS = {
    "doc": "Личинка в очереди выведения."
   },
   {
-   "name": "HouseMe",
-   "kind": "class",
-   "doc": "Что домашняя пчела знает о себе."
-  },
-  {
-   "name": "HouseSensors",
-   "kind": "class",
-   "doc": "Сенсоры домашней пчелы: она живёт в улье и видит его склад."
-  },
-  {
    "name": "Bee",
    "kind": "class",
-   "doc": "Летающая пчела. Общие команды разведчика, сборщика и охранника."
+   "doc": "Летающая пчела. Общие команды разведчика и сборщика."
   },
   {
    "name": "Scout",
@@ -1487,21 +938,6 @@ export const API_HINTS = {
    "name": "Forager",
    "kind": "class",
    "doc": "Сборщик: носит нектар (до 1.5 ед.), летает ≈5 м/с, видит 8 м, ≈4 минуты полёта."
-  },
-  {
-   "name": "Guard",
-   "kind": "class",
-   "doc": "Охранник: крупный и сильный (≈6 м/с), видит 12 м, летает ≈3 минуты."
-  },
-  {
-   "name": "HouseBee",
-   "kind": "class",
-   "doc": "Домашняя пчела: не летает, живёт в улье."
-  },
-  {
-   "name": "Hornet",
-   "kind": "class",
-   "doc": "Шершень: крупный (≈7 м/с), охотится на пчёл и грабит ульи."
   },
   {
    "name": "Spider",

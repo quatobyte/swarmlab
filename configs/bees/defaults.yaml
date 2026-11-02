@@ -80,18 +80,6 @@ bee_types:
     energy_max: 1462.38
     power_idle: 0.290155
     power_coef: 2.402983
-  guard:                     # охранник
-    radius: 0.35
-    mass: 0.15
-    cargo_max: 0.0
-    thrust_max: 3.0
-    cruise_speed: 6.0
-    view_radius: 12.0
-    flight_time_s: 180.0
-    drag_coef: 0.07262
-    energy_max: 1685.65
-    power_idle: 0.445938
-    power_coef: 1.716417
   # Домашняя пчела (house) не летает и не имеет тела — её параметры в economy.
 
 # ---------------------------------------------------------------- §2.2 Силы
@@ -99,7 +87,7 @@ physics:
   gravity: 9.81              # ускорение свободного падения, м/с²
   angular_damping: 0.002     # демпфирование вращения пчелы, Н·м·с (вращение для игры не важно)
   cargo_unit_mass: 0.04      # масса 1 ед. нектара, кг (груз сборщика 1.0 ед. = 0.04 кг)
-  rain_force_coef: 1.227718  # k_rain: F_rain = k_rain · r², Н/м² (≈10% веса; calibrate.py)
+  rain_force_coef: 1.240965  # k_rain: F_rain = k_rain · r², Н/м² (≈10% веса; calibrate.py)
   rain_drag_multiplier: 1.3  # множитель сопротивления в дождь
   wall_stiffness: 2.0        # мягкие стенки и потолок: Н на метр выхода за границу на кг массы
   bee_solref: [0.01, 1.0]    # жёсткость контактов пчёл (MuJoCo solref: timeconst ≥ 2·dt, dampratio)
@@ -139,7 +127,7 @@ autopilot:
 economy:
   start_honey: 20.0          # мёд на старте, ед.
   start_nectar: 0.0          # нектар на старте, ед.
-  start_bees: {scout: 5, forager: 15, guard: 5, house: 10}   # §4.6, только у ульев со скриптом
+  start_bees: {scout: 5, forager: 15, house: 10}   # §4.6, только у ульев со скриптом
   collect:                   # §4.2
     rate: 0.25               # набор нектара, ед./с
     max_horizontal: 1.0      # над цветком: по горизонтали ≤, м
@@ -148,6 +136,7 @@ economy:
   processing:                # §4.3
     k_proc: 0.1              # скорость = k_proc·√n_process, ед. нектара/с
     honey_per_nectar: 0.5    # 1 ед. нектара → 0.5 ед. мёда
+    min_nectar: 0.05         # домашние перерабатывают, если нектара на складе больше (DECISIONS №82)
   feeding:                   # §4.4
     joules_per_honey: 4000.0 # 1 ед. мёда = 4000 Дж (M6: было 2000 — заправка съедала весь доход)
     refuel_rate: 200.0       # скорость заправки, Дж/с
@@ -156,7 +145,6 @@ economy:
                              # очередь: растёт одна личинка за раз (DECISIONS №34)
     scout: {cost: 3.0, time_s: 30.0}
     forager: {cost: 4.0, time_s: 30.0}
-    guard: {cost: 6.0, time_s: 45.0}
     house: {cost: 2.0, time_s: 20.0}
 
 program:                     # §3.1: step() с yield ждёт выполнения команды (DECISIONS №57, №61)
@@ -166,7 +154,7 @@ program:                     # §3.1: step() с yield ждёт выполнен�
 
 hive:                        # вход и вылет (уточнение §3.3, DECISIONS №34)
   enter_radius: 1.5          # go_home: ближе к летку — пчела входит в улей, м
-  exit_per_tick: 3           # leave_hive: вылетов из одного улья за тик решений
+  exit_per_tick: 3           # вылетов (fly_to/collect из улья) из одного улья за тик решений
   approach_margin: 2.5       # go_home из-за улья: облёт сбоку на таком зазоре от стенки, м
 
 # ---------------------------------------------------------------- §5 Сенсоры и связь
@@ -202,34 +190,6 @@ weather:
 # ---------------------------------------------------------------- §7 Враги
 # Враги — встроенные боты (swarmlab/bees/bots/) на том же API, что у игроков.
 enemies:
-  hornets:
-    enabled: true            # false — шершней нет совсем (и тел в модели)
-    attack: true             # укусы: контакт с пчелой непрерывно kill_contact_s → пчела гибнет
-    rob: true                # грабёж мёда у летка
-    heat_ball: true          # тепловой шар: урон шершню от охранников
-    max: 8                   # одновременно не больше (задаёт профиль)
-    radius: 0.4              # м
-    mass: 0.3                # кг
-    cruise_speed: 7.0        # м/с (c_d выводится из неё и thrust_max)
-    thrust_max: 5.0          # Н (нет в спецификации; вес 2.94 Н)
-    view_radius: 15.0        # обзор, м (нет в спецификации)
-    hp: 100.0
-    first_wave_s: 60.0       # первая волна
-    wave_interval_s: 60.0    # волна с края карты каждые …
-    wave_growth_s: 120.0     # размер волны 1 + floor(t / wave_growth_s)
-    spawn_agl: 12.0          # высота появления над рельефом, м
-    target_max_allies: 1     # цель — пчела, у которой ≤ 1 союзника …
-    target_ally_radius: 3.0  # … в радиусе, м
-    kill_contact_s: 1.5      # непрерывный контакт → жертва погибает
-    touch_margin: 0.1        # «контакт»: зазор между поверхностями ≤, м
-    rob_radius: 3.0          # грабёж у летка ближе, м
-    rob_guard_radius: 5.0    # … если нет охранников этого улья ближе к шершню, м
-    rob_rate: 0.2            # кража мёда, ед./с
-    heat_ball_min_guards: 2  # тепловой шар: охранников ≥
-    heat_ball_distance: 1.0  # … на расстоянии от поверхности шершня ≤, м
-    heat_ball_dps: 10.0      # урон за каждого охранника, HP/с
-    flee_hp: 30.0            # HP ниже — шершень улетает к краю
-    leave_margin: 3.0        # убегающий шершень ближе к краю карты — покидает матч, м
   spiders:
     enabled: true
     flower_fraction: 0.10    # доля цветов с пауком
@@ -240,11 +200,10 @@ pool:
   max_bees_per_hive: 100     # летающих тел на улей (задаёт профиль)
 
 # ---------------------------------------------------------------- §8–10 Матч
-advanced_control: false      # разрешить thrust(fx, fy, fz)
 sensor_noise: false          # шум сенсоров
 hives: []                    # [{script: путь, color: "#rrggbb"}] — по записи на улей; пусто = цвета по умолчанию
 
 # Демо-пчёлы без раннера: доверенные скрипты внутри модуля, не код игрока.
 demo:
   bees: []                   # M0: [{kind, hive, waypoints: [[dx, dy, agl], …], loop, dwell_s}]
-  swarm: null                # M1: {per_hive: {scout, forager, guard}, agl: [мин, макс], dwell_s, …}
+  swarm: null                # M1: {per_hive: {scout, forager}, agl: [мин, макс], dwell_s, …}

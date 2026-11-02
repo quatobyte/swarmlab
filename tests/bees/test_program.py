@@ -21,10 +21,11 @@ from swarmlab.core.sim import Simulation
 
 from .helpers import CALM, CONFIGS, FLAT, make_sim, run_for
 
-#: Стартовый состав: uid 0–4 разведчики, 5–19 сборщики, 20–24 охранники, 25–34 домашние.
+#: Стартовый состав: uid 0–4 разведчики, 5–19 сборщики, 20–29 домашние.
 FIRST_FORAGER = 5
-#: Хеш реплея `demo.yaml` на 30 с, снятый до M7a (коммит ddf65c7) на машине Лео.
-DEMO30_HASH_BEFORE_M7A = "68fbd0aeafd47247dd3ec294206508b32b833d1c545873bf3191b8422b8bdc51"
+#: Хеш реплея `demo.yaml` на 30 с. До M7e — снят кодом до M7a (коммит ddf65c7); M7e убрал
+#: шершней и охранников (DECISIONS №82), мир изменился — эталон снят заново после M7e.
+DEMO30_HASH_BEFORE_M7A = "fc3223f11bb19baf718ce6519faca21d2a1fd7d1df6d638191424ce754bc424b"
 
 
 # ===================================================================== хост без процесса
@@ -43,7 +44,7 @@ def raw_bee(uid: int, tick: int, *, wait_status=None, x: float = 0.0) -> dict:
         "tick": tick, "time": round(tick * 0.1, 6), "me": me,
         "home": {"pos": [0.0, 0.0, 1.0], "dir": [1.0, 0.0, 0.0], "dist": 1.0},
         "ground_z": 0.0, "airspeed": [0.0, 0.0, 0.0], "weather": "clear",
-        "flowers": [], "bees": [], "enemies": [], "obstacles": [], "messages": [],
+        "flowers": [], "bees": [], "obstacles": [], "messages": [],
         "pheromones": {"values": [], "gradient": []},
     }
 
@@ -236,7 +237,7 @@ def test_death_in_real_match_runs_finally_and_newborn_starts_over(tmp_path):
 def test_wait_loop_does_not_trip_cpu_budget(tmp_path):
     """Критерий M7a: `while …: yield wait()` — один шаг цикла за тик, бюджет не срабатывает."""
     code = """
-        from swarmlab.bees.api import Forager, Guard, HouseBee, Scout, wait
+        from swarmlab.bees.api import Forager, Scout, wait
 
         class F(Forager):
             def step(self, s):
@@ -244,16 +245,6 @@ def test_wait_loop_does_not_trip_cpu_budget(tmp_path):
                     yield wait()
 
         class S(Scout):
-            def step(self, s):
-                while True:
-                    yield wait()
-
-        class G(Guard):
-            def step(self, s):
-                while True:
-                    yield wait()
-
-        class H(HouseBee):
             def step(self, s):
                 while True:
                     yield wait()
@@ -301,7 +292,7 @@ def test_yield_from_in_real_runner(tmp_path):
                     yield wait()
 
             def out_and_count(self):
-                ok = yield self.leave_hive()
+                ok = yield self.hover()  # в улье — сразу «выполнено»
                 n = 0
                 for _ in range(3):
                     yield wait()
@@ -321,15 +312,15 @@ def _team_cmd(sim, uid: int, cmd: dict) -> None:
 
 
 def test_module_wait_conditions():
-    """DECISIONS №61: go_home — в улье; unload — сразу; битый цветок — сразу «не вышло»."""
-    with make_sim(*FLAT, *CALM, "enemies.hornets.enabled=false") as sim:
+    """DECISIONS №61: go_home — в улье; удалённая команда и битый цветок — сразу «не вышло»."""
+    with make_sim(*FLAT, *CALM) as sim:
         m = sim.module
         b, c = m.bees, m.control
         slots = [m.spawn(0, "forager") for _ in range(3)]
         uids = [int(b.uid[s]) for s in slots]
         run_for(sim, 0.1)
         _team_cmd(sim, uids[0], {"move": ["go_home"], "wait": 1})
-        _team_cmd(sim, uids[1], {"move": ["unload"], "wait": 2})  # не в улье
+        _team_cmd(sim, uids[1], {"move": ["unload"], "wait": 2})  # команды нет (DECISIONS №82)
         _team_cmd(sim, uids[2], {"move": ["collect", 10**6], "wait": 3})
         assert c.wait_state[slots[1]] == FAILED and c.wait_state[slots[2]] == FAILED
         assert c.wait_state[slots[0]] == RUNNING
@@ -354,8 +345,9 @@ def test_module_wait_conditions():
 def test_step_without_yield_gives_same_replay_hash_as_before_m7a(tmp_path):
     """Критерий M7a: без `yield` — те же траектории (хеш реплея) и счёт `demo.yaml`, что до M7a.
 
-    Эталон снят кодом до M7a (коммит ddf65c7) на машине Лео (DECISIONS №12: битовый
-    детерминизм MuJoCo — только на одной машине). Бюджет раннера снят: превышение
+    Эталон снят кодом до M7a (коммит ddf65c7), после M7e (DECISIONS №82) — заново: без
+    шершней и охранников другой матч. DECISIONS №12: битовый детерминизм MuJoCo — только на
+    одной машине. Бюджет раннера снят: превышение
     20 мс меряется часами стены и под нагрузкой отбрасывает команды тика — тогда
     хеш зависел бы от загрузки машины, а не от кода.
     """
@@ -375,7 +367,7 @@ def test_step_without_yield_gives_same_replay_hash_as_before_m7a(tmp_path):
     got = {k: (v["place"], round(v["honey"], 6), round(v["delivered"], 6), v["alive"])
            for k, v in teams.items()}
     assert got == {
-        "0": (3.0, 16.684345, 4.5, 34.0),
-        "1": (2.0, 20.810836, 4.5, 34.0),
-        "2": (1.0, 21.018007, 9.0, 35.0),
+        "0": (3.0, 16.725968, 6.0, 30.0),
+        "1": (2.0, 20.857459, 4.5, 28.0),
+        "2": (1.0, 21.290178, 7.5, 30.0),
     }

@@ -13,7 +13,7 @@ from .helpers import CALM, FLAT, make_sim, run_for
 ME_KEYS = {"id", "kind", "pos", "vel", "energy", "energy_max", "cargo", "cargo_max",
            "in_hive", "alive"}
 TOP_KEYS = {"tick", "time", "me", "home", "ground_z", "airspeed", "weather", "flowers", "bees",
-            "enemies", "obstacles", "messages", "pheromones"}
+            "obstacles", "messages", "pheromones"}
 
 
 def _plain(x):
@@ -36,7 +36,7 @@ def test_sensor_format_matches_spec_and_serializes():
     entrance = m.world.hive_entrance
     a = m.spawn(0, "scout", entrance[0] + np.array([3.0, 0.0, 2.0]))
     b = m.spawn(0, "forager", entrance[0] + np.array([6.0, 0.0, 2.0]))
-    c = m.spawn(1, "guard", entrance[1] + np.array([3.0, 0.0, 2.0]))
+    c = m.spawn(1, "scout", entrance[1] + np.array([3.0, 0.0, 2.0]))
     run_for(sim, 0.1)
     batch = m.collect_sensors(0)
     assert isinstance(batch, SensorBatch) and batch.team == 0
@@ -49,7 +49,7 @@ def test_sensor_format_matches_spec_and_serializes():
         assert set(s["pheromones"]) == {"values", "gradient"}
         assert np.array(s["pheromones"]["values"]).shape == (3, 3, 4)
         assert np.array(s["pheromones"]["gradient"]).shape == (4, 2)
-        assert s["weather"] == "clear" and s["enemies"] == []
+        assert s["weather"] == "clear"
         assert _plain(s)
     # Протокол M2 — msgpack без pickle: сериализуется и читается обратно без потерь.
     raw = msgpack.packb(agents)

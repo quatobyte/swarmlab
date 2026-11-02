@@ -5,18 +5,12 @@ export const BLOCKS_API = {
   "Kind": [
    "scout",
    "forager",
-   "guard",
    "house"
   ],
   "Weather": [
    "clear",
    "windy",
    "rain"
-  ],
-  "Task": [
-   "rest",
-   "process",
-   "nurse"
   ]
  },
  "classes": {
@@ -24,26 +18,13 @@ export const BLOCKS_API = {
    "target": "self",
    "subjects": [
     "scout",
-    "forager",
-    "guard"
+    "forager"
    ]
   },
   "Forager": {
    "target": "self",
    "subjects": [
     "forager"
-   ]
-  },
-  "Guard": {
-   "target": "self",
-   "subjects": [
-    "guard"
-   ]
-  },
-  "HouseBee": {
-   "target": "self",
-   "subjects": [
-    "house"
    ]
   },
   "Hive": {
@@ -56,36 +37,21 @@ export const BLOCKS_API = {
    "target": "s",
    "subjects": [
     "scout",
-    "forager",
-    "guard"
+    "forager"
    ]
   },
   "Me": {
    "target": "s.me",
    "subjects": [
     "scout",
-    "forager",
-    "guard"
+    "forager"
    ]
   },
   "Home": {
    "target": "s.home",
    "subjects": [
     "scout",
-    "forager",
-    "guard"
-   ]
-  },
-  "HouseSensors": {
-   "target": "s",
-   "subjects": [
-    "house"
-   ]
-  },
-  "HouseMe": {
-   "target": "s.me",
-   "subjects": [
-    "house"
+    "forager"
    ]
   },
   "Flower": {
@@ -93,18 +59,6 @@ export const BLOCKS_API = {
    "subjects": [
     "scout",
     "forager",
-    "guard",
-    "house",
-    "hive"
-   ]
-  },
-  "Enemy": {
-   "target": "obj",
-   "subjects": [
-    "scout",
-    "forager",
-    "guard",
-    "house",
     "hive"
    ]
   },
@@ -113,8 +67,6 @@ export const BLOCKS_API = {
    "subjects": [
     "scout",
     "forager",
-    "guard",
-    "house",
     "hive"
    ]
   },
@@ -123,8 +75,6 @@ export const BLOCKS_API = {
    "subjects": [
     "scout",
     "forager",
-    "guard",
-    "house",
     "hive"
    ]
   },
@@ -133,8 +83,6 @@ export const BLOCKS_API = {
    "subjects": [
     "scout",
     "forager",
-    "guard",
-    "house",
     "hive"
    ]
   },
@@ -143,8 +91,6 @@ export const BLOCKS_API = {
    "subjects": [
     "scout",
     "forager",
-    "guard",
-    "house",
     "hive"
    ]
   },
@@ -153,8 +99,6 @@ export const BLOCKS_API = {
    "subjects": [
     "scout",
     "forager",
-    "guard",
-    "house",
     "hive"
    ]
   },
@@ -163,8 +107,6 @@ export const BLOCKS_API = {
    "subjects": [
     "scout",
     "forager",
-    "guard",
-    "house",
     "hive"
    ]
   },
@@ -173,76 +115,11 @@ export const BLOCKS_API = {
    "subjects": [
     "scout",
     "forager",
-    "guard",
-    "house",
     "hive"
    ]
   }
  },
  "blocks": [
-  {
-   "type": "bees_Bee_fly_dir",
-   "api": "Bee.fly_dir",
-   "cls": "Bee",
-   "name": "fly_dir",
-   "member": "method",
-   "target": "self",
-   "subjects": [
-    "scout",
-    "forager",
-    "guard"
-   ],
-   "params": [
-    {
-     "name": "dx",
-     "type": "float",
-     "required": true,
-     "default": null,
-     "vararg": false,
-     "options": null,
-     "check": [
-      "Number"
-     ]
-    },
-    {
-     "name": "dy",
-     "type": "float",
-     "required": true,
-     "default": null,
-     "vararg": false,
-     "options": null,
-     "check": [
-      "Number"
-     ]
-    },
-    {
-     "name": "dz",
-     "type": "float",
-     "required": false,
-     "default": "0.0",
-     "vararg": false,
-     "options": null,
-     "check": [
-      "Number"
-     ]
-    },
-    {
-     "name": "speed",
-     "type": "float | None",
-     "required": false,
-     "default": "None",
-     "vararg": false,
-     "options": null,
-     "check": [
-      "Number"
-     ]
-    }
-   ],
-   "returns": "Order",
-   "output": null,
-   "waitable": true,
-   "doc": "Лететь в направлении `(dx, dy, dz)` (длина неважна), пока не скажут другое."
-  },
   {
    "type": "bees_Bee_fly_to",
    "api": "Bee.fly_to",
@@ -252,8 +129,7 @@ export const BLOCKS_API = {
    "target": "self",
    "subjects": [
     "scout",
-    "forager",
-    "guard"
+    "forager"
    ],
    "params": [
     {
@@ -315,7 +191,7 @@ export const BLOCKS_API = {
    "returns": "Order",
    "output": null,
    "waitable": true,
-   "doc": "Лететь к точке `(x, y)`."
+   "doc": "Лететь к точке `(x, y)`. Из улья пчела сначала вылетает."
   },
   {
    "type": "bees_Bee_go_home",
@@ -326,14 +202,13 @@ export const BLOCKS_API = {
    "target": "self",
    "subjects": [
     "scout",
-    "forager",
-    "guard"
+    "forager"
    ],
    "params": [],
    "returns": "Order",
    "output": null,
    "waitable": true,
-   "doc": "Лететь к летку и войти в улей (там заправка и выгрузка нектара)."
+   "doc": "Лететь к летку и войти в улей: там нектар выгрузится сам, а пчела заправится."
   },
   {
    "type": "bees_Bee_hover",
@@ -344,32 +219,13 @@ export const BLOCKS_API = {
    "target": "self",
    "subjects": [
     "scout",
-    "forager",
-    "guard"
+    "forager"
    ],
    "params": [],
    "returns": "Order",
    "output": null,
    "waitable": true,
-   "doc": "Зависнуть на месте."
-  },
-  {
-   "type": "bees_Bee_leave_hive",
-   "api": "Bee.leave_hive",
-   "cls": "Bee",
-   "name": "leave_hive",
-   "member": "method",
-   "target": "self",
-   "subjects": [
-    "scout",
-    "forager",
-    "guard"
-   ],
-   "params": [],
-   "returns": "Order",
-   "output": null,
-   "waitable": true,
-   "doc": "Вылететь из улья (если пчела внутри)."
+   "doc": "Зависнуть на месте (в улье — остаться внутри)."
   },
   {
    "type": "bees_Bee_mark",
@@ -380,8 +236,7 @@ export const BLOCKS_API = {
    "target": "self",
    "subjects": [
     "scout",
-    "forager",
-    "guard"
+    "forager"
    ],
    "params": [
     {
@@ -421,8 +276,7 @@ export const BLOCKS_API = {
    "target": "self",
    "subjects": [
     "scout",
-    "forager",
-    "guard"
+    "forager"
    ],
    "params": [
     {
@@ -441,58 +295,6 @@ export const BLOCKS_API = {
    "output": null,
    "waitable": false,
    "doc": "Сообщение до 8 чисел своим пчёлам в радиусе 15 м (дойдёт на следующем тике)."
-  },
-  {
-   "type": "bees_Bee_thrust",
-   "api": "Bee.thrust",
-   "cls": "Bee",
-   "name": "thrust",
-   "member": "method",
-   "target": "self",
-   "subjects": [
-    "scout",
-    "forager",
-    "guard"
-   ],
-   "params": [
-    {
-     "name": "fx",
-     "type": "float",
-     "required": true,
-     "default": null,
-     "vararg": false,
-     "options": null,
-     "check": [
-      "Number"
-     ]
-    },
-    {
-     "name": "fy",
-     "type": "float",
-     "required": true,
-     "default": null,
-     "vararg": false,
-     "options": null,
-     "check": [
-      "Number"
-     ]
-    },
-    {
-     "name": "fz",
-     "type": "float",
-     "required": true,
-     "default": null,
-     "vararg": false,
-     "options": null,
-     "check": [
-      "Number"
-     ]
-    }
-   ],
-   "returns": "Order",
-   "output": null,
-   "waitable": true,
-   "doc": "Продвинутый режим: прямая сила тяги, Н. Автопилот выключается."
   },
   {
    "type": "bees_Forager_collect",
@@ -524,100 +326,6 @@ export const BLOCKS_API = {
    "doc": "Подлететь к цветку, зависнуть над ним и набирать нектар (0.25 ед./с)."
   },
   {
-   "type": "bees_Forager_unload",
-   "api": "Forager.unload",
-   "cls": "Forager",
-   "name": "unload",
-   "member": "method",
-   "target": "self",
-   "subjects": [
-    "forager"
-   ],
-   "params": [],
-   "returns": "Order",
-   "output": null,
-   "waitable": true,
-   "doc": "Выгрузить весь нектар на склад. Работает, только когда сборщик в улье."
-  },
-  {
-   "type": "bees_Guard_intercept",
-   "api": "Guard.intercept",
-   "cls": "Guard",
-   "name": "intercept",
-   "member": "method",
-   "target": "self",
-   "subjects": [
-    "guard"
-   ],
-   "params": [
-    {
-     "name": "target",
-     "type": "Enemy | BeeInfo | int",
-     "required": true,
-     "default": null,
-     "vararg": false,
-     "options": null,
-     "check": [
-      "Enemy",
-      "BeeInfo",
-      "Number"
-     ]
-    }
-   ],
-   "returns": "Order",
-   "output": null,
-   "waitable": true,
-   "doc": "Преследовать цель с упреждением (лететь туда, где она будет)."
-  },
-  {
-   "type": "bees_HouseBee_nurse",
-   "api": "HouseBee.nurse",
-   "cls": "HouseBee",
-   "name": "nurse",
-   "member": "method",
-   "target": "self",
-   "subjects": [
-    "house"
-   ],
-   "params": [],
-   "returns": "Order",
-   "output": null,
-   "waitable": true,
-   "doc": "Ухаживать за личинками: чем больше нянек, тем быстрее выведение."
-  },
-  {
-   "type": "bees_HouseBee_process",
-   "api": "HouseBee.process",
-   "cls": "HouseBee",
-   "name": "process",
-   "member": "method",
-   "target": "self",
-   "subjects": [
-    "house"
-   ],
-   "params": [],
-   "returns": "Order",
-   "output": null,
-   "waitable": true,
-   "doc": "Перерабатывать нектар в мёд (1 ед. нектара → 0.5 ед. мёда)."
-  },
-  {
-   "type": "bees_HouseBee_rest",
-   "api": "HouseBee.rest",
-   "cls": "HouseBee",
-   "name": "rest",
-   "member": "method",
-   "target": "self",
-   "subjects": [
-    "house"
-   ],
-   "params": [],
-   "returns": "Order",
-   "output": null,
-   "waitable": true,
-   "doc": "Отдыхать (мёд всё равно ест)."
-  },
-  {
    "type": "bees_Hive_breed",
    "api": "Hive.breed",
    "cls": "Hive",
@@ -637,7 +345,6 @@ export const BLOCKS_API = {
      "options": [
       "scout",
       "forager",
-      "guard",
       "house"
      ],
      "check": [
@@ -659,40 +366,7 @@ export const BLOCKS_API = {
    "returns": "None",
    "output": null,
    "waitable": false,
-   "doc": "Вывести `n` пчёл типа `kind` (\"scout\", \"forager\", \"guard\", \"house\")."
-  },
-  {
-   "type": "bees_Hive_cancel_breeding",
-   "api": "Hive.cancel_breeding",
-   "cls": "Hive",
-   "name": "cancel_breeding",
-   "member": "method",
-   "target": "hive",
-   "subjects": [
-    "hive"
-   ],
-   "params": [
-    {
-     "name": "kind",
-     "type": "Kind",
-     "required": true,
-     "default": null,
-     "vararg": false,
-     "options": [
-      "scout",
-      "forager",
-      "guard",
-      "house"
-     ],
-     "check": [
-      "String"
-     ]
-    }
-   ],
-   "returns": "None",
-   "output": null,
-   "waitable": false,
-   "doc": "Отменить последнюю личинку типа `kind` в очереди (мёд вернётся)."
+   "doc": "Вывести `n` пчёл типа `kind` (\"scout\", \"forager\", \"house\")."
   },
   {
    "type": "bees_Hive_costs",
@@ -907,8 +581,7 @@ export const BLOCKS_API = {
    "target": "s",
    "subjects": [
     "scout",
-    "forager",
-    "guard"
+    "forager"
    ],
    "params": [],
    "returns": "Vec",
@@ -927,8 +600,7 @@ export const BLOCKS_API = {
    "target": "s",
    "subjects": [
     "scout",
-    "forager",
-    "guard"
+    "forager"
    ],
    "params": [],
    "returns": "list[BeeInfo]",
@@ -939,26 +611,6 @@ export const BLOCKS_API = {
    "doc": "пчёлы рядом"
   },
   {
-   "type": "bees_Sensors_enemies",
-   "api": "Sensors.enemies",
-   "cls": "Sensors",
-   "name": "enemies",
-   "member": "field",
-   "target": "s",
-   "subjects": [
-    "scout",
-    "forager",
-    "guard"
-   ],
-   "params": [],
-   "returns": "list[Enemy]",
-   "output": [
-    "Array"
-   ],
-   "waitable": false,
-   "doc": "враги рядом"
-  },
-  {
    "type": "bees_Sensors_flowers",
    "api": "Sensors.flowers",
    "cls": "Sensors",
@@ -967,8 +619,7 @@ export const BLOCKS_API = {
    "target": "s",
    "subjects": [
     "scout",
-    "forager",
-    "guard"
+    "forager"
    ],
    "params": [],
    "returns": "list[Flower]",
@@ -987,8 +638,7 @@ export const BLOCKS_API = {
    "target": "s",
    "subjects": [
     "scout",
-    "forager",
-    "guard"
+    "forager"
    ],
    "params": [],
    "returns": "float",
@@ -1007,8 +657,7 @@ export const BLOCKS_API = {
    "target": "s",
    "subjects": [
     "scout",
-    "forager",
-    "guard"
+    "forager"
    ],
    "params": [],
    "returns": "Home",
@@ -1027,8 +676,7 @@ export const BLOCKS_API = {
    "target": "s",
    "subjects": [
     "scout",
-    "forager",
-    "guard"
+    "forager"
    ],
    "params": [],
    "returns": "Me",
@@ -1047,8 +695,7 @@ export const BLOCKS_API = {
    "target": "s",
    "subjects": [
     "scout",
-    "forager",
-    "guard"
+    "forager"
    ],
    "params": [],
    "returns": "list[Message]",
@@ -1059,26 +706,6 @@ export const BLOCKS_API = {
    "doc": "сообщения от своих"
   },
   {
-   "type": "bees_Sensors_nearest_enemy",
-   "api": "Sensors.nearest_enemy",
-   "cls": "Sensors",
-   "name": "nearest_enemy",
-   "member": "method",
-   "target": "s",
-   "subjects": [
-    "scout",
-    "forager",
-    "guard"
-   ],
-   "params": [],
-   "returns": "Enemy | None",
-   "output": [
-    "Enemy"
-   ],
-   "waitable": false,
-   "doc": "Ближайший видимый враг; `None` — врагов не видно."
-  },
-  {
    "type": "bees_Sensors_nearest_flower",
    "api": "Sensors.nearest_flower",
    "cls": "Sensors",
@@ -1087,8 +714,7 @@ export const BLOCKS_API = {
    "target": "s",
    "subjects": [
     "scout",
-    "forager",
-    "guard"
+    "forager"
    ],
    "params": [
     {
@@ -1119,8 +745,7 @@ export const BLOCKS_API = {
    "target": "s",
    "subjects": [
     "scout",
-    "forager",
-    "guard"
+    "forager"
    ],
    "params": [],
    "returns": "list[Obstacle]",
@@ -1139,8 +764,7 @@ export const BLOCKS_API = {
    "target": "s",
    "subjects": [
     "scout",
-    "forager",
-    "guard"
+    "forager"
    ],
    "params": [],
    "returns": "Pheromones",
@@ -1159,8 +783,7 @@ export const BLOCKS_API = {
    "target": "s",
    "subjects": [
     "scout",
-    "forager",
-    "guard"
+    "forager"
    ],
    "params": [],
    "returns": "int",
@@ -1179,8 +802,7 @@ export const BLOCKS_API = {
    "target": "s",
    "subjects": [
     "scout",
-    "forager",
-    "guard"
+    "forager"
    ],
    "params": [],
    "returns": "float",
@@ -1199,8 +821,7 @@ export const BLOCKS_API = {
    "target": "s",
    "subjects": [
     "scout",
-    "forager",
-    "guard"
+    "forager"
    ],
    "params": [],
    "returns": "Weather",
@@ -1219,8 +840,7 @@ export const BLOCKS_API = {
    "target": "s.me",
    "subjects": [
     "scout",
-    "forager",
-    "guard"
+    "forager"
    ],
    "params": [],
    "returns": "bool",
@@ -1239,8 +859,7 @@ export const BLOCKS_API = {
    "target": "s.me",
    "subjects": [
     "scout",
-    "forager",
-    "guard"
+    "forager"
    ],
    "params": [],
    "returns": "float",
@@ -1259,8 +878,7 @@ export const BLOCKS_API = {
    "target": "s.me",
    "subjects": [
     "scout",
-    "forager",
-    "guard"
+    "forager"
    ],
    "params": [],
    "returns": "float",
@@ -1279,8 +897,7 @@ export const BLOCKS_API = {
    "target": "s.me",
    "subjects": [
     "scout",
-    "forager",
-    "guard"
+    "forager"
    ],
    "params": [],
    "returns": "float",
@@ -1299,8 +916,7 @@ export const BLOCKS_API = {
    "target": "s.me",
    "subjects": [
     "scout",
-    "forager",
-    "guard"
+    "forager"
    ],
    "params": [],
    "returns": "float",
@@ -1319,8 +935,7 @@ export const BLOCKS_API = {
    "target": "s.me",
    "subjects": [
     "scout",
-    "forager",
-    "guard"
+    "forager"
    ],
    "params": [],
    "returns": "float",
@@ -1339,8 +954,7 @@ export const BLOCKS_API = {
    "target": "s.me",
    "subjects": [
     "scout",
-    "forager",
-    "guard"
+    "forager"
    ],
    "params": [],
    "returns": "int",
@@ -1359,8 +973,7 @@ export const BLOCKS_API = {
    "target": "s.me",
    "subjects": [
     "scout",
-    "forager",
-    "guard"
+    "forager"
    ],
    "params": [],
    "returns": "bool",
@@ -1368,7 +981,7 @@ export const BLOCKS_API = {
     "Boolean"
    ],
    "waitable": false,
-   "doc": "я внутри улья (там заправляюсь и выгружаю нектар)"
+   "doc": "я внутри улья (там заправляюсь; нектар выгружается сам при входе)"
   },
   {
    "type": "bees_Me_is_full",
@@ -1379,8 +992,7 @@ export const BLOCKS_API = {
    "target": "s.me",
    "subjects": [
     "scout",
-    "forager",
-    "guard"
+    "forager"
    ],
    "params": [],
    "returns": "bool",
@@ -1399,8 +1011,7 @@ export const BLOCKS_API = {
    "target": "s.me",
    "subjects": [
     "scout",
-    "forager",
-    "guard"
+    "forager"
    ],
    "params": [],
    "returns": "Kind",
@@ -1408,7 +1019,7 @@ export const BLOCKS_API = {
     "String"
    ],
    "waitable": false,
-   "doc": "тип: \"scout\", \"forager\", \"guard\""
+   "doc": "тип: \"scout\" или \"forager\""
   },
   {
    "type": "bees_Me_pos",
@@ -1419,8 +1030,7 @@ export const BLOCKS_API = {
    "target": "s.me",
    "subjects": [
     "scout",
-    "forager",
-    "guard"
+    "forager"
    ],
    "params": [],
    "returns": "Vec",
@@ -1439,8 +1049,7 @@ export const BLOCKS_API = {
    "target": "s.me",
    "subjects": [
     "scout",
-    "forager",
-    "guard"
+    "forager"
    ],
    "params": [],
    "returns": "Vec",
@@ -1459,8 +1068,7 @@ export const BLOCKS_API = {
    "target": "s.home",
    "subjects": [
     "scout",
-    "forager",
-    "guard"
+    "forager"
    ],
    "params": [],
    "returns": "Vec",
@@ -1479,8 +1087,7 @@ export const BLOCKS_API = {
    "target": "s.home",
    "subjects": [
     "scout",
-    "forager",
-    "guard"
+    "forager"
    ],
    "params": [],
    "returns": "float",
@@ -1499,8 +1106,7 @@ export const BLOCKS_API = {
    "target": "s.home",
    "subjects": [
     "scout",
-    "forager",
-    "guard"
+    "forager"
    ],
    "params": [],
    "returns": "Vec",
@@ -1509,186 +1115,6 @@ export const BLOCKS_API = {
    ],
    "waitable": false,
    "doc": "леток — вход в улей"
-  },
-  {
-   "type": "bees_HouseSensors_breeding_queue",
-   "api": "HouseSensors.breeding_queue",
-   "cls": "HouseSensors",
-   "name": "breeding_queue",
-   "member": "field",
-   "target": "s",
-   "subjects": [
-    "house"
-   ],
-   "params": [],
-   "returns": "list[Larva]",
-   "output": [
-    "Array"
-   ],
-   "waitable": false,
-   "doc": "очередь выведения"
-  },
-  {
-   "type": "bees_HouseSensors_counts",
-   "api": "HouseSensors.counts",
-   "cls": "HouseSensors",
-   "name": "counts",
-   "member": "field",
-   "target": "s",
-   "subjects": [
-    "house"
-   ],
-   "params": [],
-   "returns": "Counts",
-   "output": [
-    "Counts"
-   ],
-   "waitable": false,
-   "doc": "сколько пчёл в улье"
-  },
-  {
-   "type": "bees_HouseSensors_hive_honey",
-   "api": "HouseSensors.hive_honey",
-   "cls": "HouseSensors",
-   "name": "hive_honey",
-   "member": "field",
-   "target": "s",
-   "subjects": [
-    "house"
-   ],
-   "params": [],
-   "returns": "float",
-   "output": [
-    "Number"
-   ],
-   "waitable": false,
-   "doc": "мёда на складе, ед."
-  },
-  {
-   "type": "bees_HouseSensors_hive_nectar",
-   "api": "HouseSensors.hive_nectar",
-   "cls": "HouseSensors",
-   "name": "hive_nectar",
-   "member": "field",
-   "target": "s",
-   "subjects": [
-    "house"
-   ],
-   "params": [],
-   "returns": "float",
-   "output": [
-    "Number"
-   ],
-   "waitable": false,
-   "doc": "нектара на складе, ед."
-  },
-  {
-   "type": "bees_HouseSensors_me",
-   "api": "HouseSensors.me",
-   "cls": "HouseSensors",
-   "name": "me",
-   "member": "field",
-   "target": "s",
-   "subjects": [
-    "house"
-   ],
-   "params": [],
-   "returns": "HouseMe",
-   "output": [
-    "HouseMe"
-   ],
-   "waitable": false,
-   "doc": ""
-  },
-  {
-   "type": "bees_HouseSensors_tick",
-   "api": "HouseSensors.tick",
-   "cls": "HouseSensors",
-   "name": "tick",
-   "member": "field",
-   "target": "s",
-   "subjects": [
-    "house"
-   ],
-   "params": [],
-   "returns": "int",
-   "output": [
-    "Number"
-   ],
-   "waitable": false,
-   "doc": ""
-  },
-  {
-   "type": "bees_HouseSensors_time",
-   "api": "HouseSensors.time",
-   "cls": "HouseSensors",
-   "name": "time",
-   "member": "field",
-   "target": "s",
-   "subjects": [
-    "house"
-   ],
-   "params": [],
-   "returns": "float",
-   "output": [
-    "Number"
-   ],
-   "waitable": false,
-   "doc": ""
-  },
-  {
-   "type": "bees_HouseMe_id",
-   "api": "HouseMe.id",
-   "cls": "HouseMe",
-   "name": "id",
-   "member": "field",
-   "target": "s.me",
-   "subjects": [
-    "house"
-   ],
-   "params": [],
-   "returns": "int",
-   "output": [
-    "Number"
-   ],
-   "waitable": false,
-   "doc": ""
-  },
-  {
-   "type": "bees_HouseMe_kind",
-   "api": "HouseMe.kind",
-   "cls": "HouseMe",
-   "name": "kind",
-   "member": "field",
-   "target": "s.me",
-   "subjects": [
-    "house"
-   ],
-   "params": [],
-   "returns": "Kind",
-   "output": [
-    "String"
-   ],
-   "waitable": false,
-   "doc": "всегда \"house\""
-  },
-  {
-   "type": "bees_HouseMe_task",
-   "api": "HouseMe.task",
-   "cls": "HouseMe",
-   "name": "task",
-   "member": "field",
-   "target": "s.me",
-   "subjects": [
-    "house"
-   ],
-   "params": [],
-   "returns": "Task",
-   "output": [
-    "String"
-   ],
-   "waitable": false,
-   "doc": "чем занята сейчас: \"rest\", \"process\", \"nurse\""
   },
   {
    "type": "bees_Flower_dist",
@@ -1700,8 +1126,6 @@ export const BLOCKS_API = {
    "subjects": [
     "scout",
     "forager",
-    "guard",
-    "house",
     "hive"
    ],
    "params": [],
@@ -1722,8 +1146,6 @@ export const BLOCKS_API = {
    "subjects": [
     "scout",
     "forager",
-    "guard",
-    "house",
     "hive"
    ],
    "params": [],
@@ -1744,8 +1166,6 @@ export const BLOCKS_API = {
    "subjects": [
     "scout",
     "forager",
-    "guard",
-    "house",
     "hive"
    ],
    "params": [],
@@ -1766,8 +1186,6 @@ export const BLOCKS_API = {
    "subjects": [
     "scout",
     "forager",
-    "guard",
-    "house",
     "hive"
    ],
    "params": [],
@@ -1788,8 +1206,6 @@ export const BLOCKS_API = {
    "subjects": [
     "scout",
     "forager",
-    "guard",
-    "house",
     "hive"
    ],
    "params": [],
@@ -1810,8 +1226,6 @@ export const BLOCKS_API = {
    "subjects": [
     "scout",
     "forager",
-    "guard",
-    "house",
     "hive"
    ],
    "params": [],
@@ -1823,138 +1237,6 @@ export const BLOCKS_API = {
    "doc": "у остальных и издалека — `None` («не знаю»)."
   },
   {
-   "type": "bees_Enemy_dist",
-   "api": "Enemy.dist",
-   "cls": "Enemy",
-   "name": "dist",
-   "member": "field",
-   "target": "obj",
-   "subjects": [
-    "scout",
-    "forager",
-    "guard",
-    "house",
-    "hive"
-   ],
-   "params": [],
-   "returns": "float",
-   "output": [
-    "Number"
-   ],
-   "waitable": false,
-   "doc": ""
-  },
-  {
-   "type": "bees_Enemy_id",
-   "api": "Enemy.id",
-   "cls": "Enemy",
-   "name": "id",
-   "member": "field",
-   "target": "obj",
-   "subjects": [
-    "scout",
-    "forager",
-    "guard",
-    "house",
-    "hive"
-   ],
-   "params": [],
-   "returns": "int",
-   "output": [
-    "Number"
-   ],
-   "waitable": false,
-   "doc": "номер врага — его передают в `intercept()`"
-  },
-  {
-   "type": "bees_Enemy_kind",
-   "api": "Enemy.kind",
-   "cls": "Enemy",
-   "name": "kind",
-   "member": "field",
-   "target": "obj",
-   "subjects": [
-    "scout",
-    "forager",
-    "guard",
-    "house",
-    "hive"
-   ],
-   "params": [],
-   "returns": "str",
-   "output": [
-    "String"
-   ],
-   "waitable": false,
-   "doc": "\"hornet\""
-  },
-  {
-   "type": "bees_Enemy_pos",
-   "api": "Enemy.pos",
-   "cls": "Enemy",
-   "name": "pos",
-   "member": "field",
-   "target": "obj",
-   "subjects": [
-    "scout",
-    "forager",
-    "guard",
-    "house",
-    "hive"
-   ],
-   "params": [],
-   "returns": "Vec",
-   "output": [
-    "Vec"
-   ],
-   "waitable": false,
-   "doc": ""
-  },
-  {
-   "type": "bees_Enemy_rel_pos",
-   "api": "Enemy.rel_pos",
-   "cls": "Enemy",
-   "name": "rel_pos",
-   "member": "field",
-   "target": "obj",
-   "subjects": [
-    "scout",
-    "forager",
-    "guard",
-    "house",
-    "hive"
-   ],
-   "params": [],
-   "returns": "Vec",
-   "output": [
-    "Vec"
-   ],
-   "waitable": false,
-   "doc": ""
-  },
-  {
-   "type": "bees_Enemy_vel",
-   "api": "Enemy.vel",
-   "cls": "Enemy",
-   "name": "vel",
-   "member": "field",
-   "target": "obj",
-   "subjects": [
-    "scout",
-    "forager",
-    "guard",
-    "house",
-    "hive"
-   ],
-   "params": [],
-   "returns": "Vec",
-   "output": [
-    "Vec"
-   ],
-   "waitable": false,
-   "doc": ""
-  },
-  {
    "type": "bees_BeeInfo_dist",
    "api": "BeeInfo.dist",
    "cls": "BeeInfo",
@@ -1964,8 +1246,6 @@ export const BLOCKS_API = {
    "subjects": [
     "scout",
     "forager",
-    "guard",
-    "house",
     "hive"
    ],
    "params": [],
@@ -1986,8 +1266,6 @@ export const BLOCKS_API = {
    "subjects": [
     "scout",
     "forager",
-    "guard",
-    "house",
     "hive"
    ],
    "params": [],
@@ -2008,8 +1286,6 @@ export const BLOCKS_API = {
    "subjects": [
     "scout",
     "forager",
-    "guard",
-    "house",
     "hive"
    ],
    "params": [],
@@ -2030,8 +1306,6 @@ export const BLOCKS_API = {
    "subjects": [
     "scout",
     "forager",
-    "guard",
-    "house",
     "hive"
    ],
    "params": [],
@@ -2052,8 +1326,6 @@ export const BLOCKS_API = {
    "subjects": [
     "scout",
     "forager",
-    "guard",
-    "house",
     "hive"
    ],
    "params": [],
@@ -2074,8 +1346,6 @@ export const BLOCKS_API = {
    "subjects": [
     "scout",
     "forager",
-    "guard",
-    "house",
     "hive"
    ],
    "params": [],
@@ -2096,8 +1366,6 @@ export const BLOCKS_API = {
    "subjects": [
     "scout",
     "forager",
-    "guard",
-    "house",
     "hive"
    ],
    "params": [],
@@ -2118,8 +1386,6 @@ export const BLOCKS_API = {
    "subjects": [
     "scout",
     "forager",
-    "guard",
-    "house",
     "hive"
    ],
    "params": [],
@@ -2140,8 +1406,6 @@ export const BLOCKS_API = {
    "subjects": [
     "scout",
     "forager",
-    "guard",
-    "house",
     "hive"
    ],
    "params": [],
@@ -2162,8 +1426,6 @@ export const BLOCKS_API = {
    "subjects": [
     "scout",
     "forager",
-    "guard",
-    "house",
     "hive"
    ],
    "params": [],
@@ -2184,8 +1446,6 @@ export const BLOCKS_API = {
    "subjects": [
     "scout",
     "forager",
-    "guard",
-    "house",
     "hive"
    ],
    "params": [],
@@ -2206,8 +1466,6 @@ export const BLOCKS_API = {
    "subjects": [
     "scout",
     "forager",
-    "guard",
-    "house",
     "hive"
    ],
    "params": [],
@@ -2228,8 +1486,6 @@ export const BLOCKS_API = {
    "subjects": [
     "scout",
     "forager",
-    "guard",
-    "house",
     "hive"
    ],
    "params": [],
@@ -2250,8 +1506,6 @@ export const BLOCKS_API = {
    "subjects": [
     "scout",
     "forager",
-    "guard",
-    "house",
     "hive"
    ],
    "params": [],
@@ -2272,8 +1526,6 @@ export const BLOCKS_API = {
    "subjects": [
     "scout",
     "forager",
-    "guard",
-    "house",
     "hive"
    ],
    "params": [],
@@ -2294,8 +1546,6 @@ export const BLOCKS_API = {
    "subjects": [
     "scout",
     "forager",
-    "guard",
-    "house",
     "hive"
    ],
    "params": [],
@@ -2316,8 +1566,6 @@ export const BLOCKS_API = {
    "subjects": [
     "scout",
     "forager",
-    "guard",
-    "house",
     "hive"
    ],
    "params": [
@@ -2350,8 +1598,6 @@ export const BLOCKS_API = {
    "subjects": [
     "scout",
     "forager",
-    "guard",
-    "house",
     "hive"
    ],
    "params": [],
@@ -2372,8 +1618,6 @@ export const BLOCKS_API = {
    "subjects": [
     "scout",
     "forager",
-    "guard",
-    "house",
     "hive"
    ],
    "params": [
@@ -2406,8 +1650,6 @@ export const BLOCKS_API = {
    "subjects": [
     "scout",
     "forager",
-    "guard",
-    "house",
     "hive"
    ],
    "params": [],
@@ -2428,8 +1670,6 @@ export const BLOCKS_API = {
    "subjects": [
     "scout",
     "forager",
-    "guard",
-    "house",
     "hive"
    ],
    "params": [
@@ -2460,8 +1700,6 @@ export const BLOCKS_API = {
    "subjects": [
     "scout",
     "forager",
-    "guard",
-    "house",
     "hive"
    ],
    "params": [
@@ -2492,8 +1730,6 @@ export const BLOCKS_API = {
    "subjects": [
     "scout",
     "forager",
-    "guard",
-    "house",
     "hive"
    ],
    "params": [],
@@ -2514,8 +1750,6 @@ export const BLOCKS_API = {
    "subjects": [
     "scout",
     "forager",
-    "guard",
-    "house",
     "hive"
    ],
    "params": [],
@@ -2536,8 +1770,6 @@ export const BLOCKS_API = {
    "subjects": [
     "scout",
     "forager",
-    "guard",
-    "house",
     "hive"
    ],
    "params": [],
@@ -2558,8 +1790,6 @@ export const BLOCKS_API = {
    "subjects": [
     "scout",
     "forager",
-    "guard",
-    "house",
     "hive"
    ],
    "params": [],
@@ -2580,8 +1810,6 @@ export const BLOCKS_API = {
    "subjects": [
     "scout",
     "forager",
-    "guard",
-    "house",
     "hive"
    ],
    "params": [],
@@ -2602,8 +1830,6 @@ export const BLOCKS_API = {
    "subjects": [
     "scout",
     "forager",
-    "guard",
-    "house",
     "hive"
    ],
    "params": [],
@@ -2624,8 +1850,6 @@ export const BLOCKS_API = {
    "subjects": [
     "scout",
     "forager",
-    "guard",
-    "house",
     "hive"
    ],
    "params": [],
@@ -2644,30 +1868,6 @@ export const BLOCKS_API = {
    "subjects": [
     "scout",
     "forager",
-    "guard",
-    "house",
-    "hive"
-   ],
-   "params": [],
-   "returns": "int",
-   "output": [
-    "Number"
-   ],
-   "waitable": false,
-   "doc": ""
-  },
-  {
-   "type": "bees_Counts_guard",
-   "api": "Counts.guard",
-   "cls": "Counts",
-   "name": "guard",
-   "member": "field",
-   "target": "obj",
-   "subjects": [
-    "scout",
-    "forager",
-    "guard",
-    "house",
     "hive"
    ],
    "params": [],
@@ -2688,8 +1888,6 @@ export const BLOCKS_API = {
    "subjects": [
     "scout",
     "forager",
-    "guard",
-    "house",
     "hive"
    ],
    "params": [],
@@ -2710,8 +1908,6 @@ export const BLOCKS_API = {
    "subjects": [
     "scout",
     "forager",
-    "guard",
-    "house",
     "hive"
    ],
    "params": [],
@@ -2730,8 +1926,6 @@ export const BLOCKS_API = {
    "subjects": [
     "scout",
     "forager",
-    "guard",
-    "house",
     "hive"
    ],
    "params": [],
@@ -2752,8 +1946,6 @@ export const BLOCKS_API = {
    "subjects": [
     "scout",
     "forager",
-    "guard",
-    "house",
     "hive"
    ],
    "params": [],
@@ -2774,8 +1966,6 @@ export const BLOCKS_API = {
    "subjects": [
     "scout",
     "forager",
-    "guard",
-    "house",
     "hive"
    ],
    "params": [],
@@ -2796,8 +1986,6 @@ export const BLOCKS_API = {
    "subjects": [
     "scout",
     "forager",
-    "guard",
-    "house",
     "hive"
    ],
    "params": [],
@@ -2818,8 +2006,6 @@ export const BLOCKS_API = {
    "subjects": [
     "scout",
     "forager",
-    "guard",
-    "house",
     "hive"
    ],
    "params": [],
@@ -2840,8 +2026,6 @@ export const BLOCKS_API = {
    "subjects": [
     "scout",
     "forager",
-    "guard",
-    "house",
     "hive"
    ],
    "params": [

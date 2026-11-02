@@ -130,7 +130,7 @@ def score_dict(board: ScoreBoard) -> dict[str, Any]:
 
 
 def event_key(event: dict[str, Any]) -> str:
-    """Ключ сводки событий: тип и, если есть, причина (`death/hornet`)."""
+    """Ключ сводки событий: тип и, если есть, причина (`death/spider`)."""
     key = str(event.get("type", "?"))
     cause = event.get("cause")
     return f"{key}/{cause}" if cause is not None else key

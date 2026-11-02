@@ -41,20 +41,18 @@ def test_demo_twice_gives_same_replay_hash(tmp_path):
 
 # ------------------------------------------------------------------ переключатели в матче
 
-#: Эффекты часто: шершни со 2-й секунды, все цветы с пауками, погода меняется раз в ~3 с.
+#: Эффекты часто: все цветы с пауками, погода меняется раз в ~3 с.
 _BUSY = (
-    "enemies.hornets.first_wave_s=2", "enemies.hornets.wave_interval_s=3",
     "enemies.spiders.flower_fraction=1.0", "enemies.spiders.kill_prob_per_s=0.5",
     "weather.mean_duration_s=3", "duration_s=30",
 )
 
 
-@pytest.mark.parametrize("off", [None, "enemies.hornets", "enemies.spiders", "weather"])
+@pytest.mark.parametrize("off", [None, "enemies.spiders", "weather"])
 def test_enabled_false_removes_effect_completely(tmp_path, off):
     extra = (f"{off}.enabled=false",) if off else ()
     cfg = load_match(CONFIGS / "matches" / "m2_economy.yaml",
-                     cli_overrides=(*_BUSY, "enemies.hornets.enabled=true",
-                                    "enemies.spiders.enabled=true", *extra))
+                     cli_overrides=(*_BUSY, "enemies.spiders.enabled=true", *extra))
     events = []
     wind_seen = 0.0
     with Simulation(cfg, on_frame=lambda f: events.extend(f.events)) as sim:
@@ -64,14 +62,10 @@ def test_enabled_false_removes_effect_completely(tmp_path, off):
             wind_seen = max(wind_seen, float(np.abs(m._wind).max()))
     types = {e["type"] for e in events}
     causes = {e.get("cause") for e in events if e["type"] == "death"}
-    hornets = bool(types & {"hornet_spawn", "attack", "heat_ball", "rob"})
     print(f"выключено {off}: события {sorted(types)}, причины гибели {causes}, "
           f"ветер до {wind_seen:.2f} м/с")
-    assert hornets == (off != "enemies.hornets")
     assert ("spider" in causes) == (off != "enemies.spiders")
     assert ("weather" in types) == (off != "weather")
-    if off == "enemies.hornets":
-        assert m.enemies.n == 0 and m.backend.n_bodies == m.bees.n
     if off == "enemies.spiders":
         assert not m.world.flower_spider.any() and m.enemies.bite_rolls == 0
     if off == "weather":
@@ -96,7 +90,6 @@ def test_places_winner_and_early_finish():
         cli_overrides=(
             "hives=[{script: examples/bees/example_basic.py}, "
             "{script: examples/bees/example_basic.py}, {color: '#ffffff'}]",
-            "enemies.hornets.enabled=false",
         ),
     )
     with Simulation(cfg) as sim:
@@ -142,7 +135,7 @@ def test_replay_frame_restores_body_positions(tmp_path):
     """Кадр реплея → тела модели там же, где были в матче (с точностью квантования)."""
     cfg = load_match(CONFIGS / "matches" / "m1_swarm.yaml",
                      cli_overrides=("duration_s=3", "profile=small",
-                                    "demo.swarm.per_hive={scout: 5, forager: 10, guard: 5}"))
+                                    "demo.swarm.per_hive={scout: 5, forager: 15}"))
     truth = {}
     with Simulation(cfg) as sim:
         m = sim.module
@@ -192,25 +185,18 @@ def test_replay_frame_restores_body_positions(tmp_path):
 
 
 def test_deaths_by_cause_in_score_match_death_events(tmp_path):
-    """Критерий M7c: гибели в счёте (энергия / шершень / паук) = события `death` реплея.
+    """Критерий M7c: гибели в счёте (энергия / паук) = события `death` реплея.
 
-    Разведчики с малым запасом энергии падают, цветы с пауками кусают сборщиков, а
-    шершня тест ставит вплотную к пчёлам в воздухе (волна сама до них не долетела бы).
+    Разведчики с малым запасом энергии падают, цветы с пауками кусают сборщиков.
     """
     cfg = load_match(CONFIGS / "matches" / "m2_economy.yaml", cli_overrides=(
-        *_BUSY, "enemies.hornets.enabled=true", "enemies.hornets.first_wave_s=1e9",
-        "enemies.spiders.enabled=true", "bee_types.scout.energy_max=40"))
+        *_BUSY, "enemies.spiders.enabled=true", "bee_types.scout.energy_max=40"))
     path = tmp_path / "d.swr"
     with Simulation(cfg) as sim:
         m = sim.module
         writer = ReplayWriter(path, make_header(cfg, sim.teams, m.scene()))
         sim.on_frame = writer
-        while not sim.finished:
-            sim.run(max_steps=sim.clock.steps_for(3.0))
-            air = m.bees.airborne
-            if air.size and m.enemies.alive.sum() < 2:
-                pos, _ = m.backend.body_state(air[:1])
-                m.enemies.spawn(pos[0] + np.array([1.5, 0.0, 0.0]))
+        sim.run()
         writer.close(m.score())
     rp = read_replay(path)
     counted: dict[tuple[int, str], int] = {}
@@ -221,7 +207,7 @@ def test_deaths_by_cause_in_score_match_death_events(tmp_path):
                 counted[key] = counted.get(key, 0) + 1
     print(f"гибели по событиям: {counted}")
     teams = rp.footer["score"]["teams"]
-    for cause in ("energy", "hornet", "spider"):
+    for cause in ("energy", "spider"):
         assert any(c == cause for _, c in counted), f"в матче нет гибелей «{cause}»"
         for hive, row in teams.items():
             assert row[f"deaths_{cause}"] == counted.get((int(hive), cause), 0), (hive, cause)

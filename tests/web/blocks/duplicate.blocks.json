@@ -56,7 +56,7 @@
      "inputs": {
       "DO": {
        "block": {
-        "type": "bees_Bee_leave_hive",
+        "type": "bees_Bee_hover",
         "id": "scout_leave",
         "fields": {
          "WAIT": false

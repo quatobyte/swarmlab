@@ -1,5 +1,5 @@
-// Пчёлы и шершни: InstancedMesh на тип, интерполяция между кадрами по uid, ориентация по скорости.
-// Разведчик — тонкий и вытянутый, сборщик — круглый, охранник — крупный, угловатый, с жалом.
+// Пчёлы: InstancedMesh на тип, интерполяция между кадрами по uid, ориентация по скорости.
+// Разведчик — тонкий и вытянутый, сборщик — круглый.
 // Цвет инстанса = цвет команды; чёрные полоски остаются чёрными (цвет вершин × цвет инстанса).
 
 import * as THREE from "three";
@@ -8,10 +8,7 @@ import { dequantize } from "../../core/codec.js";
 
 const dummy = new THREE.Object3D();
 dummy.rotation.order = "YXZ";
-const tmpColor = new THREE.Color();
 const WHITE = new THREE.Color(1, 1, 1);
-const FLEE = new THREE.Color(0.62, 0.62, 0.72);
-const ROB = new THREE.Color(1.0, 0.45, 0.4);
 
 // ------------------------------------------------------------------ геометрия
 
@@ -54,37 +51,14 @@ function beeGeometry(kind) {
       parts.push(part(new THREE.SphereGeometry(1, 8, 4), WING, M(s * 0.95, 0.55, 0.15, 1.05, 0.05, 0.32, 0, s * 0.35, s * 0.1)));
       parts.push(part(new THREE.CylinderGeometry(0.04, 0.04, 0.9, 3), DARK, M(s * 0.25, 0.45, 1.85, 1, 1, 1, 0.9, 0, -s * 0.4)));
     }
-  } else if (kind === "forager") {
+  } else {
     parts.push(part(new THREE.SphereGeometry(1, 14, 10), stripes(2.0, 0.38, 0.1), M(0, 0, -0.2, 0.92, 0.85, 1.12)));
     parts.push(part(new THREE.SphereGeometry(0.5, 8, 6), DARK, M(0, 0.08, 1.0)));
     for (const s of [-1, 1]) {
       parts.push(part(new THREE.SphereGeometry(1, 8, 4), WING, M(s * 0.75, 0.8, 0.1, 0.72, 0.06, 0.42, 0, s * 0.25, s * 0.25)));
     }
-  } else {
-    parts.push(part(new THREE.IcosahedronGeometry(1, 1), stripes(1.5, 0.45, 0.2), M(0, 0, -0.35, 0.95, 0.9, 1.3)));
-    parts.push(part(new THREE.IcosahedronGeometry(0.62, 0), DARK, M(0, 0.1, 1.0)));
-    parts.push(part(new THREE.ConeGeometry(0.2, 0.75, 5), DARK, M(0, -0.05, -1.95, 1, 1, 1, -Math.PI / 2, 0, 0)));
-    for (const s of [-1, 1]) {
-      parts.push(part(new THREE.SphereGeometry(1, 6, 3), WING, M(s * 0.8, 0.85, 0.15, 0.8, 0.06, 0.5, 0, s * 0.3, s * 0.3)));
-      parts.push(part(new THREE.ConeGeometry(0.1, 0.45, 4), DARK, M(s * 0.28, -0.1, 1.5, 1, 1, 1, Math.PI / 2, 0, s * 0.5)));
-    }
   }
   return mergeGeometries(parts);
-}
-
-function hornetGeometry() {
-  // Шершень — оранжево-бурый с чёрным, не путается с жёлтым ульем.
-  const O = [0.95, 0.38, 0.04];
-  const B = [0.08, 0.05, 0.04];
-  const body = (x, y, z) => (((((z + 3) * 2.2) % 1) + 1) % 1 < 0.42 ? B : O);
-  return mergeGeometries([
-    part(new THREE.SphereGeometry(1, 14, 9), body, M(0, 0, -0.55, 0.78, 0.74, 1.35)),
-    part(new THREE.SphereGeometry(0.55, 10, 7), [0.3, 0.1, 0.05], M(0, 0.05, 0.75)),
-    part(new THREE.SphereGeometry(0.48, 8, 6), [0.85, 0.15, 0.05], M(0, 0.05, 1.45)),
-    part(new THREE.ConeGeometry(0.15, 0.6, 5), B, M(0, -0.1, -2.15, 1, 1, 1, -Math.PI / 2, 0, 0)),
-    ...[-1, 1].map((s) =>
-      part(new THREE.SphereGeometry(1, 8, 4), [0.75, 0.62, 0.42], M(s * 0.9, 0.62, 0.35, 0.95, 0.05, 0.38, 0, s * 0.3, s * 0.15))),
-  ]);
 }
 
 // ------------------------------------------------------------------ подготовка кадров
@@ -116,7 +90,6 @@ function prep(frame, scene) {
   if (!frame._prep) {
     frame._prep = {
       bee: prepGroup(frame, "bee", scene.pos_lo, scene.pos_hi),
-      hornet: prepGroup(frame, "hornet", scene.pos_lo, scene.pos_hi),
     };
   }
   return frame._prep;
@@ -127,17 +100,17 @@ function prep(frame, scene) {
 export class Agents {
   constructor(scene, hiveColors) {
     this.scene = scene;
-    this.kinds = scene.kinds; // ["scout", "forager", "guard"]
+    this.kinds = scene.kinds; // ["scout", "forager"]
     this.perHive = scene.per_hive;
     this.hiveColors = hiveColors;
     this.fallingState = scene.states.indexOf("falling");
-    this.scale = 3; // масштаб для видимости (реальные радиусы 0.2–0.4 м)
+    this.scale = 3; // масштаб для видимости (реальные радиусы 0.2–0.25 м)
     this.group = new THREE.Group();
     this.group.name = "bees-agents";
 
     const slots = scene.bee_slots;
     this.meshes = this.kinds.map((k) => {
-      const mat = new THREE.MeshLambertMaterial({ vertexColors: true, flatShading: k === "guard" });
+      const mat = new THREE.MeshLambertMaterial({ vertexColors: true });
       const mesh = new THREE.InstancedMesh(beeGeometry(k), mat, slots);
       mesh.setColorAt(0, WHITE);
       mesh.count = 0;
@@ -156,25 +129,6 @@ export class Agents {
     this.cargo.frustumCulled = false;
     this.group.add(this.cargo);
 
-    const hs = Math.max(scene.hornet_slots, 1);
-    this.hornets = new THREE.InstancedMesh(
-      hornetGeometry(), new THREE.MeshLambertMaterial({ vertexColors: true }), hs);
-    this.hornets.setColorAt(0, WHITE);
-    this.hornets.count = 0;
-    this.hornets.frustumCulled = false;
-    this.group.add(this.hornets);
-    this.heat = new THREE.InstancedMesh(
-      new THREE.IcosahedronGeometry(1, 2),
-      new THREE.MeshBasicMaterial({
-        color: "#ff5a00", transparent: true, opacity: 0.45, depthWrite: false, fog: false,
-      }),
-      hs,
-    );
-    this.heat.count = 0;
-    this.heat.frustumCulled = false;
-    this.heat.renderOrder = 3;
-    this.group.add(this.heat);
-
     // Метка выбранной цели «следить».
     this.marker = new THREE.Mesh(
       new THREE.TorusGeometry(1, 0.06, 6, 32),
@@ -185,10 +139,10 @@ export class Agents {
     this.marker.visible = false;
     this.group.add(this.marker);
 
-    this.yaw = new Float32Array(slots + hs);
-    this.pitch = new Float32Array(slots + hs);
+    this.yaw = new Float32Array(slots);
+    this.pitch = new Float32Array(slots);
     // Что нарисовано в последнем кадре: для клика и «следить».
-    this.drawn = { pos: new Float32Array((slots + hs) * 3), uid: new Int32Array(slots + hs), n: 0, index: new Map() };
+    this.drawn = { pos: new Float32Array(slots * 3), uid: new Int32Array(slots), n: 0, index: new Map() };
     this.info = new Map(); // uid → сведения для панели
     this.clock = 0;
   }
@@ -216,7 +170,7 @@ export class Agents {
     this.info.clear();
 
     // ---- пчёлы
-    const counts = [0, 0, 0];
+    const counts = this.kinds.map(() => 0);
     let nCargo = 0;
     const g = pa.bee;
     for (let i = 0; i < g.n; i++) {
@@ -264,51 +218,6 @@ export class Agents {
     });
     this.cargo.count = nCargo;
     this.cargo.instanceMatrix.needsUpdate = true;
-
-    // ---- шершни
-    const h = pa.hornet;
-    let nH = 0;
-    let nHeat = 0;
-    const hs = scene.hornet_radius * this.scale * 1.25;
-    for (let i = 0; i < h.n; i++) {
-      const uid = h.uid[i];
-      const j = pb ? pb.hornet.map.get(uid) : undefined;
-      let x = h.pos[3 * i], y = h.pos[3 * i + 1], z = h.pos[3 * i + 2];
-      let vx = h.vel[3 * i], vy = h.vel[3 * i + 1], vz = h.vel[3 * i + 2];
-      if (j !== undefined) {
-        const P = pb.hornet.pos, V = pb.hornet.vel;
-        x += alpha * (P[3 * j] - x); y += alpha * (P[3 * j + 1] - y); z += alpha * (P[3 * j + 2] - z);
-        vx += alpha * (V[3 * j] - vx); vy += alpha * (V[3 * j + 1] - vy); vz += alpha * (V[3 * j + 2] - vz);
-      }
-      const flags = A.hornet_flags[i];
-      this._orient(scene.bee_slots + A.hornet_slot[i], vx, vy, vz);
-      dummy.position.set(x, y, z);
-      dummy.scale.setScalar(hs);
-      dummy.updateMatrix();
-      this.hornets.setMatrixAt(nH, dummy.matrix);
-      if (flags & 1) tmpColor.copy(FLEE);
-      else if (flags & 4) tmpColor.copy(WHITE).lerp(ROB, 0.5 + 0.5 * Math.sin(this.clock * 10));
-      else tmpColor.copy(WHITE);
-      this.hornets.setColorAt(nH++, tmpColor);
-      if (flags & 2) {
-        const r = (scene.hornet_radius + 1.0) * this.scale * (1 + 0.15 * Math.sin(this.clock * 9 + i));
-        dummy.rotation.set(this.clock, this.clock * 0.7, 0);
-        dummy.scale.setScalar(r);
-        dummy.updateMatrix();
-        this.heat.setMatrixAt(nHeat++, dummy.matrix);
-      }
-      this._draw(uid, x, y, z);
-      this.info.set(uid, {
-        type: "hornet", hp: A.hornet_hp[i] / 255, fleeing: !!(flags & 1), heatBall: !!(flags & 2),
-        robbing: !!(flags & 4), speed: Math.hypot(vx, vy, vz), pos: [x, y, z], radius: hs,
-      });
-    }
-    this.hornets.count = nH;
-    this.hornets.instanceMatrix.needsUpdate = true;
-    if (this.hornets.instanceColor) this.hornets.instanceColor.needsUpdate = true;
-    this.heat.count = nHeat;
-    this.heat.instanceMatrix.needsUpdate = true;
-    this.heat.material.opacity = 0.38 + 0.14 * Math.sin(this.clock * 6);
   }
 
   _draw(uid, x, y, z) {

@@ -17,10 +17,9 @@ from swarmlab.bees.world import World
 
 # Маски столкновений (BEES_SPEC §2.4, DECISIONS №31). Контакт есть, если
 # (contype_a & conaffinity_b) or (contype_b & conaffinity_a).
-# Биты: 0b001 — статика, 0b010 — пчела, 0b100 — шершень.
+# Биты: 0b001 — статика, 0b010 — пчела.
 STATIC_CONTYPE, STATIC_CONAFFINITY = 0b001, 0b000  # статика не сталкивается сама с собой
-BEE_CONTYPE, BEE_CONAFFINITY = 0b010, 0b111  # пчёлы: с пчёлами, шершнями и статикой
-HORNET_CONTYPE, HORNET_CONAFFINITY = 0b100, 0b011  # шершни: с пчёлами и статикой
+BEE_CONTYPE, BEE_CONAFFINITY = 0b010, 0b011  # пчёлы: с пчёлами и статикой
 PARKED_CONTYPE, PARKED_CONAFFINITY = 0, 0  # припаркованные тела пула — ни с чем
 
 TERRAIN_RGBA = "0.42 0.55 0.30 1"
@@ -29,13 +28,12 @@ LEAF_RGBA = "0.20 0.45 0.18 1"
 ROCK_RGBA = "0.50 0.50 0.48 1"
 FLOWER_RGBA = "0.95 0.45 0.75 1"
 SPIDER_FLOWER_RGBA = "0.55 0.20 0.65 1"
-HORNET_RGBA = "0.85 0.35 0.05 1"
 DEFAULT_HIVE_COLORS = ("#f5b700", "#3a86ff", "#e63946")
 
 
 @dataclass(frozen=True)
 class BodySlot:
-    """Слот пула тел: свободная сфера (пчела или шершень — по маскам столкновений)."""
+    """Слот пула тел: свободная сфера пчелы."""
 
     name: str
     radius: float

@@ -2,18 +2,18 @@
 
 Чистая логика на массивах по ульям, без физики: модуль вызывает её на тике
 решений с `dt` тика. Главный инвариант — **мёд не появляется сам по себе**:
-единственный источник мёда — переработка нектара (`honey_per_nectar` за единицу),
-плюс возврат цены отменённой личинки (ранее списанного мёда). Поэтому в любой
-момент `honey ≤ start_honey + honey_per_nectar · processed_total`.
+единственный источник мёда — переработка нектара (`honey_per_nectar` за единицу).
+Поэтому в любой момент `honey ≤ start_honey + honey_per_nectar · processed_total`.
 
-Домашние пчёлы (`house`) не имеют тела и живут только здесь: у каждой задача
-`rest` / `process` / `nurse`. Потребление мёда домашними идёт первым; если мёда
-не хватает — домашние на этом тике не работают (ни переработки, ни ухода за
-личинками, §4.4).
+Домашние пчёлы (`house`) не имеют тела и живут только здесь. Кода игрока у них
+нет (DECISIONS №82): все домашние улья работают по одному правилу — нектара на
+складе больше `min_nectar` → перерабатывают, иначе есть личинки → нянчат, иначе
+отдыхают. Потребление мёда домашними идёт первым; если мёда не хватает —
+домашние на этом тике не работают (ни переработки, ни ухода за личинками, §4.4).
 
 Выведение — очередь: растёт одна личинка (голова очереди), скорость роста
 `√max(1, n_nurse)` базовых секунд в секунду (§4.5). Цена списывается сразу при
-постановке в очередь; отмена возвращает цену последней личинки этого типа.
+постановке в очередь.
 """
 
 from __future__ import annotations
@@ -24,10 +24,6 @@ import numpy as np
 
 from swarmlab.bees.params import BEE_KINDS, BeeKind, EconomyParams
 
-#: Задачи домашней пчелы.
-REST, PROCESS, NURSE = 0, 1, 2
-HOUSE_TASKS = ("rest", "process", "nurse")
-
 
 @dataclass
 class Larva:
@@ -35,7 +31,6 @@ class Larva:
 
     kind: BeeKind
     left_s: float  # базовых секунд до рождения
-    cost: float  # списанный мёд (для возврата при отмене)
 
 
 @dataclass(frozen=True)
@@ -61,8 +56,6 @@ class HiveEconomy:
         self.spent_breeding = np.zeros(n_hives)
         self.spent_feeding = np.zeros(n_hives)  # заправка летающих
         self.spent_house = np.zeros(n_hives)  # питание домашних
-        self.refunded = np.zeros(n_hives)
-        self.stolen = np.zeros(n_hives)  # украдено шершнями
         self.working = np.ones(n_hives, dtype=bool)  # домашние работали на последнем тике
 
         # Домашние пчёлы — SoA по слотам (как пул тел, но без тел).
@@ -70,7 +63,6 @@ class HiveEconomy:
         self.house_alive = np.zeros(n, dtype=bool)
         self.house_uid = np.full(n, -1, dtype=np.int64)
         self.house_hive = np.repeat(np.arange(n_hives, dtype=np.int64), max_bees)
-        self.house_task = np.zeros(n, dtype=np.int64)
 
         self.queue: list[list[Larva]] = [[] for _ in range(n_hives)]
 
@@ -101,21 +93,14 @@ class HiveEconomy:
         s = sl.start + int(free[0])
         self.house_alive[s] = True
         self.house_uid[s] = uid
-        self.house_task[s] = REST
         return s
 
     def house_slots(self, hive: int) -> np.ndarray:
         sl = self._hive_slice(hive)
         return sl.start + np.flatnonzero(self.house_alive[sl])
 
-    def house_count(self, hive: int, task: int | None = None) -> int:
-        slots = self.house_slots(hive)
-        if task is None:
-            return int(slots.size)
-        return int(np.count_nonzero(self.house_task[slots] == task))
-
-    def set_task(self, slots: np.ndarray, task: int) -> None:
-        self.house_task[slots] = task
+    def house_count(self, hive: int) -> int:
+        return int(self.house_slots(hive).size)
 
     def _hive_slice(self, hive: int) -> slice:
         return slice(hive * self.max_bees, (hive + 1) * self.max_bees)
@@ -150,13 +135,6 @@ class HiveEconomy:
         self.spent_feeding += spent
         return given
 
-    def steal(self, hive: int, amount: float) -> float:
-        """Шершень крадёт мёд у летка (§7.1); вернуть, сколько украдено."""
-        taken = min(max(amount, 0.0), float(self.honey[hive]))
-        self.honey[hive] -= taken
-        self.stolen[hive] += taken
-        return taken
-
     # --------------------------------------------------------------- выведение
 
     def alive_and_queued(self, hive: int, flying_alive: int) -> int:
@@ -174,20 +152,8 @@ class HiveEconomy:
             return f"не хватает мёда: {kind} стоит {cost:g}, есть {self.honey[hive]:.2f}"
         self.honey[hive] -= cost
         self.spent_breeding[hive] += cost
-        self.queue[hive].append(Larva(kind, self.params.breeding[kind].time_s, cost))
+        self.queue[hive].append(Larva(kind, self.params.breeding[kind].time_s))
         return None
-
-    def cancel(self, hive: int, kind: BeeKind) -> bool:
-        """Снять последнюю личинку типа `kind` и вернуть её цену."""
-        q = self.queue[hive]
-        for i in range(len(q) - 1, -1, -1):
-            if q[i].kind == kind:
-                larva = q.pop(i)
-                self.honey[hive] += larva.cost
-                self.spent_breeding[hive] -= larva.cost
-                self.refunded[hive] += larva.cost
-                return True
-        return False
 
     # --------------------------------------------------------------- тик
 
@@ -203,11 +169,12 @@ class HiveEconomy:
             self.spent_house[h] += eaten
             working = slots.size == 0 or eaten >= need - 1e-12
             self.working[h] = working
-            tasks = self.house_task[slots]
-            n_process = int(np.count_nonzero(tasks == PROCESS)) if working else 0
-            n_nurse = int(np.count_nonzero(tasks == NURSE)) if working else 0
+            q = self.queue[h]
+            n = int(slots.size) if working else 0
+            n_process = n if self.nectar[h] > p.processing.min_nectar else 0
+            n_nurse = n if not n_process and q else 0
 
-            if n_process and self.nectar[h] > 0:
+            if n_process:
                 amount = min(float(self.process_rate(n_process)) * dt, float(self.nectar[h]))
                 made = amount * p.processing.honey_per_nectar
                 self.nectar[h] -= amount
@@ -215,7 +182,6 @@ class HiveEconomy:
                 self.honey[h] += made
                 self.honey_made[h] += made
 
-            q = self.queue[h]
             if q:
                 q[0].left_s -= dt * float(self.nurse_speedup(n_nurse))
                 if q[0].left_s <= 0:

@@ -22,24 +22,24 @@
 import math
 import random
 
-from swarmlab.bees.api import Forager, Hive, HouseBee, HouseSensors, Sensors, wait
+from swarmlab.bees.api import Forager, Hive, Sensors, wait
 
 #: Не тратить мёд на выведение, пока его меньше — запас на заправку и еду.
 HONEY_RESERVE = 24.0
 
 
 class WaitingForager(Forager):
-    """Сборщик по шагам: найти цветок → долететь → набрать → домой → выгрузить."""
+    """Сборщик по шагам: найти цветок → долететь → набрать → домой (нектар выгрузится сам)."""
 
     def step(self, s: Sensors):
         me = s.me
         if me.in_hive:
-            yield from self.rest_at_home(s)
-            return
+            yield from self.refuel(s)
 
         flower = s.nearest_flower(min_nectar=0.3)
         if flower is None:
-            # Цветов не видно — слетать в случайную точку вокруг улья и посмотреть там.
+            # Цветов не видно (из улья их не видно никогда) — слетать в случайную точку
+            # вокруг улья и посмотреть там. Из улья fly_to сначала выводит наружу.
             angle = random.uniform(0, 2 * math.pi)
             r = random.uniform(15, 50)
             x = s.home.pos.x + math.cos(angle) * r
@@ -68,25 +68,10 @@ class WaitingForager(Forager):
             return 0.0
         return cargo
 
-    def rest_at_home(self, s: Sensors):
-        """Процедура: выгрузить нектар, дождаться заправки и вылететь."""
-        if s.me.cargo > 0:
-            yield self.unload()
+    def refuel(self, s: Sensors):
+        """Процедура: дождаться в улье заправки до 90%."""
         while s.me.energy_percent < 90:
             yield wait()
-        yield self.leave_hive()
-
-
-class Housekeeper(HouseBee):
-    """Перерабатывает нектар, когда он есть; иначе нянчит личинки или отдыхает."""
-
-    def step(self, s: HouseSensors):
-        if s.hive_nectar > 0.05:
-            self.process()
-        elif s.breeding_queue:
-            self.nurse()
-        else:
-            self.rest()
 
 
 def hive_step(hive: Hive):

@@ -22,5 +22,3 @@ bees:
     flowers: {cluster_distance: [20.0, 60.0]}
   pool:
     max_bees_per_hive: 50
-  enemies:
-    hornets: {max: 3}

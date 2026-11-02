@@ -10,11 +10,11 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
-FlyingKind = Literal["scout", "forager", "guard"]
-FLYING_KINDS: tuple[FlyingKind, ...] = ("scout", "forager", "guard")
+FlyingKind = Literal["scout", "forager"]
+FLYING_KINDS: tuple[FlyingKind, ...] = ("scout", "forager")
 #: Все типы пчёл, включая домашнюю (без тела).
-BeeKind = Literal["scout", "forager", "guard", "house"]
-BEE_KINDS: tuple[BeeKind, ...] = ("scout", "forager", "guard", "house")
+BeeKind = Literal["scout", "forager", "house"]
+BEE_KINDS: tuple[BeeKind, ...] = ("scout", "forager", "house")
 WeatherKind = Literal["clear", "windy", "rain"]
 
 Range = tuple[float, float]
@@ -108,7 +108,6 @@ class BeeTypeParams(_Strict):
 class BeeTypes(_Strict):
     scout: BeeTypeParams
     forager: BeeTypeParams
-    guard: BeeTypeParams
 
     def of(self, kind: FlyingKind) -> BeeTypeParams:
         return getattr(self, kind)
@@ -155,44 +154,6 @@ class WeatherParams(_Strict):
     states: dict[WeatherKind, WeatherStateParams]
 
 
-class HornetParams(_Strict):
-    """Шершни (BEES_SPEC §7.1, DECISIONS №37–38)."""
-
-    enabled: bool
-    attack: bool = True
-    rob: bool = True
-    heat_ball: bool = True
-    max: int = Field(ge=0)
-    radius: float = Field(gt=0)
-    mass: float = Field(gt=0)
-    cruise_speed: float = Field(gt=0)
-    thrust_max: float = Field(gt=0)
-    view_radius: float = Field(gt=0)
-    hp: float = Field(gt=0)
-    first_wave_s: float = Field(ge=0)
-    wave_interval_s: float = Field(gt=0)
-    wave_growth_s: float = Field(gt=0)
-    spawn_agl: float = Field(gt=0)
-    target_max_allies: int = Field(ge=0)
-    target_ally_radius: float = Field(ge=0)
-    kill_contact_s: float = Field(gt=0)
-    touch_margin: float = Field(ge=0)
-    rob_radius: float = Field(ge=0)
-    rob_guard_radius: float = Field(ge=0)
-    rob_rate: float = Field(ge=0)
-    heat_ball_min_guards: int = Field(ge=1)
-    heat_ball_distance: float = Field(ge=0)
-    heat_ball_dps: float = Field(ge=0)
-    flee_hp: float = Field(ge=0)
-    leave_margin: float = Field(ge=0)
-
-    @model_validator(mode="after")
-    def _can_fly(self) -> HornetParams:
-        if self.thrust_max <= self.mass * 9.81:
-            raise ValueError("enemies.hornets.thrust_max: тяга меньше веса — шершень не взлетит")
-        return self
-
-
 class SpiderParams(_Strict):
     """Пауки (BEES_SPEC §7.2)."""
 
@@ -202,7 +163,6 @@ class SpiderParams(_Strict):
 
 
 class EnemiesParams(_Strict):
-    hornets: HornetParams
     spiders: SpiderParams
 
 
@@ -251,6 +211,8 @@ class CollectParams(_Strict):
 class ProcessingParams(_Strict):
     k_proc: float = Field(ge=0)
     honey_per_nectar: float = Field(ge=0)
+    #: Домашние перерабатывают, если нектара на складе больше (DECISIONS №82).
+    min_nectar: float = Field(ge=0)
 
 
 class FeedingParams(_Strict):
@@ -361,7 +323,6 @@ class BeesParams(_Strict):
     pheromones: PheromoneParams
     weather: WeatherParams
     enemies: EnemiesParams
-    advanced_control: bool = False
     sensor_noise: bool = False
     hives: list[HiveEntry] = Field(default_factory=list)
     demo: DemoParams = DemoParams()

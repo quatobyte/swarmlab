@@ -1,6 +1,6 @@
 """Балансный прогон: один матч на нескольких seed'ах headless, сводная таблица.
 
-По каждому seed — мёд в конце, гибели пчёл по причинам, судьба шершней; в конце —
+По каждому seed — мёд в конце, гибели пчёл по причинам; в конце —
 победы по скриптам, средний мёд по времени (кривая: выходит ли на плато) и средние
 гибели. Матчи идут параллельно в отдельных процессах (`--jobs`), у каждого свои
 раннеры кода игрока. Детерминизм не нарушается: seed матча задаёт всё.
@@ -9,9 +9,9 @@
 
     .venv\\Scripts\\python tools\\balance.py                       # demo.yaml, seed 1–10
     .venv\\Scripts\\python tools\\balance.py --seeds 3 --duration 120
-    .venv\\Scripts\\python tools\\balance.py --scripts example_basic.py example_basic.py `
-        example_basic.py --set economy.start_bees.guard=0           # без охраны
-    .venv\\Scripts\\python tools\\balance.py --set enemies.hornets.enabled=false
+    .venv\\Scripts\\python tools\\balance.py --scripts example_basic.py example_smart.py `
+        example_basic.py --set economy.start_bees.scout=0           # без разведчиков
+    .venv\\Scripts\\python tools\\balance.py --set enemies.spiders.enabled=false
 """
 
 from __future__ import annotations
@@ -26,8 +26,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
-CAUSES = ("energy", "hornet", "spider")
-HORNET_FATES = ("hornet_spawn", "hornet_death", "hornet_flee", "hornet_left")
+CAUSES = ("energy", "spider")
 
 
 @dataclass
@@ -39,11 +38,8 @@ class Result:
     winner: int | None
     honey: list[float]
     delivered: list[float]
-    stolen: list[float]
     alive: list[int]
     deaths: list[Counter[str]]
-    hornets: Counter[str]
-    heat_ball: int
     curve: list[tuple[float, list[float]]] = field(default_factory=list)
     wall_s: float = 0.0
 
@@ -55,19 +51,11 @@ def run_one(match: str, seed: int, overrides: list[str], curve_s: float) -> Resu
 
     cfg = load_match(ROOT / match, cli_overrides=[*overrides, f"seed={seed}"])
     deaths: dict[int, Counter[str]] = {}
-    hornets: Counter[str] = Counter()
-    heat_ball = 0
 
     def on_frame(frame) -> None:
-        nonlocal heat_ball
         for e in frame.events:
-            kind = e.get("type")
-            if kind == "death":
+            if e.get("type") == "death":
                 deaths.setdefault(int(e["hive"]), Counter())[e["cause"]] += 1
-            elif kind in HORNET_FATES:
-                hornets[kind] += 1
-            elif kind == "heat_ball":
-                heat_ball += 1
 
     t0 = time.perf_counter()
     curve: list[tuple[float, list[float]]] = []
@@ -87,11 +75,8 @@ def run_one(match: str, seed: int, overrides: list[str], curve_s: float) -> Resu
         winner=teams.index(board.winner) if board.winner in teams else None,
         honey=[r["honey"] for r in rows],
         delivered=[r["delivered"] for r in rows],
-        stolen=[r["stolen"] for r in rows],
         alive=[int(r["alive"]) for r in rows],
         deaths=[deaths.get(int(t), Counter()) for t in teams],
-        hornets=hornets,
-        heat_ball=heat_ball,
         curve=curve,
         wall_s=time.perf_counter() - t0,
     )
@@ -112,15 +97,12 @@ def report(results: list[Result]) -> None:
     print()
     head = ["seed", "победил"]
     head += [f"мёд {i}" for i in range(n_hives)]
-    head += [f"гибели {i} э/ш/п" for i in range(n_hives)]
-    head += ["шершни: всего/убит/бежал", "тепл.шар"]
+    head += [f"гибели {i} э/п" for i in range(n_hives)]
     rows = []
     for r in results:
         row = [str(r.seed), names[r.winner] if r.winner is not None else "—"]
         row += [f"{h:.1f}" for h in r.honey]
         row += ["/".join(str(d[c]) for c in CAUSES) for d in r.deaths]
-        row += [f"{r.hornets['hornet_spawn']}/{r.hornets['hornet_death']}/"
-                f"{r.hornets['hornet_flee']}", str(r.heat_ball)]
         rows.append(row)
     _table(head, rows)
 
@@ -128,8 +110,8 @@ def report(results: list[Result]) -> None:
     wins = Counter(r.winner for r in results)
     print("Побед: " + ", ".join(f"{names[i]} — {wins[i]}" for i in range(n_hives))
           + f" (из {len(results)})")
-    head = ["улей", "мёд ср.", "мин", "макс", "доставлено", "украдено", "живых",
-            "гибели энерг.", "шершень", "паук"]
+    head = ["улей", "мёд ср.", "мин", "макс", "доставлено", "живых",
+            "гибели энерг.", "паук"]
     rows = []
     k = len(results)
     for i in range(n_hives):
@@ -137,18 +119,10 @@ def report(results: list[Result]) -> None:
         rows.append([
             names[i], f"{sum(honey) / k:.1f}", f"{min(honey):.1f}", f"{max(honey):.1f}",
             f"{sum(r.delivered[i] for r in results) / k:.1f}",
-            f"{sum(r.stolen[i] for r in results) / k:.1f}",
             f"{sum(r.alive[i] for r in results) / k:.1f}",
             *(f"{sum(r.deaths[i][c] for r in results) / k:.1f}" for c in CAUSES),
         ])
     _table(head, rows)
-    hn = Counter()
-    for r in results:
-        hn.update(r.hornets)
-    print(f"Шершни в среднем за матч: появилось {hn['hornet_spawn'] / k:.1f}, "
-          f"убито {hn['hornet_death'] / k:.1f}, бежало {hn['hornet_flee'] / k:.1f}, "
-          f"покинуло карту {hn['hornet_left'] / k:.1f}; "
-          f"тиков теплового шара {sum(r.heat_ball for r in results) / k:.0f}")
 
     print()
     print("Мёд по времени (среднее по seed'ам):")

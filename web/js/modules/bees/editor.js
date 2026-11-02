@@ -15,10 +15,9 @@ const PY_BUILTINS = [
 ];
 /** Имена переменных, тип которых угадывается без аннотаций (как в шаблоне и примерах). */
 const NAME_TYPES = {
-  s: "Sensors", hive: "Hive", flower: "Flower", enemy: "Enemy", bee: "BeeInfo", msg: "Message",
-  m: "Message", f: "Flower", e: "Enemy", b: "BeeInfo", target: "Enemy", larva: "Larva",
+  s: "Sensors", hive: "Hive", flower: "Flower", bee: "BeeInfo", msg: "Message",
+  m: "Message", f: "Flower", b: "BeeInfo", larva: "Larva",
 };
-const HOUSE_BASES = new Set(["HouseBee"]);
 
 // ------------------------------------------------------------------ типы
 
@@ -119,7 +118,6 @@ class Scope {
         if (t) return t;
       }
     }
-    if (name === "s" && HOUSE_BASES.has(this.selfClass)) return { cls: "HouseSensors" };
     const guess = NAME_TYPES[name];
     return guess ? { cls: guess } : null;
   }
@@ -286,7 +284,6 @@ export class MatchPanel {
       </select>
       <label>Мир</label>
       <div class="toggles">
-        <label><input type="checkbox" id="${p}-hornets" checked> шершни</label>
         <label><input type="checkbox" id="${p}-spiders" checked> пауки</label>
         <label><input type="checkbox" id="${p}-weather" checked> погода</label>
       </div>
@@ -298,7 +295,7 @@ export class MatchPanel {
     const q = (id) => root.querySelector(`#${p}-${id}`);
     this.el = {
       profile: q("profile"), hives: q("hives"), seed: q("seed"), duration: q("duration"),
-      hornets: q("hornets"), spiders: q("spiders"), weather: q("weather"), speed: q("speed"),
+      spiders: q("spiders"), weather: q("weather"), speed: q("speed"),
     };
     q("dice").onclick = () => {
       this.el.seed.value = String(randomSeed());
@@ -406,7 +403,6 @@ export class MatchPanel {
       `profile=${this.el.profile.value}`,
       `duration_s=${Number(this.el.duration.value)}`,
       `hives=[${flow}]`,
-      `enemies.hornets.enabled=${this.el.hornets.checked}`,
       `enemies.spiders.enabled=${this.el.spiders.checked}`,
       `weather.enabled=${this.el.weather.checked}`,
     ];
@@ -442,7 +438,7 @@ export class MatchPanel {
   save() {
     const state = {
       profile: this.el.profile.value, seed: this.el.seed.value, duration: this.el.duration.value,
-      hornets: this.el.hornets.checked, spiders: this.el.spiders.checked, weather: this.el.weather.checked,
+      spiders: this.el.spiders.checked, weather: this.el.weather.checked,
       speed: this.el.speed.value,
       choice: this.choice,
     };
@@ -464,7 +460,7 @@ export class MatchPanel {
     if ([...this.el.profile.options].some((o) => o.value === st.profile)) this.el.profile.value = st.profile;
     if (st.seed !== undefined && !this.randomSeed) this.el.seed.value = st.seed;
     if (st.duration) this.el.duration.value = st.duration;
-    for (const k of ["hornets", "spiders", "weather"]) if (typeof st[k] === "boolean") this.el[k].checked = st[k];
+    for (const k of ["spiders", "weather"]) if (typeof st[k] === "boolean") this.el[k].checked = st[k];
     if (st.speed) this.el.speed.value = st.speed;
     this.choice = st.choice || {};
     if (this.lockFirst) delete this.choice["0"]; // первый улей — всегда файл из редактора

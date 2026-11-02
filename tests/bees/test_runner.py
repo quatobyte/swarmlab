@@ -16,7 +16,7 @@ from swarmlab.core.sim import Simulation
 
 from .helpers import CONFIGS, run_for
 
-#: Стартовый состав: uid 0–4 разведчики, 5–19 сборщики, 20–24 охранники, 25–34 домашние.
+#: Стартовый состав: uid 0–4 разведчики, 5–19 сборщики, 20–29 домашние.
 FIRST_FORAGER = 5
 
 
@@ -148,7 +148,7 @@ def test_syntax_error_is_reported_with_line_and_match_goes_on(tmp_path):
 
 
 def test_commands_go_home_collect_unload_and_breed(tmp_path):
-    """Цепочка команд игрока: вылет, сбор, домой, выгрузка, выведение."""
+    """Цепочка команд игрока: вылет, сбор, домой (выгрузка сама, DECISIONS №82), выведение."""
     code = """
         from swarmlab.bees.api import Forager, Hive, Sensors
 
@@ -158,9 +158,8 @@ def test_commands_go_home_collect_unload_and_breed(tmp_path):
             def step(self, s: Sensors):
                 me = s.me
                 if me.in_hive:
-                    if me.cargo > 0:
-                        self.unload()
-                    elif not getattr(self, "done", False):
+                    assert me.cargo == 0  # нектар выгружается при входе
+                    if not getattr(self, "done", False):
                         self.done = True
                         self.collect(FLOWER)
                     return

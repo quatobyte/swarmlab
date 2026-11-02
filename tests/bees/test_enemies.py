@@ -1,22 +1,10 @@
-"""Враги M3 (BEES_SPEC §7): шершни, тепловой шар, грабёж, пауки, переключатели."""
+"""Враги (BEES_SPEC §7): пауки и переключатели. Шершней нет (DECISIONS №82)."""
 
 import math
 
 import numpy as np
-import pytest
 
-from swarmlab.bees.control import INTERCEPT
-from swarmlab.bees.state import FREE
-
-from .helpers import CALM, FLAT, make_sim, run_for
-
-#: Шершни включены, но волн нет — тест сам ставит шершня (`enemies.spawn`).
-HORNETS = ("enemies.hornets.enabled=true", "enemies.hornets.first_wave_s=1e9")
-
-
-def _ground_point(m, xy, agl):
-    xy = np.asarray(xy, dtype=np.float64)
-    return np.array([xy[0], xy[1], float(m.world.ground_height(xy[None])[0]) + agl])
+from .helpers import CALM, make_sim, run_for
 
 
 def _events(sim, seconds, types=None):
@@ -27,152 +15,6 @@ def _events(sim, seconds, types=None):
         if sim.clock.is_decision_step:
             out += sim.module.snapshot().events
     return [e for e in out if types is None or e["type"] in types]
-
-
-# ------------------------------------------------------------------ тепловой шар
-
-
-def test_three_guards_surround_hornet_and_it_dies_or_flees():
-    sim = make_sim(*FLAT, *CALM, *HORNETS)
-    m = sim.module
-    center = _ground_point(m, [40.0, 40.0], 8.0)
-    h = m.enemies.spawn(center)
-    hornet_uid = int(m.enemies.uid[h])
-    guards = []
-    for k in range(3):
-        a = 2 * math.pi * k / 3
-        g = m.spawn(0, "guard", center + np.array([4 * math.cos(a), 4 * math.sin(a), 0.0]))
-        m.control.mode[g] = INTERCEPT
-        m.control.target[g] = hornet_uid
-        guards.append(g)
-
-    # Убегающий шершень (7 м/с) быстрее охранников (6 м/с): до края «Малой» карты ~10 с.
-    events = _events(sim, 30.0)
-    kinds = [e["type"] for e in events]
-    gone = [e for e in events if e["type"] in ("hornet_death", "hornet_left")
-            and e["hornet"] == hornet_uid]
-    lost_guards = [e for e in events if e["type"] == "death" and e["cause"] == "hornet"]
-    print(f"события: {sorted(set(kinds))}; итог шершня: {gone}; погибло охранников "
-          f"{len(lost_guards)}")
-    assert "heat_ball" in kinds
-    assert gone, "шершень не погиб и не улетел за 30 с"
-    assert not m.enemies.alive[h]
-    assert len(lost_guards) <= 2  # шершень кусает по одной пчеле за раз
-
-
-def test_single_guard_does_not_hurt_hornet():
-    sim = make_sim(*FLAT, *CALM, *HORNETS, "enemies.hornets.attack=false")
-    m = sim.module
-    center = _ground_point(m, [40.0, 40.0], 8.0)
-    h = m.enemies.spawn(center)
-    g = m.spawn(0, "guard", center + np.array([3.0, 0.0, 0.0]))
-    m.control.mode[g] = INTERCEPT
-    m.control.target[g] = int(m.enemies.uid[h])
-    run_for(sim, 6.0)
-    assert m.enemies.hp[h] == pytest.approx(m.params.enemies.hornets.hp)
-
-
-def test_heat_ball_switch_off_keeps_hornet_alive():
-    sim = make_sim(*FLAT, *CALM, *HORNETS, "enemies.hornets.heat_ball=false",
-                   "enemies.hornets.attack=false")
-    m = sim.module
-    center = _ground_point(m, [40.0, 40.0], 8.0)
-    h = m.enemies.spawn(center)
-    for k in range(3):
-        g = m.spawn(0, "guard", center + np.array([3.0 * (k - 1), 3.0, 0.0]))
-        m.control.mode[g] = INTERCEPT
-        m.control.target[g] = int(m.enemies.uid[h])
-    events = _events(sim, 6.0)
-    assert m.enemies.hp[h] == pytest.approx(m.params.enemies.hornets.hp)
-    assert not [e for e in events if e["type"] == "heat_ball"]
-
-
-# ------------------------------------------------------------------ атака
-
-
-@pytest.mark.parametrize("attack", [True, False])
-def test_hornet_kills_lone_bee_after_continuous_contact(attack):
-    sim = make_sim(*FLAT, *CALM, *HORNETS, f"enemies.hornets.attack={str(attack).lower()}")
-    m = sim.module
-    spot = _ground_point(m, [-40.0, 30.0], 6.0)
-    s = m.spawn(0, "forager", spot)
-    uid = int(m.bees.uid[s])
-    m.enemies.spawn(spot + np.array([2.0, 0.0, 0.0]))
-    events = _events(sim, 6.0)
-    deaths = [e for e in events if e["type"] == "death" and e["bee"] == uid]
-    attacks = [e for e in events if e["type"] == "attack" and e["bee"] == uid]
-    if attack:
-        assert deaths and deaths[0]["cause"] == "hornet"
-        assert attacks
-        # Не раньше kill_contact_s после начала контакта.
-        assert deaths[0]["time"] - attacks[0]["time"] >= 1.5 - 1e-6
-        assert m.bees.state[s] == FREE or m.bees.uid[s] != uid
-    else:
-        assert not deaths and not attacks
-        assert m.bees.uid[s] == uid
-
-
-# ------------------------------------------------------------------ грабёж
-
-
-@pytest.mark.parametrize("case", ["rob", "guard_near", "switch_off"])
-def test_hornet_robs_hive_without_guards(case):
-    extra = ("enemies.hornets.rob=false",) if case == "switch_off" else ()
-    sim = make_sim(*FLAT, *CALM, *HORNETS, "enemies.hornets.attack=false", *extra)
-    m = sim.module
-    e = m.economy
-    entrance = m.world.hive_entrance[0]
-    if case == "guard_near":
-        # Охранник висит рядом с летком (ближе rob_guard_radius к шершню).
-        m.spawn(0, "guard", entrance + np.array([2.0, 3.0, 1.5]))
-    m.enemies.spawn(entrance + np.array([6.0, 0.0, 2.0]))
-    honey0 = float(e.honey[0])
-    events = _events(sim, 15.0)
-    robbed = [ev for ev in events if ev["type"] == "rob"]
-    stolen = float(e.stolen[0])
-    if case == "rob":
-        assert robbed and robbed[0]["hive"] == 0
-        # 0.2 ед./с, пока шершень у летка (он подлетает за пару секунд).
-        assert 1.0 < stolen <= 0.2 * 15.0 + 1e-9
-        assert float(e.honey[0]) == pytest.approx(honey0 - stolen)
-    else:
-        assert not robbed and stolen == 0.0
-
-
-# ------------------------------------------------------------------ волны
-
-
-def test_hornet_waves_grow_and_respect_max():
-    sim = make_sim(
-        *FLAT, *CALM, "enemies.hornets.enabled=true", "enemies.hornets.first_wave_s=5",
-        "enemies.hornets.wave_interval_s=5", "enemies.hornets.wave_growth_s=10",
-    )
-    m = sim.module
-    cap = m.params.enemies.hornets.max  # «Малый» профиль — 3
-    spawned = []
-    for _ in range(round(21.0 / sim.clock.dt)):
-        sim.step()
-        if sim.clock.is_decision_step:
-            spawned += [e for e in m.snapshot().events if e["type"] == "hornet_spawn"]
-            assert m.enemies.alive.sum() <= cap
-    times = [round(e["time"], 1) for e in spawned]
-    # t=5: 1 шершень; t=10: волна 2, но мест 2 → 2; t=15, 20: мест нет.
-    assert times == [5.0, 10.0, 10.0]
-    half = m.world.half_size
-    for e in spawned:
-        assert max(abs(e["pos"][0]), abs(e["pos"][1])) == pytest.approx(half - 2.0, abs=1e-6)
-
-
-def test_hornets_disabled_removes_bodies_and_events():
-    sim = make_sim(
-        *FLAT, "enemies.hornets.enabled=false", "enemies.hornets.first_wave_s=0",
-        "enemies.hornets.wave_interval_s=1",
-    )
-    m = sim.module
-    assert m.enemies.n == 0
-    assert m.backend.n_bodies == m.bees.n
-    events = _events(sim, 5.0)
-    assert not [e for e in events if e["type"].startswith("hornet")]
 
 
 # ------------------------------------------------------------------ пауки
@@ -238,14 +80,19 @@ def test_spiders_disabled_no_spider_flowers_no_deaths():
     assert m.enemies.bite_rolls == 0
 
 
-def test_guard_sees_hornet_in_sensors():
-    sim = make_sim(*FLAT, *CALM, *HORNETS)
+def test_no_hornets_bodies_scene_or_enemy_sensors():
+    """Шершней нет: в модели только тела пчёл, в сцене и кадре — ни следа, сенсора врагов нет."""
+    sim = make_sim(*CALM)
     m = sim.module
-    spot = _ground_point(m, [20.0, -30.0], 6.0)
-    g = m.spawn(0, "guard", spot)
-    h = m.enemies.spawn(spot + np.array([5.0, 0.0, 0.0]))
+    assert m.backend.n_bodies == m.bees.n
+    scene = m.scene()
+    assert not [k for k in scene if "hornet" in k]
+    assert scene["kinds"] == ["scout", "forager"]
+    assert scene["hive_counts"] == ["scout", "forager", "house", "in_hive"]
+    s = m.spawn(0, "scout")
     run_for(sim, 0.2)
-    rows = [r for r in m.hive_sensors(0) if r["me"]["id"] == int(m.bees.uid[g])]
-    enemies = rows[0]["enemies"]
-    assert [e["id"] for e in enemies] == [int(m.enemies.uid[h])]
-    assert enemies[0]["kind"] == "hornet"
+    frame = m.snapshot()
+    assert not [k for k in frame.arrays if "hornet" in k]
+    assert frame.arrays["hive_counts"].shape[1] == len(scene["hive_counts"])
+    row = next(r for r in m.hive_sensors(0) if r["me"]["id"] == int(m.bees.uid[s]))
+    assert "enemies" not in row

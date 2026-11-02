@@ -73,8 +73,6 @@ class BeeState:
         self.power_coef = np.zeros(n)
         #: Тяга последнего шага физики (для энергии и тестов), Н.
         self.thrust = np.zeros((n, 3))
-        #: Прямая команда тяги (`thrust(fx, fy, fz)`, §3.3); NaN — управляет автопилот.
-        self.thrust_cmd = np.full((n, 3), np.nan)
 
         self._next_uid = 0
         self._airborne: np.ndarray | None = None
@@ -136,7 +134,6 @@ class BeeState:
         self.power_idle[s] = tbl["power_idle"][k]
         self.power_coef[s] = tbl["power_coef"][k]
         self.thrust[s] = 0.0
-        self.thrust_cmd[s] = np.nan
         self.uid[s] = self.new_uid()
         self.state[s] = state
         self._changed()
@@ -159,7 +156,6 @@ class BeeState:
         self.cargo[slots] = 0.0
         self.energy[slots] = 0.0
         self.thrust[slots] = 0.0
-        self.thrust_cmd[slots] = np.nan
         self._changed()
 
     def kind_name(self, slot: int) -> FlyingKind:

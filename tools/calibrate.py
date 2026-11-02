@@ -35,7 +35,7 @@ import yaml
 
 ROOT = Path(__file__).resolve().parents[1]
 DEFAULTS = ROOT / "configs" / "bees" / "defaults.yaml"
-KINDS = ("scout", "forager", "guard")
+KINDS = ("scout", "forager")
 
 #: Опоры калибровки (не механики игры, а допущения модели).
 AIR_DENSITY = 1.225  # ρ, кг/м³

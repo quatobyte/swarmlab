@@ -80,8 +80,6 @@ def test_collision_mask_matrix():
     from swarmlab.bees.physics.mjcf import (
         BEE_CONAFFINITY,
         BEE_CONTYPE,
-        HORNET_CONAFFINITY,
-        HORNET_CONTYPE,
         PARKED_CONAFFINITY,
         PARKED_CONTYPE,
         STATIC_CONAFFINITY,
@@ -92,16 +90,12 @@ def test_collision_mask_matrix():
     masks = {
         "static": (STATIC_CONTYPE, STATIC_CONAFFINITY),
         "bee": (BEE_CONTYPE, BEE_CONAFFINITY),
-        "hornet": (HORNET_CONTYPE, HORNET_CONAFFINITY),
         "parked": (PARKED_CONTYPE, PARKED_CONAFFINITY),
     }
     expected = {
         ("static", "static"): False,
         ("static", "bee"): True,
-        ("static", "hornet"): True,
         ("bee", "bee"): True,
-        ("bee", "hornet"): True,
-        ("hornet", "hornet"): False,
     }
     for (a, b), want in expected.items():
         assert collides(*masks[a], *masks[b]) is want, (a, b)

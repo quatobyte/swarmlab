@@ -11,7 +11,6 @@ hives:
 
 weather: {enabled: false}
 enemies:
-  hornets: {enabled: false}
   spiders: {enabled: false}
 
 demo:

@@ -25,7 +25,7 @@ API_PY = ROOT / "src" / "swarmlab" / "bees" / "api.py"
 OUT_JS = ROOT / "web" / "js" / "modules" / "bees" / "api_hints.js"
 
 #: Внутренние классы, которые в подсказках не показываются, но чьи члены наследуются.
-_HIDDEN_BASES = ("_Agent", "_Flyer")
+_HIDDEN_BASES = ("_Agent",)
 #: Методы, которые игрок переопределяет, а не вызывает.
 _OVERRIDE_ONLY = {"step"}
 

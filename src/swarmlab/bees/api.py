@@ -5,13 +5,16 @@
 * Мир живёт **тиками**: 10 раз в секунду каждая пчела получает свежие сенсоры
   (`Sensors`) и решает, что делать. Для этого у пчелы вызывается метод `step()`.
 * Внутри `step()` пчела **вызывает команды**: `self.fly_to(...)`, `self.collect(...)`,
-  `self.go_home()`… Если команд движения несколько — побеждает последняя.
+  `self.go_home()`, `self.hover()`. Если команд движения несколько — побеждает последняя.
   Если пчела ничего не вызвала — она продолжает прошлую команду.
+* Пчёлы договариваются между собой: `self.signal(...)` — сообщение соседям,
+  `self.mark(...)` — запах на месте. Общей карты и общего командира нет.
 * Пчела видит только то, что рядом (радиус обзора), а не всю карту.
 * Пчёлы — обычные объекты Python: можно хранить память в `self`
   (`self.my_flower = ...`), она доживёт до следующего тика.
 * Улей может принимать решения в функции `hive_step(hive)`: выводить новых
-  пчёл, следить за мёдом.
+  пчёл, следить за мёдом. Домашние пчёлы работают сами: перерабатывают нектар
+  и нянчат личинки.
 * Ждать выполнения команды можно через `yield`: `ok = yield self.fly_to(x, y)` —
   пчела долетит (`True`) или не успеет за 60 с (`False`). `yield wait()` —
   подождать один тик, `yield wait(5)` — пять секунд. Процедуру с ожиданием
@@ -20,7 +23,7 @@
 Файл игрока
 -----------
 ```python
-from swarmlab.bees.api import Scout, Forager, Guard, HouseBee, Hive, Sensors
+from swarmlab.bees.api import Scout, Forager, Hive, Sensors
 
 
 class MyForager(Forager):
@@ -48,18 +51,16 @@ from typing import Any, Literal, NamedTuple
 from swarmlab.core.program import Order, Wait
 
 #: Тип пчелы.
-Kind = Literal["scout", "forager", "guard", "house"]
+Kind = Literal["scout", "forager", "house"]
 #: Погода.
 Weather = Literal["clear", "windy", "rain"]
-#: Задача домашней пчелы.
-Task = Literal["rest", "process", "nurse"]
 
 #: `from_id` сообщений, которые отправил сам улей (`hive.signal`).
 HIVE_ID = -1
 
 
 # Правила матча; раннер заполняет их перед загрузкой скрипта игрока.
-_RULES: dict[str, Any] = {"advanced_control": False, "channels": 4, "max_values": 8}
+_RULES: dict[str, Any] = {"channels": 4, "max_values": 8}
 
 
 # ===================================================================== ожидание
@@ -138,14 +139,14 @@ class Me:
     """Что пчела знает о себе."""
 
     id: int  #: номер пчелы (у каждой свой, не меняется)
-    kind: Kind  #: тип: "scout", "forager", "guard"
+    kind: Kind  #: тип: "scout" или "forager"
     pos: Vec  #: где я, м
     vel: Vec  #: моя скорость, м/с
     energy: float  #: сколько энергии осталось, Дж (0 — пчела падает)
     energy_max: float  #: полный запас энергии, Дж
     cargo: float  #: сколько нектара несу, ед.
     cargo_max: float  #: сколько нектара влезает, ед. (у сборщика 1.5, у остальных 0)
-    in_hive: bool  #: я внутри улья (там заправляюсь и выгружаю нектар)
+    in_hive: bool  #: я внутри улья (там заправляюсь; нектар выгружается сам при входе)
     alive: bool  #: жива ли пчела
 
     @property
@@ -190,18 +191,6 @@ class BeeInfo:
     kind: Kind
     team: int  #: номер улья пчелы
     friend: bool  #: из моего улья
-    pos: Vec
-    rel_pos: Vec
-    dist: float
-    vel: Vec
-
-
-@dataclass(slots=True)
-class Enemy:
-    """Враг рядом (шершень)."""
-
-    id: int  #: номер врага — его передают в `intercept()`
-    kind: str  #: "hornet"
     pos: Vec
     rel_pos: Vec
     dist: float
@@ -262,7 +251,6 @@ class Sensors:
     weather: Weather  #: погода: "clear", "windy", "rain"
     flowers: list[Flower]  #: цветы рядом (ближние — первыми)
     bees: list[BeeInfo]  #: пчёлы рядом
-    enemies: list[Enemy]  #: враги рядом
     obstacles: list[Obstacle]  #: препятствия рядом
     messages: list[Message]  #: сообщения от своих
     pheromones: Pheromones  #: запахи своего улья
@@ -274,51 +262,6 @@ class Sensors:
             if f.nectar >= min_nectar and (best is None or f.dist < best.dist):
                 best = f
         return best
-
-    def nearest_enemy(self) -> Enemy | None:
-        """Ближайший видимый враг; `None` — врагов не видно."""
-        return min(self.enemies, key=lambda e: e.dist, default=None)
-
-
-@dataclass(slots=True)
-class HornetMe:
-    """Что шершень знает о себе."""
-
-    id: int  #: номер шершня (пчёлы видят его в `enemies`)
-    kind: str  #: всегда "hornet"
-    pos: Vec
-    vel: Vec
-    hp: float  #: здоровье (0 — шершень погиб)
-    hp_max: float
-    #: Здоровья мало (меньше порога) — шершень больше не нападает и должен улетать за край.
-    fleeing: bool
-
-
-@dataclass(slots=True)
-class HiveInfo:
-    """Улей на карте (шершни знают, где ульи)."""
-
-    team: int  #: номер улья
-    pos: Vec  #: леток
-    rel_pos: Vec
-    dist: float
-
-
-@dataclass(slots=True)
-class HornetSensors:
-    """Сенсоры шершня. Приходят в `step(self, s)` класса `Hornet`."""
-
-    tick: int
-    time: float
-    me: HornetMe
-    ground_z: float  #: высота земли подо мной, м
-    bees: list[BeeInfo]  #: пчёлы рядом (ближние — первыми); `friend` всегда False
-    hives: list[HiveInfo]  #: все ульи карты
-    map_half_size: float  #: карта — квадрат от -map_half_size до +map_half_size по x и y
-
-    def nearest_bee(self) -> BeeInfo | None:
-        """Ближайшая видимая пчела; `None` — пчёл не видно."""
-        return min(self.bees, key=lambda b: b.dist, default=None)
 
 
 @dataclass(slots=True)
@@ -348,7 +291,6 @@ class Counts:
 
     scout: int = 0
     forager: int = 0
-    guard: int = 0
     house: int = 0
     #: Сколько каждого типа сидит в улье: `in_hive["forager"]`.
     in_hive: dict[str, int] = field(default_factory=dict)
@@ -358,7 +300,7 @@ class Counts:
     @property
     def total(self) -> int:
         """Всего живых пчёл."""
-        return self.scout + self.forager + self.guard + self.house
+        return self.scout + self.forager + self.house
 
 
 @dataclass(slots=True)
@@ -367,28 +309,6 @@ class Larva:
 
     kind: Kind
     left_s: float  #: сколько ещё расти (в секундах при одной няньке)
-
-
-@dataclass(slots=True)
-class HouseMe:
-    """Что домашняя пчела знает о себе."""
-
-    id: int
-    kind: Kind  #: всегда "house"
-    task: Task  #: чем занята сейчас: "rest", "process", "nurse"
-
-
-@dataclass(slots=True)
-class HouseSensors:
-    """Сенсоры домашней пчелы: она живёт в улье и видит его склад."""
-
-    tick: int
-    time: float
-    me: HouseMe
-    hive_nectar: float  #: нектара на складе, ед.
-    hive_honey: float  #: мёда на складе, ед.
-    breeding_queue: list[Larva]  #: очередь выведения
-    counts: Counts  #: сколько пчёл в улье
 
 
 # ===================================================================== пчёлы
@@ -409,7 +329,7 @@ def _opt(name: str, value: Any) -> float | None:
 
 
 def _id(name: str, value: Any) -> int:
-    """Номер цветка или врага: можно передать сам объект или его `id`."""
+    """Номер цветка или пчелы: можно передать сам объект или его `id`."""
     value = getattr(value, "id", value)
     if isinstance(value, bool) or not isinstance(value, int):
         raise TypeError(f"{name}: нужен номер (id) или сам объект, а получено {value!r}")
@@ -433,8 +353,21 @@ class _Agent:
         return Order(move, instant)
 
 
-class _Flyer(_Agent):
-    """Общие команды движения всех, кто летает: пчёл и шершней."""
+class Bee(_Agent):
+    """Летающая пчела. Общие команды разведчика и сборщика.
+
+    Команды движения (действует последняя вызванная за тик):
+    `fly_to`, `hover`, `go_home`. Дополнительно (можно вместе с движением):
+    `signal`, `mark`.
+
+    Если пчела в улье, `fly_to` и `collect` сначала выводят её наружу, а потом
+    выполняются. `hover` и `go_home` в улье оставляют пчелу внутри.
+    """
+
+    def step(self, s: Sensors) -> None:
+        """Решение пчелы на этом тике. Переопределите в своём классе."""
+
+    # ----------------------------------------------------------------- движение
 
     def fly_to(
         self,
@@ -444,7 +377,7 @@ class _Flyer(_Agent):
         speed: float | None = None,
         avoid: bool = True,
     ) -> Order:
-        """Лететь к точке `(x, y)`.
+        """Лететь к точке `(x, y)`. Из улья пчела сначала вылетает.
 
         * `z` — высота (абсолютная, м). Не задана — держаться в 5 м над землёй.
         * `speed` — скорость, м/с. Не задана — крейсерская для этой пчелы.
@@ -457,52 +390,13 @@ class _Flyer(_Agent):
             bool(avoid),
         )
 
-    def fly_dir(self, dx: float, dy: float, dz: float = 0.0, speed: float | None = None) -> Order:
-        """Лететь в направлении `(dx, dy, dz)` (длина неважна), пока не скажут другое."""
-        dx, dy, dz = _num("dx", dx), _num("dy", dy), _num("dz", dz)
-        if dx == 0 and dy == 0 and dz == 0:
-            raise ValueError("fly_dir: направление (0, 0, 0) — непонятно, куда лететь")
-        return self._move("fly_dir", dx, dy, dz, _opt("speed", speed), instant=True)
-
     def hover(self) -> Order:
-        """Зависнуть на месте."""
+        """Зависнуть на месте (в улье — остаться внутри)."""
         return self._move("hover")
 
-
-class Bee(_Flyer):
-    """Летающая пчела. Общие команды разведчика, сборщика и охранника.
-
-    Команды движения (действует последняя вызванная за тик):
-    `fly_to`, `fly_dir`, `hover`, `go_home`, `leave_hive`.
-    Дополнительно (можно вместе с движением): `signal`, `mark`.
-
-    Если пчела в улье, `fly_to`, `fly_dir`, `collect`, `intercept` и `thrust`
-    сначала выводят её наружу (как `leave_hive`), а потом выполняются.
-    `hover` и `go_home` в улье оставляют пчелу внутри.
-    """
-
-    def step(self, s: Sensors) -> None:
-        """Решение пчелы на этом тике. Переопределите в своём классе."""
-
-    # ----------------------------------------------------------------- движение
-
     def go_home(self) -> Order:
-        """Лететь к летку и войти в улей (там заправка и выгрузка нектара)."""
+        """Лететь к летку и войти в улей: там нектар выгрузится сам, а пчела заправится."""
         return self._move("go_home")
-
-    def leave_hive(self) -> Order:
-        """Вылететь из улья (если пчела внутри)."""
-        return self._move("leave_hive")
-
-    def thrust(self, fx: float, fy: float, fz: float) -> Order:
-        """Продвинутый режим: прямая сила тяги, Н. Автопилот выключается.
-
-        Работает, только если в матче `advanced_control: true`. Тяга вниз не бывает,
-        а слишком большая обрезается до максимальной для этой пчелы.
-        """
-        if not _RULES["advanced_control"]:
-            raise RuntimeError("thrust() разрешена только в матче с advanced_control: true")
-        return self._move("thrust", _num("fx", fx), _num("fy", fy), _num("fz", fz), instant=True)
 
     # ----------------------------------------------------------------- связь
 
@@ -544,18 +438,19 @@ class Scout(Bee):
     kind: Kind = "scout"
 
     def step(self, s: Sensors) -> None:
-        _wander(self, s, radius=(15.0, 70.0), home_below=35.0)
+        _wander(self, s, radius=(15.0, 70.0), home_below=35.0, leave_above=90.0)
 
 
 class Forager(Bee):
     """Сборщик: носит нектар (до 1.5 ед.), летает ≈5 м/с, видит 8 м, ≈4 минуты полёта.
 
-    Дополнительные команды: `collect(flower)`, `unload()`. С грузом сборщик
-    тяжелее и разгоняется медленнее.
+    Дополнительная команда: `collect(flower)`. Нектар выгружается сам, когда
+    сборщик входит в улей (`go_home`). С грузом сборщик тяжелее и разгоняется
+    медленнее.
 
     Поведение по умолчанию: летит к ближайшему цветку с нектаром и собирает,
-    полный — домой, выгружает, заправляется и снова в путь. Если цветов не видно —
-    ищет в случайных точках вокруг улья.
+    полный — домой, заправляется и снова в путь. Если цветов не видно — ищет
+    в случайных точках вокруг улья.
     """
 
     kind: Kind = "forager"
@@ -563,25 +458,19 @@ class Forager(Bee):
     def collect(self, flower: Flower | int) -> Order:
         """Подлететь к цветку, зависнуть над ним и набирать нектар (0.25 ед./с).
 
-        Набор идёт, пока груз не полный или цветок не пустой. Можно передать
-        сам цветок или его номер: `self.collect(f)` или `self.collect(f.id)`.
+        Набор идёт, пока груз не полный или цветок не пустой. Из улья сборщик
+        сначала вылетает. Можно передать сам цветок или его номер:
+        `self.collect(f)` или `self.collect(f.id)`.
         """
         return self._move("collect", _id("collect", flower))
-
-    def unload(self) -> Order:
-        """Выгрузить весь нектар на склад. Работает, только когда сборщик в улье."""
-        return self._move("unload")
 
     def step(self, s: Sensors) -> None:
         me = s.me
         mem = self.__dict__.setdefault("_base", {})
         if me.in_hive:
-            if me.cargo > 0:
-                self.unload()
-            elif me.energy_percent > 80:
-                self.leave_hive()
-            return
-        if me.is_full or me.energy_percent < 30:
+            if me.energy_percent <= 80:
+                return  # заправляется
+        elif me.is_full or me.energy_percent < 30:
             self.go_home()
             return
         flower = s.nearest_flower(min_nectar=0.3)
@@ -595,101 +484,10 @@ class Forager(Bee):
                 self.fly_to(field_pos.x, field_pos.y)
                 return
             mem.pop("field")  # поляна опустела — ищем другую
-        _wander(self, s, radius=(15.0, 60.0), home_below=30.0)
-
-
-class Guard(Bee):
-    """Охранник: крупный и сильный (≈6 м/с), видит 12 м, летает ≈3 минуты.
-
-    Дополнительная команда: `intercept(enemy)`. Против шершня охранники
-    собираются по двое и больше — «тепловой шар».
-
-    Поведение по умолчанию: патрулирует круг 8 м вокруг улья и бросается на
-    ближайшего врага; энергии меньше 35% — домой.
-    """
-
-    kind: Kind = "guard"
-
-    def intercept(self, target: Enemy | BeeInfo | int) -> Order:
-        """Преследовать цель с упреждением (лететь туда, где она будет)."""
-        return self._move("intercept", _id("intercept", target))
-
-    def step(self, s: Sensors) -> None:
-        me = s.me
-        if me.in_hive:
-            if me.energy_percent > 90:
-                self.leave_hive()
-            return
-        if me.energy_percent < 35:
-            self.go_home()
-            return
-        enemy = s.nearest_enemy()
-        if enemy is not None:
-            self.intercept(enemy)
-            return
-        mem = self.__dict__.setdefault("_base", {"angle": random.uniform(0, 2 * math.pi)})
-        target = s.home.pos + Vec(math.cos(mem["angle"]), math.sin(mem["angle"]), 0.0) * 8.0
-        if me.pos.dist_xy(target) < 2.0:
-            mem["angle"] += 0.6
-        self.fly_to(target.x, target.y)
-
-
-class HouseBee(_Agent):
-    """Домашняя пчела: не летает, живёт в улье.
-
-    Команды: `process()` — перерабатывать нектар в мёд, `nurse()` — ухаживать
-    за личинками (выведение быстрее), `rest()` — отдыхать.
-    Каждая домашняя пчела ест 0.002 ед. мёда в секунду; без мёда не работает.
-
-    Поведение по умолчанию: перерабатывает, если есть нектар; иначе нянчит
-    личинки, если они есть; иначе отдыхает.
-    """
-
-    kind: Kind = "house"
-
-    def step(self, s: HouseSensors) -> None:
-        if s.hive_nectar > 0.05:
-            self.process()
-        elif s.breeding_queue:
-            self.nurse()
-        else:
-            self.rest()
-
-    def process(self) -> Order:
-        """Перерабатывать нектар в мёд (1 ед. нектара → 0.5 ед. мёда)."""
-        return self._move("process", instant=True)
-
-    def nurse(self) -> Order:
-        """Ухаживать за личинками: чем больше нянек, тем быстрее выведение."""
-        return self._move("nurse", instant=True)
-
-    def rest(self) -> Order:
-        """Отдыхать (мёд всё равно ест)."""
-        return self._move("rest", instant=True)
+        _wander(self, s, radius=(15.0, 60.0), home_below=30.0, leave_above=80.0)
 
 
 # ===================================================================== враги
-
-
-class Hornet(_Flyer):
-    """Шершень: крупный (≈7 м/с), охотится на пчёл и грабит ульи.
-
-    Так написаны встроенные боты (`swarmlab/bees/bots/hornet.py`). Команды:
-    `fly_to`, `fly_dir`, `hover`, `intercept(bee)`. Укусы и грабёж происходят
-    сами: шершень кусает пчелу, которой касается, и крадёт мёд у летка, если
-    рядом нет охранников. Когда `s.me.fleeing`, он больше не нападает.
-
-    Поведение по умолчанию: висит на месте.
-    """
-
-    kind: str = "hornet"
-
-    def step(self, s: HornetSensors) -> None:
-        """Решение шершня на этом тике. Переопределите в своём классе."""
-
-    def intercept(self, target: BeeInfo | int) -> Order:
-        """Преследовать пчелу с упреждением (лететь туда, где она будет)."""
-        return self._move("intercept", _id("intercept", target))
 
 
 class Spider(_Agent):
@@ -719,8 +517,11 @@ class Hive:
     """Улей. Передаётся в `hive_step(hive)` каждый тик.
 
     Читать: `honey`, `nectar`, `counts`, `queue`, `max_bees`, `costs`, `messages`.
-    Делать: `breed(kind)`, `cancel_breeding(kind)`, `signal(...)`.
+    Делать: `breed(kind)`, `signal(...)`.
     Помнить между тиками: словарь `memory`.
+
+    Домашние пчёлы работают сами: есть нектар — перерабатывают его в мёд,
+    иначе нянчат личинки (выведение быстрее), иначе отдыхают.
     """
 
     def __init__(self) -> None:
@@ -740,24 +541,18 @@ class Hive:
         self._swarmlab_cmd: dict[str, Any] = {}
 
     def breed(self, kind: Kind, n: int = 1) -> None:
-        """Вывести `n` пчёл типа `kind` ("scout", "forager", "guard", "house").
+        """Вывести `n` пчёл типа `kind` ("scout", "forager", "house").
 
         Мёд списывается сразу. Если мёда не хватает или улей полон — личинка
         не ставится (в лог придёт сообщение).
         """
-        if kind not in ("scout", "forager", "guard", "house"):
+        if kind not in ("scout", "forager", "house"):
             raise ValueError(
-                f"breed(): тип пчелы — 'scout', 'forager', 'guard' или 'house', а не {kind!r}"
+                f"breed(): тип пчелы — 'scout', 'forager' или 'house', а не {kind!r}"
             )
         if isinstance(n, bool) or not isinstance(n, int) or n < 1:
             raise ValueError(f"breed(): n — целое число от 1, а получено {n!r}")
         self._swarmlab_cmd.setdefault("breed", []).append([kind, n])
-
-    def cancel_breeding(self, kind: Kind) -> None:
-        """Отменить последнюю личинку типа `kind` в очереди (мёд вернётся)."""
-        if kind not in ("scout", "forager", "guard", "house"):
-            raise ValueError(f"cancel_breeding(): нет такого типа пчелы: {kind!r}")
-        self._swarmlab_cmd.setdefault("cancel", []).append(kind)
 
     def signal(self, *values: float) -> None:
         """Сообщение до 8 чисел всем своим пчёлам в радиусе 15 м от летка."""
@@ -770,14 +565,15 @@ class Hive:
 # ===================================================================== поведение по умолчанию
 
 
-def _wander(bee: Bee, s: Sensors, radius: tuple[float, float], home_below: float) -> None:
+def _wander(
+    bee: Bee, s: Sensors, radius: tuple[float, float], home_below: float, leave_above: float
+) -> None:
     """Облёт случайных точек вокруг улья; мало энергии — домой."""
     me = s.me
     if me.in_hive:
-        if me.energy_percent > 90:
-            bee.leave_hive()
-        return
-    if me.energy_percent < home_below:
+        if me.energy_percent <= leave_above:
+            return  # заправляется
+    elif me.energy_percent < home_below:
         bee.go_home()
         return
     mem = bee.__dict__.setdefault("_base", {})
