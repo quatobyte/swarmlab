@@ -15,8 +15,8 @@ const PY_BUILTINS = [
 ];
 /** Имена переменных, тип которых угадывается без аннотаций (как в шаблоне и примерах). */
 const NAME_TYPES = {
-  s: "Sensors", hive: "Hive", flower: "Flower", bee: "BeeInfo", msg: "Message",
-  m: "Message", f: "Flower", b: "BeeInfo", larva: "Larva",
+  flower: "Flower", f: "Flower", bee: "OtherBee", b: "OtherBee", message: "Message", msg: "Message",
+  m: "Message", point: "Point", p: "Point", place: "Point",
 };
 
 // ------------------------------------------------------------------ типы
@@ -228,7 +228,6 @@ export function hint(cm) {
     if (!word) return null;
     const names = [
       ...API_HINTS.globals.map((g) => ({ name: g.name, kind: g.kind === "class" ? "class" : g.kind, doc: g.doc, type: g.kind === "class" ? "class" : "" })),
-      { name: "hive_step", kind: "function", sig: "(hive)", doc: "Решения улья (необязательно): def hive_step(hive: Hive)" },
       ...PY_KEYWORDS.map((k) => ({ name: k, kind: "keyword" })),
       ...PY_BUILTINS.map((k) => ({ name: k, kind: "builtin" })),
     ];

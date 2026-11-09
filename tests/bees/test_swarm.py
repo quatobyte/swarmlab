@@ -91,7 +91,7 @@ def test_hover_over_flower_no_contact():
 
 def test_cruise_speed_and_flight_time_within_15_percent():
     """По типам: установившаяся скорость и время до E = 0 — в пределах ±15% от целей."""
-    sim = make_sim(*FLAT, *CALM, "world.map_size=3000")
+    sim = make_sim(*FLAT, *CALM, "world.map_size=3000", "energy.tank_spread=0")
     m = sim.module
     slots = []
     for i, kind in enumerate(FLYING_KINDS):

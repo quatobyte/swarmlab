@@ -457,7 +457,7 @@ class RunnerPool:
         else:
             reason = (
                 f"код улья не ответил за {self.cfg.hard_timeout_ms:g} мс при бюджете "
-                f"{self.cfg.budget_ms:g} мс — бесконечный цикл или слишком долгий step()?"
+                f"{self.cfg.budget_ms:g} мс — бесконечный цикл без команд в loop()?"
             )
         link.log.write(
             f"[ядро] тик {tick} пропущен: {reason} "

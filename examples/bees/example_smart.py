@@ -1,246 +1,146 @@
-"""Умный улей: разведка, общая карта полян и пауков, расчёт мёда.
+"""Умный улей: разведка, пауки, дележ полян и расчёт мёда.
 
 Как он устроен (BEES_SPEC §11):
 
-* **Разведчики** разлетаются веером, у найденной поляны облетают её низко
-  (паука видно только ближе 4 м), потом летят к летку и рассказывают:
-  где поляна и на каких цветах пауки.
-* **Улей** собирает рассказы в память (`hive.memory`) — это «карта» улья — и
-  пересказывает её каждой пчеле, которая вылетает: по очереди поляны и пауков.
-* **Сборщики** помнят карту, выбирают цветок «побольше нектара, поближе»,
-  обходят цветы с пауками и делят поляны между собой.
-* **Домашние пчёлы** работают сами: перерабатывают нектар и нянчат личинок.
-* **Улей** выводит пчёл, пока это окупается.
-
-Сообщения (до 8 чисел):
-    (FIELD, x, y, нектар)              — поляна
-    (SPIDER, x1, y1, x2, y2, x3, y3)   — до трёх цветов с пауками
+* **Разведчики** ищут цветы. Нашли — подлетают ближе (паука видно только
+  ближе 4 м), летят домой и рассказывают: «flowers» — где поляна,
+  «spider» — где паук.
+* **Улей** запоминает поляны и раз в несколько секунд повторяет их у летка —
+  так новость слышат и пчёлы, которые вернутся позже.
+* **Сборщики** запоминают пауков, выбирают цветок «побольше нектара, поближе,
+  без паука», делят поляны (чётные и нечётные — на разные).
+* **Улей** выводит пчёл, пока это окупается, и решает, когда пчёлам
+  возвращаться: в начале рискуем, к концу бережём энергию.
+* Домашние пчёлы (`Worker`) работают сами: делают мёд и растят личинки.
 """
 
-import math
+from swarmlab.bees.api import Collector, Hive, Scout, Worker
 
-from swarmlab.bees.api import HIVE_ID, Forager, Hive, Scout, Sensors, Vec
-
-FIELD, SPIDER = 1.0, 2.0
-
-#: Цветок ближе этого к пауку из карты — считаем паучьим, м.
+#: Цветок ближе этого к пауку — считаем паучьим, м.
 SPIDER_RADIUS = 0.5
 #: Две поляны ближе этого — одна и та же, м.
 SAME_FIELD = 12.0
 #: Мёд, который улей не тратит на выведение: запас на заправку.
 HONEY_RESERVE = 16.0
 #: После этой секунды матча новые пчёлы уже не успеют окупиться.
-BREED_UNTIL_S = 150.0
+HATCH_UNTIL_S = 150.0
 
 
-def _golden_angle(n: int) -> float:
-    """Угол для n-й пчелы — так разные пчёлы смотрят в разные стороны."""
-    return (n * 2.399963) % (2 * math.pi)
-
-
-def _read_map(messages, fields: list, spiders: list) -> None:
-    """Дописать в карту поляны и пауков из сообщений."""
-    for m in messages:
-        v = m.values
-        if len(v) >= 4 and v[0] == FIELD:
-            _add_field(fields, v[1], v[2], v[3])
-        elif len(v) >= 3 and v[0] == SPIDER:
-            for i in range(1, len(v) - 1, 2):
-                _add_spider(spiders, v[i], v[i + 1])
-
-
-def _add_field(fields: list, x: float, y: float, nectar: float) -> None:
-    for f in fields:
-        if math.hypot(f[0] - x, f[1] - y) < SAME_FIELD:
-            f[2] = nectar  # свежая оценка нектара
-            return
-    fields.append([x, y, nectar])
-
-
-def _add_spider(spiders: list, x: float, y: float) -> None:
-    for sx, sy in spiders:
-        if math.hypot(sx - x, sy - y) < SPIDER_RADIUS:
-            return
-    spiders.append((x, y))
-
-
-def _is_spider(spiders: list, pos: Vec) -> bool:
-    return any(math.hypot(sx - pos.x, sy - pos.y) < SPIDER_RADIUS for sx, sy in spiders)
+def near_any(points, place, radius):
+    """Есть ли среди точек `points` такая, что ближе `radius` к `place`."""
+    return any(p.distance(place) < radius for p in points)
 
 
 # ===================================================================== разведчик
 
 
 class SmartScout(Scout):
-    """Ищет поляны, облетает их низко, ищет пауков и несёт новости домой."""
+    """Ищет поляны, высматривает пауков и несёт новости домой."""
 
-    def __init__(self):
-        self.fields = []  # [x, y, нектар] — найденные мной поляны
-        self.spiders = []  # (x, y) — замеченные мной пауки
-        self.plan = []  # точки облёта поляны
-        self.news = False  # есть что рассказать улью
-        self.trip = 0  # номер вылета — каждый раз в новую сторону
-        self.inside = False  # был в улье на прошлом тике
-
-    def step(self, s: Sensors):
-        me = s.me
-        if me.in_hive:
-            if not self.inside:
-                self.trip += 1  # вернулся — следующий вылет в новую сторону
-            self.inside = True
-            if me.energy_percent <= 90:
-                return  # заправляюсь
-        self.inside = me.in_hive
-
-        # Всё, что вижу: пауков — на карту.
-        for f in s.flowers:
-            if f.spider:
-                if not _is_spider(self.spiders, f.pos):
-                    self.news = True
-                _add_spider(self.spiders, f.pos.x, f.pos.y)
-
-        if me.energy_percent < 35:
-            self._go_report(s)
+    def loop(self):
+        flower = self.explore()
+        if flower is None:
             return
-
-        # Новая поляна — облететь её низко, чтобы увидеть пауков.
-        rich = [f for f in s.flowers if f.nectar > 0.3]
-        if rich and not self.plan:
-            cx = sum(f.pos.x for f in rich) / len(rich)
-            cy = sum(f.pos.y for f in rich) / len(rich)
-            if not any(math.hypot(f[0] - cx, f[1] - cy) < SAME_FIELD for f in self.fields):
-                self.fields.append([cx, cy, sum(f.nectar for f in rich)])
-                self.news = True
-                self.plan = [Vec(cx + 3 * math.cos(a), cy + 3 * math.sin(a))
-                             for a in (0.0, 1.6, 3.1, 4.7)]
-        if self.plan:
-            p = self.plan[0]
-            if me.pos.dist_xy(p) < 1.5:
-                self.plan.pop(0)
-                if not self.plan:
-                    self._go_report(s)
-                    return
-            self.fly_to(p.x, p.y, s.ground_z + 3.0)  # низко: пауки видны ближе 4 м
-            return
-
-        # С новостями — к летку.
-        if self.news:
-            self._go_report(s)
-            return
-
-        # Разведка: веер направлений, каждый вылет — дальше и в новую сторону.
-        angle = _golden_angle(me.id * 3 + self.trip)
-        reach = 30.0 + 25.0 * (self.trip % 4)
-        target = s.home.pos + Vec(math.cos(angle), math.sin(angle)) * reach
-        if me.pos.dist_xy(target) < 4.0:
-            self.trip += 1
-        self.fly_to(target.x, target.y)
-
-    def _go_report(self, s: Sensors):
-        """Лететь домой и по дороге рассказывать (слышат все свои в 15 м)."""
-        tick = s.tick
-        if self.spiders and tick % 2:
-            k = (tick // 2) % ((len(self.spiders) + 2) // 3)
-            chunk = self.spiders[3 * k: 3 * k + 3]
-            self.signal(SPIDER, *[c for xy in chunk for c in xy])
-        elif self.fields:
-            f = self.fields[(tick // 2) % len(self.fields)]
-            self.signal(FIELD, f[0], f[1], f[2])
-        if s.home.dist < 10.0:
-            self.news = False
+        self.fly_to(flower)  # ближе — чтобы увидеть пауков на соседних цветках
+        spiders = [f.pos for f in self.flowers if f.spider]
         self.go_home()
+        self.say("flowers", flower)
+        for spider in spiders[:3]:
+            self.say("spider", spider)
 
 
 # ===================================================================== сборщик
 
 
-class SmartForager(Forager):
-    """Собирает с выгодных цветов и обходит пауков."""
+class SmartCollector(Collector):
+    """Собирает с выгодных цветов, обходит пауков, делит поляны."""
 
     def __init__(self):
-        self.fields = []  # карта полян, которую рассказал улей
-        self.spiders = []  # пауки из карты
-        self.empty = {}  # поляна (номер в fields) → до какого времени не лететь
-        self.target = None  # поляна, куда лечу
+        self.spiders = []  # где пауки (точки)
+        self.fields = []  # поляны, про которые рассказали
+        self.empty = {}  # номер поляны → до какого времени туда не лететь
 
-    def step(self, s: Sensors):
-        me = s.me
-        _read_map(s.messages, self.fields, self.spiders)
-        if me.in_hive:
-            if me.energy_percent <= 70:
-                return  # нектар выгружен, заправляюсь
-        elif me.is_full or me.energy_percent < 30:
-            self.go_home()
-            return
-
-        # Цветок: побольше нектара, поближе, без паука.
-        room = me.cargo_max - me.cargo
-        good = [f for f in s.flowers
-                if f.nectar >= 0.4 and not f.spider and not _is_spider(self.spiders, f.pos)]
-        if good:
-            best = max(good, key=lambda f: min(f.nectar, room) / (f.dist + 4.0))
-            self.collect(best)
-            return
-
-        # Цветов не видно — на лучшую поляну из карты.
-        if self.target is not None and me.pos.dist_xy(self.target[1]) < 4.0:
-            self.empty[self.target[0]] = s.time + 60.0  # пусто — минуту не возвращаться
-            self.target = None
-        if self.target is None:
-            self.target = self._choose_field(s)
-        if self.target is not None:
-            p = self.target[1]
-            self.fly_to(p.x, p.y)
-            return
-
-        # Карты ещё нет — ищем сами вокруг улья.
-        angle = _golden_angle(me.id + int(s.time // 20))
-        p = s.home.pos + Vec(math.cos(angle), math.sin(angle)) * 45.0
-        self.fly_to(p.x, p.y)
-
-    def _choose_field(self, s: Sensors):
-        options = []
-        for i, (x, y, nectar) in enumerate(self.fields):
-            if self.empty.get(i, 0.0) > s.time:
+    def listen(self):
+        """Дописать в память то, что услышала."""
+        for m in self.heard:
+            if m.where is None:
                 continue
-            p = Vec(x, y)
-            options.append(((nectar + 3.0) / (s.home.pos.dist_xy(p) + 20.0), i, p))
+            if m.word == "spider" and not near_any(self.spiders, m.where, SPIDER_RADIUS):
+                self.spiders.append(m.where)
+            elif m.word == "flowers" and not near_any(self.fields, m.where, SAME_FIELD):
+                self.fields.append(m.where)
+
+    def best_flower(self):
+        """Цветок побольше нектара и поближе, без паука; `None` — такого не видно."""
+        good = [f for f in self.flowers
+                if f.nectar >= 0.4 and not f.spider
+                and not near_any(self.spiders, f.pos, SPIDER_RADIUS)]
+        if not good:
+            return None
+        return max(good, key=lambda f: f.nectar / (f.distance + 4.0))
+
+    def choose_field(self):
+        """Поляна, куда лететь: не пустая, поближе; пчёлы делятся по размеру бака."""
+        options = [(i, p) for i, p in enumerate(self.fields)
+                   if self.empty.get(i, 0.0) <= self.time]
         if not options:
             return None
-        options.sort(reverse=True)
-        # Не все на одну поляну: чётные — на лучшую, нечётные — на вторую.
-        _, i, p = options[min(s.me.id % 2, len(options) - 1)]
-        return (i, p)
+        options.sort(key=lambda o: self.home.distance(o[1]))
+        # Баки у всех разные: «чётный» бак — на ближнюю поляну, «нечётный» — на вторую.
+        return options[int(self.max_energy) % 2 % len(options)]
+
+    def loop(self):
+        self.listen()
+        if self.is_full:
+            self.go_home()
+            return
+        flower = self.best_flower()
+        if flower:
+            self.collect(flower)
+            return
+        field = self.choose_field()
+        if field is None:
+            self.explore()  # карты ещё нет — ищем сами
+            return
+        i, place = field
+        if self.search(place) is None:
+            self.empty[i] = self.time + 60.0  # пусто — минуту не возвращаться
 
 
 # ===================================================================== улей
 
 
-def hive_step(hive: Hive):
-    """Карта полян и пауков, пересказ вылетающим, выведение с расчётом."""
-    fields = hive.memory.setdefault("fields", [])
-    spiders = hive.memory.setdefault("spiders", [])
-    _read_map((m for m in hive.messages if m.from_id != HIVE_ID), fields, spiders)
+class SmartHive(Hive):
+    """Пересказ полян, выведение с расчётом, порог возврата по времени матча."""
 
-    # Пересказ: через тик — поляны (лучшие чаще) и пауки (по три).
-    if hive.tick % 2 == 0 and fields:
-        ranked = sorted(fields, key=lambda f: -f[2])
-        f = ranked[(hive.tick // 2) % len(ranked)]
-        hive.signal(FIELD, f[0], f[1], f[2])
-    elif spiders:
-        k = (hive.tick // 2) % ((len(spiders) + 2) // 3)
-        chunk = spiders[3 * k: 3 * k + 3]
-        hive.signal(SPIDER, *[c for xy in chunk for c in xy])
+    def __init__(self):
+        self.fields = []
+        self.turn = 0
 
-    # Выведение.
-    if hive.queue:
-        return
-    c = hive.counts
-    if hive.time > BREED_UNTIL_S:
-        return  # поздно: пчела не успеет принести больше, чем стоит
-    if c.house < 6 + c.forager // 4:
-        kind = "house"
-    else:
-        kind = "forager"
-    if hive.honey >= HONEY_RESERVE + hive.costs[kind]:
-        hive.breed(kind)
+    def loop(self):
+        spiders = []
+        for m in self.heard:
+            if m.where is None:
+                continue
+            if m.word == "flowers" and not near_any(self.fields, m.where, SAME_FIELD):
+                self.fields.append(m.where)
+            elif m.word == "spider" and not near_any(spiders, m.where, SPIDER_RADIUS):
+                spiders.append(m.where)
+        for spider in spiders[:3]:  # передать дальше тем, кто дома (за тик — до 4 сообщений)
+            self.say("spider", spider)
+
+        # Пересказ: по очереди каждую поляну.
+        if self.fields:
+            self.say("flowers", self.fields[self.turn % len(self.fields)])
+            self.turn += 1
+
+        # Энергия: в начале рискуем, к концу бережём пчёл.
+        self.set_home_energy(25 if self.time < 120 else 40)
+
+        # Выведение: домашних — по числу сборщиков, остальное — сборщики.
+        if self.time < HATCH_UNTIL_S:
+            kind = Worker if self.count(Worker) < 6 + self.count(Collector) // 4 else Collector
+            if self.honey >= HONEY_RESERVE + 4:
+                self.hatch(kind)
+        self.wait(2)
+

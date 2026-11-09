@@ -15,6 +15,7 @@
 | M7b | после M7a | 🟨 | Блоки в редакторе M5: генерация Python, программы пчёл и улья, проверки, русская локализация |
 | M7c | после M7b | 🟨 | Проекты .swarm (экспорт, загрузка в меню), серии матчей на разных seed с таблицей и реплеями, редактор в духе MakeCode |
 | M7e | 02.11 | 🟨 | Минимальный набор команд игрока: без шершней и охранников, выгрузка и домашние пчёлы — автоматически (DECISIONS №82) |
+| M8 | после M7e | 🟨 | Простой API: `loop()` без `yield`, всё через `self`, простые слова, порог энергии, `say`/`heard`, `explore` (DECISIONS №84–88) |
 | — | 20.10 | — | Показ |
 
 Правило отставания: если веха съезжает больше чем на полдня — урезаем M5, M6 не трогаем.
@@ -199,6 +200,25 @@
 - [x] Примеры работают на новом API: `example_basic`, `example_smart`, `example_wait`, `example_blocks` (`.py` совпадает с блоками), шаблон (`swarmlab run configs/matches/m2_economy.yaml --headless`: доставки идут, ошибок в `step()` 0).
 - [x] `pytest` и `ruff check` зелёные.
 - [x] Проверено в браузере: панель «Матч» — переключатели «пауки» и «погода», без шершней; HUD — Р/С/Д без охранников; в блоках категория «Связь» (сообщить, запах, сообщения, запахи), «Движение» — лететь, домой, зависнуть, собирать, ждать; «Домашней пчелы» нет; матч `example_blocks` против примеров идёт, ошибок в консоли и логах сервера нет.
+
+## M8 — Простой API
+
+**Входит:** API игрока по DECISIONS №84–88. Программа — `loop(self)`, команды движения ждут сами (`greenlet` в раннере, зависимость в `pyproject.toml`), один проход `loop` не чаще раза за тик. Всё через `self`: данные пчелы — свойства только для чтения. Новые имена: `Scout`, `Collector`, `Worker`, `Hive`; `fly_to`, `search`, `explore`, `collect` (цветок или место), `go_home`, `refuel`, `wait`, `stop`, `say`/`heard`, `mark`/`smell`/`smell_way` с цветами, `speed=`; улей — `honey`, `count`, `hatch(тип)`, `set_home_energy`, `set_refuel_energy`. Автовозврат по порогу и заправка, случайный бак ±20 %. `heard` копится, пока пчела ждёт. Модуль пчёл, протокол раннера, реплей (новая версия формата, старый — понятная ошибка). Блоки: `gen_blocks_api.py`, `blocks_gen.js` (Python без `yield`), `blocks_editor.js`, `blocks_ru.js`; подсказки `gen_api_hints.py`. Примеры, шаблон, `my_bees.py`, `.blocks.json`; `PLAYER_API.md`, `CHEATSHEET.md`, `BEES_SPEC.md`, `ARCHITECTURE.md`, `README.md`, `DEMO.md`.
+
+**Критерии приёмки:**
+- [x] Тест: публичные имена `api.py` совпадают со списком DECISIONS №85; удалённых имён нет ни в API, ни в подсказках, ни в блоках (`test_public_names_match_decision_85`, `test_removed_names_absent_in_api_hints_and_blocks`).
+- [x] Тест: команды движения ждут без `yield`; возвраты по №87 — `fly_to` (`True` у достижимой цели, `False` по таймауту), `search`/`explore` (цветок или `None`), `collect` цветка и места (`False`, если цветка нет), `go_home` завершается при входе, `refuel(уровень)` ждёт уровня, `hatch` сразу `True`/`False` (`test_commands_wait_and_return_results` — настоящий матч; `test_commands_wait_without_yield_and_resume_with_result`, `test_search_returns_flower_or_none`, `test_hive_hatch_answers_at_once_and_counts`).
+- [x] Тест: `loop` без ждущих команд проходит не чаще раза за тик; бесконечный цикл без команд не вешает матч (бюджет) (`test_loop_without_waiting_commands_runs_once_per_tick`, `test_pass_without_commands_once_per_tick`, `test_infinite_loop_without_commands_skips_ticks_then_restarts`, `test_infinite_loop_match_goes_on_with_budget_warning`).
+- [x] Тест: ниже `set_home_energy` пчела летит домой, текущая команда — `False`, заправка до `set_refuel_energy`, `loop` с начала; порог 0 — автовозврата нет (`test_auto_return_below_threshold_refuels_and_restarts_loop`, `test_auto_return_threshold_zero_never_returns`, `test_auto_return_epoch_restarts_loop_and_commands_return_false`).
+- [x] Тест: бак случаен в пределах разброса и одинаков при одном seed; разброс 0 в YAML — баки равны (`test_tank_random_within_spread_same_for_same_seed`).
+- [x] Тест: `heard` сохраняет сообщения, пришедшие во время ожидания; от пчелы — последнее по каждому слову; очищается на следующем проходе; радиус 15 м, улей слышит у летка (`test_heard_keeps_messages_while_waiting_last_per_word_and_clears_next_pass`, `test_heard_updates_during_the_pass`, `test_say_radius_15_m_and_hive_hears_at_entrance_and_bees_inside_hear`, `test_messages_delivered_next_tick_to_own_hive_in_radius`).
+- [x] Тест: запись в свойство пчелы (`self.pos = …`) — понятная ошибка; своё поле (`self.target = …`) работает (`test_writing_bee_property_is_clear_error_own_field_works`).
+- [x] Тест: ошибка в `loop` одной пчелы — строка в логе, `loop` с начала, остальные работают; смерть во время ожидания — `finally` выполнен, новая пчела начинает с начала (`test_error_in_loop_logs_restarts_and_others_keep_working`, `test_exception_in_one_bee_others_keep_working`, `test_death_while_waiting_runs_finally_and_new_bee_starts_over`).
+- [x] Тест: один seed и одни скрипты дважды → одинаковый хеш реплея; старый реплей — ошибка «реплей старой версии» (`test_same_seed_and_scripts_same_replay_hash_old_replay_is_clear_error`, `test_demo_twice_gives_same_replay_hash`).
+- [x] Тест: набор блоков совпадает с API; Python из блоков без `yield` проходит `ast`; `example_blocks` доставляет нектар (`test_block_set_matches_public_api`, `test_example_block_programs_pass_ast`, `test_russian_labels_from_dictionary_api_ids_english`, `test_example_blocks_runs_and_delivers`).
+- [x] Примеры на новом API работают headless: `example_basic`, `example_smart`, `example_blocks`, шаблон (`swarmlab run configs/matches/demo.yaml --headless`, ошибок в `loop` 0) — demo 300 с: у трёх ульев ошибок 0, пропусков 0; `test_other_examples_run_without_errors` (шаблон, `my_bees`, `example_smart`, `example_blocks`), `test_example_basic_grows_honey_and_honey_invariant_holds`.
+- [x] Документы и памятка описывают только новый API; `pytest` (238) и `ruff check` зелёные.
+- [x] Проверено в браузере: подсказки по `self.` — новый API с русскими описаниями; `example_blocks` в блоках, категория «Движение» — ждать, искать цветы, найденный цветок, лететь к, домой, остановиться, собирать нектар; матч из редактора (`example_blocks` против примеров) идёт, в логе «набрала нектара», ошибок в консоли и логах сервера нет.
 
 ---
 

@@ -1,23 +1,22 @@
 """Хост пчёлок внутри процесса-раннера (`AgentHost`, ARCHITECTURE §3.4).
 
-Работает только в раннере: импортирует скрипт игрока, держит объекты пчёл между
-тиками (память в `self` живёт, пока жив раннер), переводит словари протокола в
-классы `api.py`, вызывает `step()` каждой пчелы и `hive_step(hive)`, собирает
-команды. Исключение в `step()` одной пчелы не трогает остальных: пчела
-зависает (`hover`), трассировка уходит в лог игрока (одинаковые ошибки — с
-подсчётом, без потопа). Время кода игрока меряется `time.perf_counter()`
-(DECISIONS №32) — только вокруг вызовов кода игрока.
+Работает только в раннере: импортирует скрипт игрока, держит объекты пчёл и
+улья между тиками (память в `self` живёт, пока жив раннер), кладёт им свежие
+сенсоры и прогоняет их `loop()` в лёгких потоках (`core.program.Program`,
+DECISIONS №84). Переключения — строго по порядку `uid`, улей — последним; время
+кода игрока меряется `time.perf_counter()` только вокруг переключений в его код
+(DECISIONS №32).
 
-`step()` и `hive_step()` могут быть генераторами (DECISIONS №57–59): хост держит
-генератор между тиками (`core.program.Program`), добавляет к команде номер
-ожидания `wait` и продолжает генератор, когда модуль прислал в сенсорах пчелы
-`me["wait"] = [seq, состояние]`. Пока программа ждёт, `s` в генераторе
-обновляется на месте — после `yield` в нём свежие сенсоры. Пчела погибла —
-генератор закрывается (`finally` выполняется); конец матча — `close()`.
-
-Тот же хост без процесса исполняет встроенных ботов врагов (пауки,
-DECISIONS №36): модуль передаёт классы ботов в `use_classes` и вызывает `step`
-у себя — протокол и классы API те же, что у игрока.
+* Команда, которая ждёт, возвращает поток в хост; хост отправляет её модулю с
+  номером ожидания `wait` и продолжает поток, когда модуль прислал в сенсорах
+  `me["wait"] = [seq, состояние, результат]`. Команда, которую модуль не получил
+  (тик отброшен по бюджету), отправляется ещё раз с тем же номером.
+* `heard` (DECISIONS №87): сообщение видно с тика, когда пришло, до конца
+  следующего прохода `loop()`; от каждого отправителя — последнее по каждому слову.
+* Ошибка в `loop()` — трассировка в лог (одинаковые — с подсчётом), пчела
+  останавливается, на следующем тике `loop()` с начала. Смерть, автовозврат
+  домой (модуль увеличил `me["epoch"]`) и конец матча закрывают поток —
+  `finally` игрока выполняется.
 
 Ядро этот файл не импортирует; MuJoCo и NumPy здесь не нужны.
 """
@@ -25,7 +24,6 @@ DECISIONS №36): модуль передаёт классы ботов в `use_
 from __future__ import annotations
 
 import importlib.util
-import inspect
 import sys
 import time
 import traceback
@@ -39,8 +37,8 @@ from swarmlab.core.protocol import CommandBatch, SensorBatch
 
 _BASES: dict[str, type] = {
     "scout": api.Scout,
-    "forager": api.Forager,
-    "spider": api.Spider,
+    "forager": api.Collector,
+    "hive": api.Hive,
 }
 #: Одинаковая ошибка повторно пишется в лог на 1-й, 10-й, 100-й… раз.
 _REPEAT_LOG = (1, 10, 100, 1000, 10000)
@@ -55,32 +53,46 @@ class PlayerLoadError(RuntimeError):
         self.player_message = message
 
 
+class _Agent:
+    """Пчела или улей в хосте: объект игрока, его поток и услышанное."""
+
+    __slots__ = ("epoch", "inbox", "kind", "label", "obj", "passes", "program", "view")
+
+    def __init__(self, kind: str, label: str, team: int) -> None:
+        self.kind = kind
+        self.label = label
+        self.view = api._View(team)
+        self.obj: Any = None
+        self.program: Program | None = None
+        #: Номер автовозврата модуля: изменился — `loop()` с начала.
+        self.epoch: int | None = None
+        #: Проходов `loop()` начато (сквозной счёт, переживает перезапуски потока).
+        self.passes = 0
+        #: Услышанное: (отправитель, слово) → (сообщение, проход, в который пришло).
+        self.inbox: dict[tuple[int, str], tuple[api.Message, int]] = {}
+
+
 class HiveHost:
     """Код одного улья в раннере."""
 
     def __init__(self, log: Callable[[str], None]) -> None:
         self.log = log
         self.classes: dict[str, type] = dict(_BASES)
-        self.hive_step: Callable[[api.Hive], Any] | None = None
-        self.agents: dict[int, Any] = {}
-        self.hive = api.Hive()
+        self.agents: dict[int, _Agent] = {}
+        self.hive: _Agent | None = None
         self.team = 0
         self.script_dir: Path | None = None
-        #: `step()` с `yield`: генераторы пчёл, которые сейчас ждут (DECISIONS №57).
-        self.programs: dict[int, Program] = {}
-        #: Объект `s`, который держит генератор: обновляется на месте каждый тик.
-        self.held_sensors: dict[int, Any] = {}
-        self.hive_program: Program | None = None
         self._seq = 0
+        self._cpu = 0.0
         self._error_counts: dict[tuple[str, str, int], int] = {}
 
     # --------------------------------------------------------------- загрузка
 
     def load(self, hello: dict[str, Any]) -> dict[str, Any]:
         options = hello.get("options") or {}
-        for key in ("channels", "max_values"):
+        for key in ("max_word", "max_say"):
             if key in options:
-                api._RULES[key] = options[key]
+                api._RULES[key] = int(options[key])
         self.team = int(hello.get("team", 0))
         script = Path(str(hello["script"])).resolve()
         self.script_dir = script.parent
@@ -98,18 +110,13 @@ class HiveHost:
                 if issubclass(obj, base) and obj is not base:
                     if kind in found:
                         self.log(
-                            f"Найдено несколько классов-{kind}: {found[kind].__name__} и "
+                            f"Найдено несколько классов-{base.__name__}: {found[kind].__name__} и "
                             f"{obj.__name__}; используется {found[kind].__name__}"
                         )
                     else:
                         found[kind] = obj
         self.classes.update(found)
-        hive_step = getattr(module, "hive_step", None)
-        self.hive_step = hive_step if callable(hive_step) else None
-        return {
-            "classes": {k: c.__name__ for k, c in self.classes.items()},
-            "hive_step": self.hive_step is not None,
-        }
+        return {"classes": {k: c.__name__ for k, c in self.classes.items()}}
 
     def _import(self, script: Path) -> Any:
         if not script.is_file():
@@ -123,192 +130,167 @@ class HiveHost:
         spec.loader.exec_module(module)
         return module
 
-    def use_classes(self, classes: dict[str, type]) -> None:
-        """Доверенные классы агентов без загрузки скрипта (боты врагов в процессе симуляции)."""
-        for kind, cls in classes.items():
-            base = _BASES.get(kind)
-            if base is None or not issubclass(cls, base):
-                raise TypeError(f"{cls!r} — не подкласс {kind}")
-            self.classes[kind] = cls
-
     # --------------------------------------------------------------- тик
 
     def step(self, batch: SensorBatch) -> CommandBatch:
-        cpu = 0.0
+        self._cpu = 0.0
         commands: dict[int, dict[str, Any]] = {}
         errors: list[int] = []
-        seen: set[int] = set()
-        perf = time.perf_counter
+        rows = {int(raw["me"]["id"]): raw for raw in batch.agents}
 
-        for raw in batch.agents:
-            me = raw["me"]
-            uid = int(me["id"])
-            kind = str(me["kind"])
-            seen.add(uid)
-            sensors = self._sensors(raw, kind)
-            program = self.programs.get(uid)
-            t0 = perf()
-            try:
-                if program is not None:
-                    cmd = self._continue(uid, program, sensors, raw)
-                else:
-                    bee = self.agents.get(uid)
-                    if bee is None:
-                        bee = self._create(kind, uid)
-                    bee.__dict__["_swarmlab_cmd"] = {}
-                    result = bee.step(sensors)
-                    cmd = bee.__dict__.get("_swarmlab_cmd") or {}
-                    if inspect.isgenerator(result):
-                        cmd = self._start(uid, Program(result), sensors, float(raw["time"]))
-            except Exception as e:
-                # Пчела зависает; паук продолжает как было.
-                cmd = {"move": ["hover"]} if kind != "spider" else {}
+        # Погибшие пчёлы — закрыть потоки (finally выполнится) и забыть (id не повторяются).
+        for uid in [u for u in self.agents if u not in rows]:
+            agent = self.agents.pop(uid)
+            self._close(agent, f"finally пчелы id={uid}")
+
+        for uid in sorted(rows):  # фиксированный порядок — детерминизм
+            raw = rows[uid]
+            agent = self.agents.get(uid)
+            if agent is None:
+                kind = str(raw["me"]["kind"])
+                agent = self.agents[uid] = _Agent(kind, f"Пчела {kind} id={uid}", self.team)
+            cmd, failed = self._tick(agent, raw, raw["me"], batch.tick)
+            if failed:
                 errors.append(uid)
-                self._forget_program(uid)  # генератор с исключением уже закончен
-                self._report(e, f"Пчела {kind} id={uid}, тик {batch.tick}")
-            finally:
-                cpu += perf() - t0
             if cmd:
                 commands[uid] = cmd
 
-        # Погибшие пчёлы — закрываем их программы и забываем объекты (id не повторяются).
-        for uid in [u for u in self.agents if u not in seen]:
-            t0 = perf()
-            try:
-                self._drop(uid)
-            finally:
-                cpu += perf() - t0
-
         team_command = None
-        self._update_hive(batch.team_view)
-        if self.hive_step is not None:
-            hive = self.hive
-            hive._swarmlab_cmd = {}
-            t0 = perf()
-            try:
-                self._hive_tick(hive)
-                team_command = hive._swarmlab_cmd or None
-            except Exception as e:
-                self.hive_program = None
-                self._report(e, f"hive_step, тик {batch.tick}")
-            finally:
-                cpu += perf() - t0
+        view = batch.team_view
+        if view:
+            for note in view.get("notes") or []:
+                self.log(f"Улей: {note}")
+            if self.hive is None:
+                self.hive = _Agent("hive", "Улей", self.team)
+            team_command, failed = self._tick(self.hive, view, None, batch.tick)
+            if failed:
+                errors.append(-1)  # ошибка в loop() улья
 
         return CommandBatch(
             tick=batch.tick,
             commands=commands,
-            team_command=team_command,
-            cpu_ms=cpu * 1000.0,
+            team_command=team_command or None,
+            cpu_ms=self._cpu * 1000.0,
             errors=errors,
         )
 
-    # --------------------------------------------------------------- программы (yield)
+    def _tick(
+        self, agent: _Agent, raw: dict[str, Any], me: dict[str, Any] | None, tick: int
+    ) -> tuple[dict[str, Any], bool]:
+        """Один тик агента: сенсоры, услышанное, поток `loop()`; вернуть (команда, ошибка)."""
+        view = agent.view
+        view.update(raw)
+        view.cmd = {}
+        now = float(raw.get("time", 0.0))
+        status = me.get("wait") if me is not None else None
+
+        if me is not None:
+            epoch = int(me.get("epoch", 0))
+            if agent.epoch is not None and epoch != agent.epoch and agent.program is not None:
+                # Пчела сама вернулась домой и заправилась — loop() с начала.
+                program, agent.program = agent.program, None
+                self._close_program(program, f"finally ({agent.label})")
+            agent.epoch = epoch
+
+        program = agent.program
+        self._hear(agent, raw.get("messages") or [], program)
+        perf = time.perf_counter
+        t0 = perf()
+        try:
+            if agent.obj is None:
+                agent.obj = self._create(agent)
+            if program is None:
+                program = agent.program = Program(agent.obj.loop, lambda: self._new_pass(agent))
+                program.run(now, self._next_seq())
+            else:
+                out = program.poll(now, status)
+                if out is None:
+                    if isinstance(program.waiting, Order) and not program.acknowledged(status):
+                        return self._with_wait({}, program), False  # команда не дошла — ещё раз
+                    return {}, False  # ждём; пчела продолжает команду
+                program.run(now, self._next_seq(), out)
+        except Exception as e:
+            agent.program = None
+            self._report(e, f"{agent.label}, тик {tick}", restart=True)
+            return ({"move": ["stop"]} if me is not None else {}), True
+        finally:
+            self._cpu += perf() - t0
+        return self._with_wait(dict(view.cmd), program), False
+
+    def _with_wait(self, cmd: dict[str, Any], program: Program) -> dict[str, Any]:
+        """Добавить к команде то, чего ждёт поток (команду движения с номером ожидания)."""
+        if not program.dead and isinstance(program.waiting, Order):
+            cmd["move"] = program.waiting.move
+            cmd["wait"] = program.seq
+        return cmd
 
     def _next_seq(self) -> int:
         self._seq += 1
         return self._seq
 
-    def _start(self, uid: int, program: Program, sensors: Any, now: float) -> dict[str, Any]:
-        """`step()` оказался генератором: прогнать до первого `yield`."""
-        bee = self.agents[uid]
-        if program.start(now, self._next_seq()):
-            self.programs[uid] = program
-            self.held_sensors[uid] = sensors
-        return self._with_wait(bee.__dict__.get("_swarmlab_cmd") or {}, uid)
+    def _create(self, agent: _Agent) -> Any:
+        """Объект игрока: данные доступны уже в `__init__`."""
+        cls = self.classes.get(agent.kind)
+        if cls is None:
+            raise ValueError(f"Неизвестный тип {agent.kind!r}")
+        obj = cls.__new__(cls)
+        object.__setattr__(obj, "_swarmlab_view", agent.view)
+        obj.__init__()
+        return obj
 
-    def _continue(
-        self, uid: int, program: Program, sensors: Any, raw: dict[str, Any]
-    ) -> dict[str, Any]:
-        """Пчела ждёт: обновить её `s` на месте и, если ожидание кончилось, продолжить."""
-        held = self.held_sensors[uid]
-        for name in type(held).__slots__:
-            setattr(held, name, getattr(sensors, name))
-        status = raw["me"].get("wait")
-        now = float(raw["time"])
-        result = program.poll(now, status)
-        if result is None:
-            if program.acknowledged(status):
-                return {}  # пчела продолжает команду, которую ждёт
-            # Команда не дошла до модуля (бюджет, пропуск тика) — отправить ещё раз.
-            return self._with_wait({}, uid)
-        bee = self.agents[uid]
-        bee.__dict__["_swarmlab_cmd"] = {}
-        alive = program.resume(result, now, self._next_seq())
-        cmd = bee.__dict__.get("_swarmlab_cmd") or {}
-        if not alive:
-            self._forget_program(uid)
-            return cmd
-        return self._with_wait(cmd, uid)
+    # --------------------------------------------------------------- услышанное
 
-    def _with_wait(self, cmd: dict[str, Any], uid: int) -> dict[str, Any]:
-        """Добавить к команде то, чего ждёт программа (`yield жетон`)."""
-        program = self.programs.get(uid)
-        if program is None or not isinstance(program.waiting, Order):
-            return cmd
-        cmd = dict(cmd)
-        cmd["move"] = program.waiting.move
-        if program.seq:
-            cmd["wait"] = program.seq
-        return cmd
+    def _hear(self, agent: _Agent, rows: list[dict[str, Any]], program: Program | None) -> None:
+        """Новые сообщения тика — в копилку; номер прохода, к которому они относятся."""
+        if rows:
+            between = program is None or not program.started or program.at_pass_end()
+            stamp = agent.passes + (1 if between else 0)
+            for m in rows:
+                where = m.get("where")
+                msg = api.Message(
+                    str(m["word"]),
+                    api.Point(where[0], where[1]) if where is not None else None,
+                    api.Point(*m["from"]),
+                    int(m["from_id"]),
+                )
+                key = (msg._from, msg.word)
+                agent.inbox.pop(key, None)  # новое — в конец списка
+                agent.inbox[key] = (msg, stamp)
+        agent.view.heard = [m for m, _ in agent.inbox.values()]
 
-    def _forget_program(self, uid: int) -> None:
-        self.programs.pop(uid, None)
-        self.held_sensors.pop(uid, None)
+    def _new_pass(self, agent: _Agent) -> None:
+        """Начало прохода `loop()`: забыть то, что пришло до прошлого прохода."""
+        agent.passes += 1
+        old = agent.passes - 1
+        agent.inbox = {k: v for k, v in agent.inbox.items() if v[1] >= old}
+        agent.view.heard = [m for m, _ in agent.inbox.values()]
 
-    def _drop(self, uid: int) -> None:
-        """Пчела погибла: закрыть её программу (`finally` выполнится) и забыть объект."""
-        program = self.programs.get(uid)
-        self._forget_program(uid)
-        del self.agents[uid]
-        if program is not None:
-            try:
-                program.close()
-            except Exception as e:
-                self._report(e, f"finally пчелы id={uid}")
+    # --------------------------------------------------------------- закрытие
 
-    def _hive_tick(self, hive: api.Hive) -> None:
-        """`hive_step` один раз за тик; если он генератор — ждать по `yield wait(…)`."""
-        assert self.hive_step is not None
-        program = self.hive_program
-        now = hive.time
-        if program is not None:
-            result = program.poll(now, None)
-            if result is not None and not program.resume(result, now, 0):
-                self.hive_program = None
-            return
-        result = self.hive_step(hive)
-        if inspect.isgenerator(result):
-            program = Program(result)
-            if program.start(now, 0):
-                self.hive_program = program
+    def _close(self, agent: _Agent, where: str) -> None:
+        if agent.program is not None:
+            program, agent.program = agent.program, None
+            self._close_program(program, where)
+
+    def _close_program(self, program: Program, where: str) -> None:
+        t0 = time.perf_counter()
+        try:
+            program.close()
+        except Exception as e:
+            self._report(e, where)
+        finally:
+            self._cpu += time.perf_counter() - t0
 
     def close(self) -> None:
-        """Конец матча: закрыть все программы (`finally` выполнится)."""
-        for uid in list(self.programs):
-            program = self.programs[uid]
-            self._forget_program(uid)
-            try:
-                program.close()
-            except Exception as e:
-                self._report(e, f"finally пчелы id={uid}")
-        if self.hive_program is not None:
-            program, self.hive_program = self.hive_program, None
-            try:
-                program.close()
-            except Exception as e:
-                self._report(e, "finally hive_step")
-
-    def _create(self, kind: str, uid: int) -> Any:
-        cls = self.classes.get(kind)
-        if cls is None:
-            raise ValueError(f"Неизвестный тип пчелы {kind!r}")
-        bee = cls()
-        self.agents[uid] = bee
-        return bee
+        """Конец матча: закрыть все потоки (`finally` выполнится)."""
+        for uid in sorted(self.agents):
+            self._close(self.agents[uid], f"finally пчелы id={uid}")
+        if self.hive is not None:
+            self._close(self.hive, "finally улья")
 
     # --------------------------------------------------------------- ошибки
 
-    def _report(self, exc: BaseException, where: str) -> None:
+    def _report(self, exc: BaseException, where: str, restart: bool = False) -> None:
         tb = traceback.extract_tb(exc.__traceback__)
         frame = self._player_frames(tb)[-1:] or tb[-1:]
         key = (
@@ -319,7 +301,8 @@ class HiveHost:
         n = self._error_counts.get(key, 0) + 1
         self._error_counts[key] = n
         if n == 1:
-            self.log(self.format_error(exc, f"Ошибка: {where}. Пчела зависла на этом тике"))
+            tail = ". На следующем тике loop() начнётся сначала" if restart else ""
+            self.log(self.format_error(exc, f"Ошибка: {where}{tail}"))
         elif n in _REPEAT_LOG:
             self.log(f"Та же ошибка ({key[0]}, строка {key[2]}) уже {n} раз. Последний: {where}")
 
@@ -337,129 +320,3 @@ class HiveHost:
             lines.extend(s.rstrip("\n") for s in traceback.format_list(frames))
         lines.extend(s.rstrip("\n") for s in traceback.format_exception_only(type(exc), exc))
         return "\n".join(lines)
-
-    # --------------------------------------------------------------- сенсоры
-
-    def _sensors(self, raw: dict[str, Any], kind: str) -> Any:
-        if kind == "spider":
-            return _spider_sensors(raw)
-        return _flying_sensors(raw, self.team)
-
-    def _update_hive(self, view: dict[str, Any]) -> None:
-        for note in view.get("notes") or []:
-            self.log(f"Улей: {note}")
-        h = self.hive
-        h.tick = int(view.get("tick", 0))
-        h.time = float(view.get("time", 0.0))
-        h.honey = float(view.get("honey", 0.0))
-        h.nectar = float(view.get("nectar", 0.0))
-        h.counts = _counts(view.get("counts") or {})
-        h.queue = [api.Larva(q["kind"], q["left_s"]) for q in view.get("queue") or []]
-        h.max_bees = int(view.get("max_bees", 0))
-        h.costs = dict(view.get("costs") or {})
-        h.messages = [
-            api.Message(m["from_id"], _vec(m["pos"]), _vec(m["rel_pos"]), tuple(m["values"]))
-            for m in view.get("messages") or []
-        ]
-
-
-def _vec(v: list[float]) -> api.Vec:
-    return api.Vec(v[0], v[1], v[2])
-
-
-def _counts(c: dict[str, Any]) -> api.Counts:
-    out = api.Counts()
-    for kind in ("scout", "forager"):
-        entry = c.get(kind) or {}
-        in_hive, flying = int(entry.get("in_hive", 0)), int(entry.get("flying", 0))
-        setattr(out, kind, in_hive + flying)
-        out.in_hive[kind] = in_hive
-        out.flying[kind] = flying
-    out.house = int(c.get("house", 0))
-    out.in_hive["house"] = out.house
-    out.flying["house"] = 0
-    return out
-
-
-def _flying_sensors(raw: dict[str, Any], team: int) -> api.Sensors:
-    m = raw["me"]
-    pos = _vec(m["pos"])
-    px, py, pz = pos
-    me = api.Me(
-        m["id"], m["kind"], pos, _vec(m["vel"]), m["energy"], m["energy_max"],
-        m["cargo"], m["cargo_max"], m["in_hive"], m["alive"],
-    )
-    home = raw["home"]
-    Vec = api.Vec
-
-    def absolute(r: list[float]) -> api.Vec:
-        return Vec(px + r[0], py + r[1], pz + r[2])
-
-    def dist(r: list[float]) -> float:
-        return (r[0] * r[0] + r[1] * r[1] + r[2] * r[2]) ** 0.5
-
-    flowers = [
-        api.Flower(f["id"], absolute(r), Vec(*r), dist(r), f["nectar"], f.get("spider"))
-        for f in raw["flowers"]
-        for r in (f["rel_pos"],)
-    ]
-    flowers.sort(key=lambda f: f.dist)
-    bees = [
-        api.BeeInfo(b["id"], b["kind"], b["team"], b["team"] == team, absolute(r), Vec(*r),
-                    dist(r), _vec(b["vel"]))
-        for b in raw["bees"]
-        for r in (b["rel_pos"],)
-    ]
-    obstacles = [
-        api.Obstacle(absolute(r), Vec(*r), dist(r), o["radius"])
-        for o in raw["obstacles"]
-        for r in (o["rel_pos"],)
-    ]
-    messages = [
-        api.Message(msg["from_id"], absolute(r), Vec(*r), tuple(msg["values"]))
-        for msg in raw["messages"]
-        for r in (msg["rel_pos"],)
-    ]
-    ph = raw["pheromones"]
-    return api.Sensors(
-        tick=raw["tick"],
-        time=raw["time"],
-        me=me,
-        home=api.Home(_vec(home["pos"]), _vec(home["dir"]), home["dist"]),
-        ground_z=raw["ground_z"],
-        airspeed=_vec(raw["airspeed"]),
-        weather=raw["weather"],
-        flowers=flowers,
-        bees=bees,
-        obstacles=obstacles,
-        messages=messages,
-        pheromones=api.Pheromones(ph["values"], ph["gradient"]),
-    )
-
-
-def _bee_infos(rows: list[dict[str, Any]], origin: api.Vec, team: int) -> list[api.BeeInfo]:
-    Vec = api.Vec
-    ox, oy, oz = origin
-    out = []
-    for b in rows:
-        r = b["rel_pos"]
-        out.append(
-            api.BeeInfo(
-                b["id"], b["kind"], b["team"], b["team"] == team,
-                Vec(ox + r[0], oy + r[1], oz + r[2]), Vec(*r),
-                (r[0] * r[0] + r[1] * r[1] + r[2] * r[2]) ** 0.5, _vec(b["vel"]),
-            )
-        )
-    out.sort(key=lambda b: b.dist)
-    return out
-
-
-def _spider_sensors(raw: dict[str, Any]) -> api.SpiderSensors:
-    m = raw["me"]
-    pos = _vec(m["pos"])
-    return api.SpiderSensors(
-        tick=raw["tick"],
-        time=raw["time"],
-        me=api.SpiderMe(m["id"], "spider", m["flower_id"], pos),
-        prey=_bee_infos(raw["prey"], pos, -1),
-    )

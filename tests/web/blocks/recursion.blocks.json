@@ -238,7 +238,7 @@
         },
         "next": {
          "block": {
-          "type": "bees_wait",
+          "type": "bees_Agent_wait",
           "id": "hive_wait",
           "inputs": {
            "seconds": {

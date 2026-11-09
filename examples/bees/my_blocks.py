@@ -2,13 +2,14 @@
 # пока скрипт в режиме «Блоки», редактор перезаписывает его при каждом сохранении.
 # Чтобы писать на Python, нажмите в редакторе «Перейти на Python».
 
-from swarmlab.bees.api import Forager
+from swarmlab.bees.api import Collector, Hive
 
 
-class MyForager(Forager):  # block:start_forager
-    def step(self, s):  # block:start_forager
-        pass  # block:start_forager
+class MyCollector(Collector):  # block:start_collector
+    def loop(self):  # block:start_collector
+        pass  # block:start_collector
 
 
-def hive_step(hive):  # block:start_hive
-    pass  # block:start_hive
+class MyHive(Hive):  # block:start_hive
+    def loop(self):  # block:start_hive
+        pass  # block:start_hive

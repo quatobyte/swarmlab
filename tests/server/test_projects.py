@@ -134,7 +134,7 @@ def test_match_with_projects_in_two_hives_runs(server):
     assert set(info["score"]["teams"]) == {"0", "1"}
     server.json("POST", f"/api/matches/{info['id']}/stop")
 
-    bad = _project("broken", code="def step(self, s)\n    pass\n")
+    bad = _project("broken", code="def loop(self)\n    pass\n")
     _upload(server, bad)
     code, err = server.json("POST", "/api/matches", {**body, "projects": ["broken"]})
     assert code == 400 and err["detail"]["project"] == "broken" and err["detail"]["line"] == 1

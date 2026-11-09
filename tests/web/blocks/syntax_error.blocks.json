@@ -16,17 +16,14 @@
      "inputs": {
       "DO": {
        "block": {
-        "type": "bees_Bee_hover",
+        "type": "bees_Bee_stop",
         "id": "hover_ok",
-        "fields": {
-         "WAIT": false
-        },
         "next": {
          "block": {
           "type": "bees_python_line",
           "id": "bad_line",
           "fields": {
-           "CODE": "print(s.time"
+           "CODE": "print(self.time"
           }
          }
         }

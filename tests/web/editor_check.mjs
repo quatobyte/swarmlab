@@ -19,21 +19,20 @@ function fakeCm(text) {
 const HEAD = `from swarmlab.bees.api import *
 
 
-class MyForager(Forager):
-    def step(self, s: Sensors):
+class MyCollector(Collector):
+    def loop(self):
 `;
 
 const probes = {
-  "s.me.": HEAD + "        s.me.",
   "self.": HEAD + "        self.",
   "self.co": HEAD + "        self.co",
-  "flower=": HEAD + "        flower = s.nearest_flower(min_nectar=0.3)\n        flower.",
-  "for": HEAD + "        for b in s.bees:\n            b.",
-  "index": HEAD + "        s.flowers[0].pos.",
-  "selfattr": HEAD + "        self.target = s.nearest_flower()\n        self.target.",
-  "hive": "def hive_step(hive):\n    hive.",
-  "counts": "def hive_step(hive):\n    hive.counts.",
-  "global": HEAD + "        For",
+  "flower=": HEAD + "        flower = self.nearest_flower(min_nectar=0.3)\n        flower.",
+  "for": HEAD + "        for b in self.bees:\n            b.",
+  "heard": HEAD + "        for m in self.heard:\n            m.",
+  "index": HEAD + "        self.flowers[0].pos.",
+  "selfattr": HEAD + "        self.target = self.nearest_flower()\n        self.target.",
+  "hive": "class MyHive(Hive):\n    def loop(self):\n        self.",
+  "global": HEAD + "        Col",
   "super": HEAD + "        super().",
 };
 const out = {};

@@ -295,7 +295,7 @@ def _print_runner_stats(sim: Simulation) -> None:
         print(
             f"  {name}: тиков {s.ticks}, ответов {s.replies}, пропущено {s.missed}, "
             f"сверх бюджета {s.over_budget}, перезапусков {s.restarts}, "
-            f"ошибок в step() {s.agent_errors}, время кода {s.cpu_ms_mean:.2f} мс "
+            f"ошибок в loop() {s.agent_errors}, время кода {s.cpu_ms_mean:.2f} мс "
             f"в среднем / {s.cpu_ms_max:.1f} мс максимум{flag}"
         )
 

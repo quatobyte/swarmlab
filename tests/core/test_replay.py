@@ -4,7 +4,7 @@ import numpy as np
 import pytest
 
 from swarmlab.core.module import Frame, ScoreBoard
-from swarmlab.core.replay import MAGIC, ReplayError, ReplayWriter, read_replay
+from swarmlab.core.replay import FORMAT_VERSION, MAGIC, ReplayError, ReplayWriter, read_replay
 
 
 def _frames(n=30, seed=0):
@@ -25,7 +25,8 @@ def _frames(n=30, seed=0):
 
 
 def _write(path, frames, score=True):
-    header = {"t": "header", "seed": 1, "scene": {"lo": np.array([-1.0, -2.0, 0.0])}}
+    header = {"t": "header", "format": FORMAT_VERSION, "seed": 1,
+              "scene": {"lo": np.array([-1.0, -2.0, 0.0])}}
     w = ReplayWriter(path, header)
     for f in frames:
         w(f)
@@ -59,7 +60,7 @@ def test_same_frames_same_hash_different_frames_different_hash(tmp_path):
 
 def test_truncated_replay_reads_frames_without_footer(tmp_path):
     path = tmp_path / "cut.swr"
-    w = ReplayWriter(path, {"t": "header"})
+    w = ReplayWriter(path, {"t": "header", "format": FORMAT_VERSION})
     for f in _frames(50):
         w(f)
     w._zstd.flush()  # матч оборвался: итог не дописан, поток не закрыт

@@ -32,7 +32,8 @@ def test_example_basic_grows_honey_and_honey_invariant_holds():
     assert stats.missed == 0 and stats.agent_errors == 0 and stats.over_budget == 0
 
 
-@pytest.mark.parametrize("script", ["template.py", "example_smart.py"])
+@pytest.mark.parametrize(
+    "script", ["template.py", "example_smart.py", "example_blocks.py", "my_bees.py"])
 def test_other_examples_run_without_errors(script):
     cfg = load_match(
         CONFIGS / "matches" / "m2_economy.yaml",

@@ -78,42 +78,35 @@ def _public_api() -> set[str]:
     tree = ast.parse((ROOT / "src/swarmlab/bees/api.py").read_text(encoding="utf-8"))
     classes = {n.name: n for n in tree.body if isinstance(n, ast.ClassDef)}
 
-    def own(cls: str, fields: bool) -> set[str]:
+    def own(cls: str) -> set[str]:
         out = set()
         for item in classes[cls].body:
             if isinstance(item, ast.FunctionDef):
-                if item.name == "__init__" and fields:
-                    out |= {st.target.attr for st in ast.walk(item)
-                            if isinstance(st, ast.AnnAssign)
-                            and isinstance(st.target, ast.Attribute)
-                            and not st.target.attr.startswith("_")}
-                elif not item.name.startswith("_") and item.name != "step":
+                if not item.name.startswith("_") and item.name != "loop":
                     out.add(item.name)
-            elif (fields and isinstance(item, ast.AnnAssign) and isinstance(item.target, ast.Name)
-                  and not item.target.id.startswith("_")):
-                out.add(item.target.id)
+            elif isinstance(item, ast.AnnAssign) and isinstance(item.target, ast.Name):
+                if not item.target.id.startswith("_"):
+                    out.add(item.target.id)
         return out
 
-    names = {f"Bee.{m}" for m in own("Bee", False)}
-    names |= {f"Forager.{m}" for m in own("Forager", False)}
-    for cls in ("Hive", "Sensors", "Me", "Home", "Flower",
-                "BeeInfo", "Obstacle", "Message", "Pheromones", "Vec", "Counts", "Larva"):
-        names |= {f"{cls}.{m}" for m in own(cls, True)}
-    return names | {"wait", "HIVE_ID"}
+    labels = {"Agent": "_Agent", "Bee": "_Flyer", "Collector": "Collector", "Hive": "Hive",
+              "Flower": "Flower", "OtherBee": "OtherBee", "Message": "Message", "Point": "Point"}
+    return {f"{label}.{m}" for label, cls in labels.items() for m in own(cls)}
 
 
 def test_block_set_matches_public_api():
-    """Критерий M7b: набор блоков совпадает с публичными методами (и полями) api.py."""
+    """Критерий M8: набор блоков совпадает с публичными методами и данными api.py."""
     blocks = {b["api"] for b in _gen_module().build_blocks()["blocks"]}
     api = _public_api()
     assert blocks == api, f"нет блоков: {sorted(api - blocks)}; лишние: {sorted(blocks - api)}"
-    # Команды пчёл и улья — на месте; бот (паук) — не игрок; удалённых команд нет.
-    assert {"Bee.fly_to", "Bee.hover", "Bee.go_home", "Bee.signal", "Bee.mark",
-            "Forager.collect", "Hive.breed", "Sensors.nearest_flower", "Sensors.messages",
-            "Pheromones.strength", "Me.energy_percent", "wait"} <= blocks
-    assert not any(b.startswith(("Spider.", "Guard.", "HouseBee.", "Enemy.")) for b in blocks)
-    assert not {"Bee.fly_dir", "Bee.leave_hive", "Bee.thrust", "Forager.unload",
-                "Hive.cancel_breeding"} & blocks
+    assert {"Bee.fly_to", "Bee.search", "Bee.explore", "Bee.go_home", "Bee.refuel", "Bee.stop",
+            "Bee.mark", "Bee.smell", "Collector.collect", "Agent.say", "Agent.heard",
+            "Agent.wait", "Hive.hatch", "Hive.count", "Hive.set_home_energy"} <= blocks
+    # Команды с результатом — и оператор, и значение; данные — только значение.
+    by_api = {b["api"]: b for b in _gen_module().build_blocks()["blocks"]}
+    assert by_api["Bee.explore"]["output"] is None and by_api["Bee.explore"]["result"] == ["Flower"]
+    assert by_api["Bee.fly_to"]["result"] == ["Boolean"]
+    assert by_api["Bee.energy"]["output"] == ["Number"] and by_api["Bee.energy"]["result"] is None
 
 
 @needs_node
@@ -131,7 +124,7 @@ def test_russian_labels_from_dictionary_api_ids_english():
 
     cat = _node("catalog")
     code = cat["code"]
-    assert cat["errors"] == [] and check_syntax(code) == []
+    assert cat["errors"] == [] and check_syntax(code) == [] and "yield" not in code
     # В коде — английские имена API: ни одной русской подписи блока; все атрибуты известны.
     for label in ru["labels"].values():
         assert label.split("{")[0].strip() not in code
@@ -139,7 +132,7 @@ def test_russian_labels_from_dictionary_api_ids_english():
         "pop", "append", "insert", "get", "randint", "random", "choice", "randrange", "sqrt", "log",
         "log10", "exp", "sin", "cos", "tan", "asin", "acos", "atan", "radians", "degrees", "pi",
         "e",
-        "ceil", "floor", "me", "home", "time"}
+        "ceil", "floor", "home", "time"}
     attrs = {n.attr for n in ast.walk(ast.parse(code)) if isinstance(n, ast.Attribute)}
     assert attrs <= known, attrs - known
     assert not re.search(r"\.[а-яё]", code, re.I)
@@ -162,6 +155,8 @@ def test_example_block_programs_pass_ast(path):
     res = _gen(path)
     assert res["errors"] == []
     assert check_syntax(res["code"], path.name) == []
+    assert "yield" not in res["code"]  # M8: команды ждут сами (DECISIONS №84)
+    assert "def loop(self):" in res["code"] or "class " not in res["code"]
     # Каждая строка от блока несёт # block:<id>, и это id существующего блока.
     ids = {m for m in re.findall(r'"id": "([^"]+)"', path.read_text(encoding="utf-8"))}
     marked = re.findall(r"# block:(\S+)$", res["code"], re.M)
@@ -198,7 +193,7 @@ def test_duplicate_program_type_not_generated():
     """Критерий M7b: дубликат типа не попадает в .py, подсвечивается предупреждением."""
     res = _gen(FIXTURES / "duplicate.blocks.json")
     code = res["code"]
-    assert code.count("class MyForager(Forager):") == 1
+    assert code.count("class MyCollector(Collector):") == 1
     assert "self.go_home()  # block:first_home" in code  # верхняя программа
     assert "second_hover" not in code and "forager_second" not in code
     assert res["duplicates"] == ["forager_second"]
@@ -212,7 +207,7 @@ def test_unconnected_block_ignored_not_error():
     res = _gen(FIXTURES / "basic_wait.blocks.json")
     assert res["orphans"] == ["orphan_hover"]
     assert res["errors"] == [] and res["warnings"] == []
-    assert "orphan_hover" not in res["code"] and "hover()" not in res["code"]
+    assert "orphan_hover" not in res["code"] and "stop()" not in res["code"]
 
 
 @needs_node
@@ -241,18 +236,22 @@ def test_recursion_warns_in_blocks_but_runs_in_python(tmp_path):
 def test_recursion_in_plain_python_runs(tmp_path):
     """DECISIONS №55: в Python рекурсию ничто не запрещает."""
     code = textwrap.dedent("""
+        from swarmlab.bees.api import Hive
+
         def fib(n):
             return n if n < 2 else fib(n - 1) + fib(n - 2)
 
-        def hive_step(hive):
-            print(f"fib={fib(15)}")
+        class H(Hive):
+            def loop(self):
+                print(f"fib={fib(15)}")
+                self.wait(100)
     """)
     stats, log, _ = _run_script(tmp_path, code, 0.3)
     assert stats.agent_errors == 0 and "fib=610" in log
 
 
 def test_example_blocks_runs_and_delivers(tmp_path):
-    """Программа из блоков: сборщики летят к цветку, ждут, возвращаются — нектар доставлен."""
+    """Критерий M8: из блоков — разведчик рассказал, сборщики собрали, нектар доставлен."""
     code = (EXAMPLES / "example_blocks.py").read_text(encoding="utf-8")
     stats, log, economy = _run_script(tmp_path, code, 60.0)
     assert stats.load_error is None, stats.load_error

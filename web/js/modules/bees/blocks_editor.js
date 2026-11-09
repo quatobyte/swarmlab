@@ -30,7 +30,7 @@ function literalName(options) {
   return Object.entries(BLOCKS_API.literals).find(([, values]) => values.join() === options.join())?.[0];
 }
 
-/** Определение блока API (и варианта «удалось: …» для команд, которые можно ждать). */
+/** Определение блока API (и блока-значения для команд с результатом: «найденный цветок»…). */
 function apiDefs(desc) {
   const ru = API_RU[desc.api];
   if (!ru) return [];
@@ -57,26 +57,24 @@ function apiDefs(desc) {
     if (statement) {
       def.previousStatement = null;
       def.nextStatement = null;
-      if (desc.waitable) {
-        def.message0 += ` ${MESSAGES.waitField} %${args.length + 1}`;
-        def.args0 = [...args, { type: "field_checkbox", name: "WAIT", checked: true }];
-      }
     } else {
       def.output = desc.output.length ? desc.output : null;
     }
     defs.push(def);
-    if (desc.waitable) {
-      defs.push({
-        ...def, type: type.replace(/^bees_/, "bees_ask_"), message0: `${MESSAGES.askPrefix} ${message}`, args0: args,
-        output: "Boolean", previousStatement: undefined, nextStatement: undefined,
-      });
-    }
+  }
+  if (desc.result) {
+    // Команда с результатом — ещё и блок-значение (по короткой подписи).
+    const ask = interpolate(ru.ask || `${MESSAGES.askPrefix} ${ru.label}`, argFor);
+    defs.push({
+      type: desc.type.replace(/^bees_/, "bees_ask_"), message0: ask.message, args0: ask.args, inputsInline: true,
+      colour: hue(cat), tooltip: ru.tip || "", output: desc.result.length ? desc.result : null,
+    });
   }
   return defs;
 }
 
 function customDefs() {
-  const kindNames = LITERALS.Kind;
+  const kindNames = MESSAGES.programWhere;
   const R = CUSTOM_RU;
   const defs = [];
   const add = (type, cat, argFor, extra) => {
@@ -89,17 +87,18 @@ function customDefs() {
   add("bees_program_hive", "programs", () => null, {
     message1: "%1", args1: [{ type: "input_statement", name: "DO" }], inputsInline: false,
   });
-  add("bees_python_line", "python", () => ({ type: "field_input", name: "CODE", text: "print(s.time)", spellcheck: false }),
+  add("bees_point", "objects", (n) => ({ type: "input_value", name: n, check: "Number" }), { output: "Point" });
+  add("bees_python_line", "python", () => ({ type: "field_input", name: "CODE", text: "print(self.time)", spellcheck: false }),
     { previousStatement: null, nextStatement: null });
-  add("bees_python_expr", "python", () => ({ type: "field_input", name: "CODE", text: "s.me.cargo * 2", spellcheck: false }),
+  add("bees_python_expr", "python", () => ({ type: "field_input", name: "CODE", text: "self.nectar * 2", spellcheck: false }),
     { output: null });
   add("bees_dict_get", "lists", (n) => ({ type: "input_value", name: n }), { output: null });
   add("bees_dict_set", "lists", (n) => ({ type: "input_value", name: n }), { previousStatement: null, nextStatement: null });
   for (const lit of Object.keys(LITERALS)) {
     const type = `bees_literal_${lit}`;
-    add(type, lit === "Weather" ? "sense" : "hive", () => ({
+    add(type, lit === "Color" ? "talk" : "hive", () => ({
       type: "field_dropdown", name: "VALUE", options: Object.entries(LITERALS[lit]).map(([v, ru]) => [ru, v]),
-    }), { output: "String" });
+    }), { output: lit === "Color" ? "String" : null });
   }
   return defs;
 }
@@ -131,6 +130,7 @@ function toolboxBlock(type) {
     if (type === "math_random_int") entry.inputs = { FROM: shadowNum(1), TO: shadowNum(10) };
     if (type === "math_arithmetic" || type === "logic_compare") entry.inputs = { A: shadowNum(0), B: shadowNum(0) };
     if (type === "controls_for") entry.inputs = { FROM: shadowNum(1), TO: shadowNum(10), BY: shadowNum(1) };
+    if (type === "bees_point") entry.inputs = { x: shadowNum(0), y: shadowNum(0) };
     return entry;
   }
   const ru = API_RU[a.desc.api] || {};
@@ -157,11 +157,11 @@ export function toolbox() {
     const cat = ru.cat || CLASS_CATEGORY[desc.cls] || "move";
     push(ru.beginner ? beginner : advanced, cat, desc.type);
     if (ru.full && ru.full !== ru.label) push(advanced, cat, `${desc.type}__full`);
-    if (desc.waitable) push(advanced, cat, desc.type.replace(/^bees_/, "bees_ask_"));
+    if (desc.result) push(ru.askBeginner ? beginner : advanced, cat, desc.type.replace(/^bees_/, "bees_ask_"));
   }
-  for (const lit of ["Kind", "Weather"]) {
-    push(lit === "Kind" ? beginner : advanced, lit === "Weather" ? "sense" : "hive", `bees_literal_${lit}`);
-  }
+  push(beginner, "hive", "bees_literal_BeeType");
+  push(beginner, "talk", "bees_literal_Color");
+  push(beginner, "objects", "bees_point");
   for (const [cat, types] of Object.entries(BUILTIN_BEGINNER)) for (const t of types) push(beginner, cat, t);
   for (const [cat, types] of Object.entries(BUILTIN_ADVANCED)) for (const t of types) push(advanced, cat, t);
   push(advanced, "lists", "bees_dict_get");
@@ -243,7 +243,7 @@ export function starterWorkspace() {
     blocks: {
       languageVersion: 0,
       blocks: [
-        { type: "bees_program_bee", id: "start_forager", x: 30, y: 30, fields: { KIND: "forager" } },
+        { type: "bees_program_bee", id: "start_collector", x: 30, y: 30, fields: { KIND: "collector" } },
         { type: "bees_program_hive", id: "start_hive", x: 30, y: 260 },
       ],
     },

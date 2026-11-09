@@ -2,37 +2,42 @@
 # пока скрипт в режиме «Блоки», редактор перезаписывает его при каждом сохранении.
 # Чтобы писать на Python, нажмите в редакторе «Перейти на Python».
 
-import random
-
-from swarmlab.bees.api import Forager, wait
+from swarmlab.bees.api import Collector, Hive, Scout
 
 
-def рейс(self, s, цветок):  # block:def_trip
-    yield self.fly_to(цветок.pos.x, цветок.pos.y)  # block:fly_to_flower
-    yield self.collect(цветок)  # block:collect
-    print("набрала нектара: " + str(s.me.cargo))  # block:print_cargo
-    yield self.go_home()  # block:go_home
+def домой_с_нектаром(self):  # block:def_trip
+    print("набрала нектара: " + str(self.nectar))  # block:print_cargo
+    self.go_home()  # block:go_home
 
 
-def отдых_дома(self, s):  # block:def_rest
-    while s.me.energy_percent < 90:  # block:while_refuel
-        yield wait()  # block:wait_tick
-    yield self.fly_to(s.home.pos.x + random.randint(-40, 40), s.home.pos.y + random.randint(-40, 40))  # block:out_fly_search
+class MyScout(Scout):  # block:prog_scout
+    def loop(self):  # block:prog_scout
+        цветок = self.explore()  # block:scout_find
+        if цветок is not None:  # block:scout_found
+            self.go_home()  # block:scout_home
+            self.say("flowers", цветок)  # block:scout_say
 
 
-class MyForager(Forager):  # block:prog_forager
-    def step(self, s):  # block:prog_forager
-        if s.me.in_hive:  # block:if_in_hive
-            yield from отдых_дома(self, s)  # block:call_rest
-        else:  # block:if_in_hive
-            цветок = s.nearest_flower(min_nectar=0.3)  # block:set_flower
-            if цветок is not None:  # block:if_flower
-                yield from рейс(self, s, цветок)  # block:call_trip
-            else:  # block:if_flower
-                yield self.fly_to(s.home.pos.x + random.randint(-40, 40), s.home.pos.y + random.randint(-40, 40))  # block:fly_search
+class MyCollector(Collector):  # block:prog_collector
+    def loop(self):  # block:prog_collector
+        новость = None  # block:news_none
+        for m in self.heard:  # block:listen
+            if m.word == "flowers":  # block:is_flowers
+                новость = m  # block:news_set
+        if новость is not None:  # block:has_news
+            self.collect(новость)  # block:collect_news
+        else:  # block:has_news
+            цветок = self.nearest_flower(0.3)  # block:set_flower
+            if цветок is None:  # block:no_flower
+                цветок = self.explore()  # block:explore_set
+            if цветок is not None:  # block:flower_seen
+                self.collect(цветок)  # block:collect_flower
+        if self.is_full:  # block:if_full
+            домой_с_нектаром(self)  # block:call_trip
 
 
-def hive_step(hive):  # block:prog_hive
-    if hive.honey > 24 + hive.costs.get("forager"):  # block:if_honey
-        hive.breed("forager")  # block:breed_forager
-    yield wait(20)  # block:hive_wait
+class MyHive(Hive):  # block:prog_hive
+    def loop(self):  # block:prog_hive
+        if self.honey > 24:  # block:enough_honey
+            self.hatch(Collector)  # block:hatch
+        self.wait(5)  # block:hive_wait

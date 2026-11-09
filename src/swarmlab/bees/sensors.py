@@ -1,28 +1,28 @@
-"""Сенсоры летающих пчёл (BEES_SPEC §5.1).
+"""Сенсоры летающих пчёл (BEES_SPEC §5.1, DECISIONS №85).
 
-Всё, что зависит от числа пчёл, считается векторно: соседи, цветы и препятствия —
+Всё, что зависит от числа пчёл, считается векторно: соседи и цветы —
 пространственной сеткой за O(N·k), шум — одним вызовом генератора на массив.
-Затем один проход собирает для каждой пчелы словарь ровно в формате §5.1: только
-`dict`, `list`, `float`, `int`, `bool` и `str`, — в M2 он уйдёт в протокол раннера
-(msgpack) без изменений.
+Затем один проход собирает для каждой пчелы словарь из `dict`, `list`, `float`,
+`int`, `bool` и `str` — он уходит в протокол раннера (msgpack) без изменений.
 
 Формат записи пчелы:
 
 ```
-{"tick", "time",
- "me": {"id", "kind", "pos", "vel", "energy", "energy_max", "cargo", "cargo_max",
-        "in_hive", "alive"},
- "home": {"pos", "dir", "dist"}, "ground_z", "airspeed", "weather",
- "flowers": [{"id", "rel_pos", "nectar"(, "spider")}],
- "bees": [{"id", "rel_pos", "vel", "kind", "team"}],
- "obstacles": [{"rel_pos", "radius"}],
- "messages": [{"from_id", "rel_pos", "values"}],
- "pheromones": {"values": [3][3][C], "gradient": [C][2]}}
+{"time",
+ "me": {"id", "kind", "pos", "energy", "energy_max", "cargo", "cargo_max", "in_hive"},
+ "home": [x, y, z],
+ "flowers": [{"id", "pos", "nectar"(, "spider")}],
+ "bees": [{"id", "pos", "team"}],
+ "messages": [{"from_id", "word", "where", "from"}],
+ "smell": [C], "smell_way": [C][2]}
 ```
 
-Векторы — списки `[x, y, z]`, `rel_pos` — относительно пчелы. Поле `spider` у
-цветка есть только у разведчика ближе `spider_visible_radius`. Пчела в улье
-получает ту же запись с `in_hive = True`, позицией летка и пустыми списками.
+Позиции — абсолютные `[x, y, z]` (с шумом сенсоров, если он включён). Поле
+`spider` у цветка есть только у разведчика ближе `spider_visible_radius` по горизонтали.
+`smell` — запах каждого цвета в клетке под пчелой, `smell_way` — градиент
+(∂/∂x, ∂/∂y). Пчела в улье получает запись с `in_hive = True`, позицией летка,
+пустыми цветами и пчёлами; сообщения она слышит у летка (`comms.py`). Модуль
+дописывает в `me` автовозврат, ожидание команды и найденный цветок.
 """
 
 from __future__ import annotations
@@ -47,15 +47,10 @@ _SCOUT = FLYING_KINDS.index("scout")
 class SensorInputs:
     """Состояние мира на тике решений, нужное для сенсоров."""
 
-    tick: int
     time: float
     airborne: np.ndarray  # (K,) слоты пчёл в воздухе
     pos: np.ndarray  # (K,3)
-    vel: np.ndarray  # (K,3)
-    ground: np.ndarray  # (K,) рельеф под пчёлами
-    wind: np.ndarray  # (K,3)
     bee_grid: UniformGrid  # проиндексирован по `pos`
-    weather: str
     rain: bool
     messages: Delivery
 
@@ -91,6 +86,10 @@ class SensorBuilder:
             return values
         return values + self.noise.normal(0.0, sigma, values.shape)
 
+    def view_radius(self, slots: np.ndarray, rain: bool) -> np.ndarray:
+        """Радиус обзора пчёл (в дождь меньше)."""
+        return self.bees.view_radius[slots] * (self.params.rain_view_multiplier if rain else 1.0)
+
     def obstacle_pairs(self, pos: np.ndarray, reach: np.ndarray) -> Pairs:
         """Препятствия, поверхность которых ближе `reach`; `delta` — к ближайшей точке оси."""
         obs = self.obstacles
@@ -109,69 +108,53 @@ class SensorBuilder:
         b = self.bees
         a = inp.airborne
         k = a.shape[0]
-        view = b.view_radius[a] * (p.rain_view_multiplier if inp.rain else 1.0)
+        view = self.view_radius(a, inp.rain)
         kind = b.kind[a]
         hive = b.hive[a]
 
         # --------------------------------------------------------------- векторная часть
         bee_pairs = inp.bee_grid.within(inp.pos, view, exclude_self=True)
         flower_pairs = self.flower_grid.within(inp.pos, view)
-        obstacle_pairs = self.obstacle_pairs(inp.pos, view)
-        pher_values, pher_grad = self.pheromones.sample(hive, inp.pos)
+        smell, smell_way = self._smell(hive, inp.pos)
 
         # Шум сенсоров — в фиксированном порядке массивов.
         my_pos = self._noisy(inp.pos, p.noise_pos_sigma)
-        my_vel = self._noisy(inp.vel, p.noise_vel_sigma)
-        bee_rel = self._noisy(bee_pairs.delta, p.noise_pos_sigma)
-        bee_vel = self._noisy(inp.vel[bee_pairs.point], p.noise_vel_sigma)
-        flower_rel = self._noisy(flower_pairs.delta, p.noise_pos_sigma)
-        obstacle_rel = self._noisy(obstacle_pairs.delta, p.noise_pos_sigma)
-
-        entrance = self.world.hive_entrance[hive]
-        to_home = entrance - inp.pos
-        home_dist = np.linalg.norm(to_home, axis=1)
-        home_dir = to_home / np.maximum(home_dist, 1e-9)[:, None]
+        bee_abs = inp.pos[bee_pairs.query] + self._noisy(bee_pairs.delta, p.noise_pos_sigma)
+        flower_abs = inp.pos[flower_pairs.query] + self._noisy(
+            flower_pairs.delta, p.noise_pos_sigma
+        )
+        # Паука видно по горизонтали: высоту полёта игрок не задаёт (DECISIONS №89).
         spider_seen = (kind[flower_pairs.query] == _SCOUT) & (
-            flower_pairs.dist <= p.spider_visible_radius
+            np.hypot(flower_pairs.delta[:, 0], flower_pairs.delta[:, 1])
+            <= p.spider_visible_radius
         )
 
         # --------------------------------------------------------------- списки записей
-        # Каждый массив переводится в списки Python одним вызовом.
         kinds = list(FLYING_KINDS)
         bee_rows = [
-            {"id": i, "rel_pos": r, "vel": v, "kind": kinds[t], "team": h}
-            for i, r, v, t, h in zip(
+            {"id": i, "pos": r, "team": h}
+            for i, r, h in zip(
                 b.uid[a][bee_pairs.point].tolist(),
-                bee_rel.tolist(),
-                bee_vel.tolist(),
-                kind[bee_pairs.point].tolist(),
+                bee_abs.tolist(),
                 hive[bee_pairs.point].tolist(),
                 strict=True,
             )
         ]
         flower_rows: list[dict[str, Any]] = [
-            {"id": i, "rel_pos": r, "nectar": n}
+            {"id": i, "pos": r, "nectar": n}
             for i, r, n in zip(
                 flower_pairs.point.tolist(),
-                flower_rel.tolist(),
+                flower_abs.tolist(),
                 self.world.flower_nectar[flower_pairs.point].tolist(),
                 strict=True,
             )
         ]
         for j in np.flatnonzero(spider_seen).tolist():
             flower_rows[j]["spider"] = bool(self.world.flower_spider[flower_pairs.point[j]])
-        obstacle_rows = [
-            {"rel_pos": r, "radius": rad}
-            for r, rad in zip(
-                obstacle_rel.tolist(),
-                self.obstacles.radius[obstacle_pairs.point].tolist(),
-                strict=True,
-            )
-        ]
-        inbox = _messages_by_receiver(inp.messages, self._pos_of(inp))
+        inbox = _messages_by_receiver(inp.messages)
         bb = _bounds(bee_pairs.query, k)
         fb = _bounds(flower_pairs.query, k)
-        ob = _bounds(obstacle_pairs.query, k)
+        entrance = self.world.hive_entrance
 
         # --------------------------------------------------------------- записи пчёл
         rows: dict[int, AgentSensors] = {}
@@ -179,89 +162,64 @@ class SensorBuilder:
             a.tolist(),
             b.uid[a].tolist(),
             kind.tolist(),
+            hive.tolist(),
             my_pos.tolist(),
-            my_vel.tolist(),
             b.energy[a].tolist(),
             b.energy_max[a].tolist(),
             b.cargo[a].tolist(),
             b.cargo_max[a].tolist(),
-            entrance.tolist(),
-            home_dir.tolist(),
-            home_dist.tolist(),
-            inp.ground.tolist(),
-            inp.wind.tolist(),
-            pher_values.tolist(),
-            pher_grad.tolist(),
+            smell.tolist(),
+            smell_way.tolist(),
             strict=True,
         )
+        homes = entrance.tolist()
         for i, row in enumerate(cols):
-            slot, uid, t, pos, vel, e, e_max, c, c_max, home, hdir, hdist, gz, wind, pv, pg = row
+            slot, uid, t, h, pos, e, e_max, c, c_max, sm, sw = row
             rows[slot] = {
-                "tick": inp.tick,
                 "time": inp.time,
                 "me": {
-                    "id": uid,
-                    "kind": kinds[t],
-                    "pos": pos,
-                    "vel": vel,
-                    "energy": e,
-                    "energy_max": e_max,
-                    "cargo": c,
-                    "cargo_max": c_max,
-                    "in_hive": False,
-                    "alive": True,
+                    "id": uid, "kind": kinds[t], "pos": pos, "energy": e, "energy_max": e_max,
+                    "cargo": c, "cargo_max": c_max, "in_hive": False,
                 },
-                "home": {"pos": home, "dir": hdir, "dist": hdist},
-                "ground_z": gz,
-                "airspeed": wind,
-                "weather": inp.weather,
+                "home": homes[h],
                 "flowers": flower_rows[fb[i] : fb[i + 1]],
                 "bees": bee_rows[bb[i] : bb[i + 1]],
-                "obstacles": obstacle_rows[ob[i] : ob[i + 1]],
                 "messages": inbox.get(slot, []),
-                "pheromones": {"values": pv, "gradient": pg},
+                "smell": sm,
+                "smell_way": sw,
             }
-        for slot in np.flatnonzero(b.state == IN_HIVE).tolist():
-            rows[slot] = self._in_hive(inp, slot)
+        inside = np.flatnonzero(b.state == IN_HIVE)
+        if inside.size:
+            h_in = b.hive[inside]
+            sm_in, sw_in = self._smell(h_in, entrance[h_in])
+            for j, slot in enumerate(inside.tolist()):
+                h = int(h_in[j])
+                rows[slot] = {
+                    "time": inp.time,
+                    "me": {
+                        "id": int(b.uid[slot]), "kind": b.kind_name(slot), "pos": homes[h],
+                        "energy": float(b.energy[slot]),
+                        "energy_max": float(b.energy_max[slot]),
+                        "cargo": float(b.cargo[slot]), "cargo_max": float(b.cargo_max[slot]),
+                        "in_hive": True,
+                    },
+                    "home": homes[h],
+                    "flowers": [],
+                    "bees": [],
+                    "messages": inbox.get(slot, []),
+                    "smell": sm_in[j].tolist(),
+                    "smell_way": sw_in[j].tolist(),
+                }
 
         out: dict[int, list[AgentSensors]] = {h: [] for h in range(b.n_hives)}
         for slot in sorted(rows):
             out[int(b.hive[slot])].append(rows[slot])
         return out
 
-    def _pos_of(self, inp: SensorInputs) -> dict[int, list[float]]:
-        return dict(zip(inp.airborne.tolist(), inp.pos.tolist(), strict=True))
-
-    def _in_hive(self, inp: SensorInputs, slot: int) -> AgentSensors:
-        b = self.bees
-        h = int(b.hive[slot])
-        entrance = self.world.hive_entrance[h]
-        values, grad = self.pheromones.sample(np.array([h]), entrance[None])
-        return {
-            "tick": inp.tick,
-            "time": inp.time,
-            "me": {
-                "id": int(b.uid[slot]),
-                "kind": b.kind_name(slot),
-                "pos": entrance.tolist(),
-                "vel": [0.0, 0.0, 0.0],
-                "energy": float(b.energy[slot]),
-                "energy_max": float(b.energy_max[slot]),
-                "cargo": float(b.cargo[slot]),
-                "cargo_max": float(b.cargo_max[slot]),
-                "in_hive": True,
-                "alive": True,
-            },
-            "home": {"pos": entrance.tolist(), "dir": [0.0, 0.0, 0.0], "dist": 0.0},
-            "ground_z": float(self.world.ground_height(entrance[:2])),
-            "airspeed": [0.0, 0.0, 0.0],
-            "weather": inp.weather,
-            "flowers": [],
-            "bees": [],
-            "obstacles": [],
-            "messages": [],
-            "pheromones": {"values": values[0].tolist(), "gradient": grad[0].tolist()},
-        }
+    def _smell(self, hive: np.ndarray, pos: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+        """Запах под пчёлами `(N,C)` и его градиент `(N,C,2)`."""
+        values, grad = self.pheromones.sample(hive, pos)
+        return values[:, 1, 1, :], grad
 
 
 def _bounds(query: np.ndarray, n: int) -> list[int]:
@@ -269,16 +227,10 @@ def _bounds(query: np.ndarray, n: int) -> list[int]:
     return np.concatenate([[0], np.cumsum(np.bincount(query, minlength=n))]).tolist()
 
 
-def _messages_by_receiver(
-    d: Delivery, receiver_pos: dict[int, list[float]]
-) -> dict[int, list[dict[str, Any]]]:
-    """Сообщения по слотам-получателям в формате §5.1."""
+def _messages_by_receiver(d: Delivery) -> dict[int, list[dict[str, Any]]]:
+    """Сообщения по слотам-получателям в формате протокола."""
+    rows = [d.row(i) for i in range(len(d.words))]
     out: dict[int, list[dict[str, Any]]] = {}
-    for recv, msg, rel in zip(d.receiver.tolist(), d.message.tolist(), d.rel_pos.tolist(),
-                              strict=True):
-        if recv not in receiver_pos:
-            continue
-        out.setdefault(recv, []).append(
-            {"from_id": int(d.sender_uid[msg]), "rel_pos": rel, "values": list(d.values[msg])}
-        )
+    for recv, msg in zip(d.receiver.tolist(), d.message.tolist(), strict=True):
+        out.setdefault(recv, []).append(rows[msg])
     return out

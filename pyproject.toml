@@ -18,6 +18,7 @@ dependencies = [
     "fastapi>=0.110",
     "uvicorn>=0.29",
     "websockets>=13",       # WebSocket в uvicorn (живой стрим вьюера)
+    "greenlet>=3.0",        # лёгкие потоки loop() в раннере (DECISIONS №84)
 ]
 
 [project.optional-dependencies]

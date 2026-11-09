@@ -112,8 +112,13 @@ class BeeState:
 
     # --------------------------------------------------------------- рождение и гибель
 
-    def allocate(self, hive: int, kind: FlyingKind, state: int = FLYING) -> int:
-        """Занять младший свободный слот улья под пчелу типа `kind`; вернуть слот."""
+    def allocate(
+        self, hive: int, kind: FlyingKind, state: int = FLYING, tank: float = 1.0
+    ) -> int:
+        """Занять младший свободный слот улья под пчелу типа `kind`; вернуть слот.
+
+        `tank` — множитель бака этой пчелы (случайный бак, DECISIONS №86).
+        """
         free = np.flatnonzero(self.state[self.hive_slots(hive)] == FREE)
         if free.size == 0:
             raise PoolFullError(f"В улье {hive} нет свободных слотов (пул {self.per_hive})")
@@ -129,8 +134,8 @@ class BeeState:
         self.cruise_empty[s] = tbl["cruise_speed"][k]
         self.view_radius[s] = tbl["view_radius"][k]
         self.drag_coef[s] = tbl["drag_coef"][k]
-        self.energy_max[s] = tbl["energy_max"][k]
-        self.energy[s] = tbl["energy_max"][k]
+        self.energy_max[s] = tbl["energy_max"][k] * tank
+        self.energy[s] = self.energy_max[s]
         self.power_idle[s] = tbl["power_idle"][k]
         self.power_coef[s] = tbl["power_coef"][k]
         self.thrust[s] = 0.0

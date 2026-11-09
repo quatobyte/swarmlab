@@ -71,14 +71,13 @@
 
 ### 6. Правка кода → новый матч (1.5 мин)
 
-**Сделать:** вернуться в редактор, в `my_bees.py` в `MyForager.step` заменить `super().step(s)` на:
+**Сделать:** вернуться в редактор, в `my_bees.py` в `MyCollector.loop` заменить `super().loop()` на:
 
 ```python
-        flower = s.nearest_flower(min_nectar=0.3)
-        if flower is None and not s.me.in_hive and not s.me.is_full:
-            self.fly_to(s.home.pos.x + 60, s.home.pos.y)   # все — на восток!
-            return
-        super().step(s)
+        flower = self.search(self.home.x + 60, self.home.y)   # все — на восток!
+        if flower:
+            self.collect(flower)
+            self.go_home()
 ```
 
 «▶ Запустить» (`Ctrl+Enter`).

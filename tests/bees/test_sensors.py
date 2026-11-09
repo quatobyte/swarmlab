@@ -10,10 +10,9 @@ from swarmlab.core.protocol import SensorBatch
 
 from .helpers import CALM, FLAT, make_sim, run_for
 
-ME_KEYS = {"id", "kind", "pos", "vel", "energy", "energy_max", "cargo", "cargo_max",
-           "in_hive", "alive"}
-TOP_KEYS = {"tick", "time", "me", "home", "ground_z", "airspeed", "weather", "flowers", "bees",
-            "obstacles", "messages", "pheromones"}
+ME_KEYS = {"id", "kind", "pos", "energy", "energy_max", "cargo", "cargo_max", "in_hive",
+           "auto_home", "epoch"}
+TOP_KEYS = {"time", "me", "home", "flowers", "bees", "messages", "smell", "smell_way"}
 
 
 def _plain(x):
@@ -45,27 +44,21 @@ def test_sensor_format_matches_spec_and_serializes():
     for s in agents:
         assert set(s) == TOP_KEYS
         assert set(s["me"]) == ME_KEYS
-        assert set(s["home"]) == {"pos", "dir", "dist"}
-        assert set(s["pheromones"]) == {"values", "gradient"}
-        assert np.array(s["pheromones"]["values"]).shape == (3, 3, 4)
-        assert np.array(s["pheromones"]["gradient"]).shape == (4, 2)
-        assert s["weather"] == "clear"
+        assert np.array(s["smell"]).shape == (4,)
+        assert np.array(s["smell_way"]).shape == (4, 2)
         assert _plain(s)
-    # Протокол M2 — msgpack без pickle: сериализуется и читается обратно без потерь.
+    # Протокол — msgpack без pickle: сериализуется и читается обратно без потерь.
     raw = msgpack.packb(agents)
     assert msgpack.unpackb(raw, strict_map_key=False) == agents
     scout = agents[0]
     assert scout["me"]["kind"] == "scout" and scout["me"]["energy"] > 0
-    # Видит соседку своего улья (3 м), но не охранника другого улья (далеко).
+    # Видит соседку своего улья (3 м), но не пчелу другого улья (далеко).
     seen = {x["id"]: x for x in scout["bees"]}
     assert int(m.bees.uid[b]) in seen and int(m.bees.uid[c]) not in seen
-    rel = np.array(seen[int(m.bees.uid[b])]["rel_pos"])
+    rel = np.array(seen[int(m.bees.uid[b])]["pos"]) - np.array(scout["me"]["pos"])
     assert np.allclose(rel, [3.0, 0.0, 0.0], atol=0.05)
-    assert seen[int(m.bees.uid[b])]["kind"] == "forager" and seen[int(m.bees.uid[b])]["team"] == 0
-    # Дом: направление единичное, расстояние согласовано с позицией.
-    pos = np.array(scout["me"]["pos"])
-    assert np.isclose(np.linalg.norm(scout["home"]["dir"]), 1.0)
-    assert np.isclose(scout["home"]["dist"], np.linalg.norm(entrance[0] - pos))
+    assert seen[int(m.bees.uid[b])]["team"] == 0
+    assert np.allclose(scout["home"], entrance[0])
     # Улей 1 видит только свою пчелу.
     assert [s["me"]["id"] for s in m.collect_sensors(1).agents] == [int(m.bees.uid[c])]
 
@@ -81,18 +74,24 @@ def test_view_radius_rain_and_spider_visibility():
     run_for(sim, 0.1)
     by_id = {s["me"]["id"]: s for s in m.collect_sensors(0).agents}
     sc, fo = by_id[int(m.bees.uid[scout])], by_id[int(m.bees.uid[forager])]
-    near_sc = [x for x in sc["flowers"] if np.linalg.norm(x["rel_pos"]) <= 4.0]
+    def flat(row, x):  # по горизонтали от пчелы
+        return np.linalg.norm(np.subtract(x["pos"], row["me"]["pos"])[:2])
+
+    def dist(row, x):
+        return np.linalg.norm(np.subtract(x["pos"], row["me"]["pos"]))
+
+    near_sc = [x for x in sc["flowers"] if flat(sc, x) <= 4.0]
     assert near_sc and all(x["spider"] is True for x in near_sc)  # разведчик видит паука
-    assert all("spider" not in x for x in sc["flowers"] if np.linalg.norm(x["rel_pos"]) > 4.0)
+    assert all("spider" not in x for x in sc["flowers"] if flat(sc, x) > 4.0)
     assert fo["flowers"] and all("spider" not in x for x in fo["flowers"])  # сборщик — нет
     # Обзор сборщика 8 м: пчела в 20 м не видна; все видимые цветы ближе 8 м.
     assert int(m.bees.uid[far]) not in {x["id"] for x in fo["bees"]}
-    assert max(np.linalg.norm(x["rel_pos"]) for x in fo["flowers"]) <= 8.0
+    assert max(dist(fo, x) for x in fo["flowers"]) <= 8.0
     # В дождь обзор ×0.7: сборщик видит не дальше 5.6 м.
     m.weather.rain = True
     m.decide(sim.clock.decision_tick)
     fo_rain = {s["me"]["id"]: s for s in m.collect_sensors(0).agents}[int(m.bees.uid[forager])]
-    assert max(np.linalg.norm(x["rel_pos"]) for x in fo_rain["flowers"]) <= 5.6
+    assert max(dist(fo_rain, x) for x in fo_rain["flowers"]) <= 5.6
     assert len(fo_rain["flowers"]) < len(fo["flowers"])
 
 
@@ -111,7 +110,8 @@ def test_sensor_noise_only_when_enabled():
 
 
 def test_obstacles_seen_and_avoided():
-    """Пчела летит сквозь дерево: видит его в сенсорах и облетает без контакта."""
+    """Пчела летит сквозь дерево: автопилот облетает его без контакта (в сенсорах игрока
+    препятствий нет — DECISIONS №85)."""
     sim = make_sim(*CALM, "world.terrain.max_relief=0", "world.rocks.per_ha=0")
     m = sim.module
     obs = m.obstacles
@@ -123,10 +123,6 @@ def test_obstacles_seen_and_avoided():
     b = base + np.array([15.0, 0.1, agl])
     s = m.spawn(0, "forager", a)
     m.autopilot.fly_to(np.array([s]), b[None, :2], z=np.array([b[2]]))
-    run_for(sim, 2.0)  # ствол уже в радиусе обзора сборщика (8 м)
-    sens = m.collect_sensors(0).agents[0]
-    radii = sorted(o["radius"] for o in sens["obstacles"])
-    assert any(np.isclose(r, obs.radius[trunk]) for r in radii)
     touched = []
 
     def watch(sim_):
@@ -137,6 +133,7 @@ def test_obstacles_seen_and_avoided():
     pos, _ = m.backend.body_state(np.array([s]))
     assert not any(touched)
     assert np.linalg.norm(pos[0, :2] - b[:2]) < 1.0  # долетела за дерево
+    assert "obstacles" not in m.collect_sensors(0).agents[0]
 
 
 def test_messages_delivered_next_tick_to_own_hive_in_radius():
@@ -148,17 +145,15 @@ def test_messages_delivered_next_tick_to_own_hive_in_radius():
     far = m.spawn(0, "forager", e[0] + np.array([5.0, 0.0, 25.0]))  # 23 м — вне радиуса 15
     other = m.spawn(1, "forager", e[0] + np.array([8.0, 0.0, 2.0]))  # чужой улей рядом
     run_for(sim, 0.1)  # на тике 1
-    m.signal(sender, [1.0, 2.5])
-    with pytest.raises(ValueError):
-        m.signal(sender, list(range(9)))
+    m.say(sender, "flowers", (1.0, 2.5))
     got = {s["me"]["id"]: s["messages"] for s in m.collect_sensors(0).agents}
     assert all(v == [] for v in got.values())  # на этом же тике — ещё нет
     run_for(sim, 0.1)  # следующий тик решений
     s0 = {s["me"]["id"]: s["messages"] for s in m.collect_sensors(0).agents}
     msgs = s0[int(m.bees.uid[near])]
     assert len(msgs) == 1 and msgs[0]["from_id"] == int(m.bees.uid[sender])
-    assert msgs[0]["values"] == [1.0, 2.5]
-    assert np.allclose(msgs[0]["rel_pos"], [-10.0, 0.0, 0.0], atol=0.1)
+    assert msgs[0]["word"] == "flowers" and msgs[0]["where"] == [1.0, 2.5]
+    assert np.allclose(msgs[0]["from"], e[0] + [5.0, 0.0, 2.0], atol=0.1)
     assert s0[int(m.bees.uid[far])] == [] and s0[int(m.bees.uid[sender])] == []
     assert m.collect_sensors(1).agents[0]["messages"] == []
     assert m._delivery.hive_inbox[0].tolist() == [0]  # леток в 5 м — улей тоже слышит
@@ -194,5 +189,5 @@ def test_mark_via_module_reaches_sensors():
     run_for(sim, 0.1)
     m.mark(s, 1, 3.0)
     run_for(sim, 0.1)
-    p = m.collect_sensors(0).agents[0]["pheromones"]["values"]
-    assert p[1][1][1] == pytest.approx(3.0 * 0.5 ** (0.1 / 60.0), rel=1e-6)
+    smell = m.collect_sensors(0).agents[0]["smell"]
+    assert smell[1] == pytest.approx(3.0 * 0.5 ** (0.1 / 60.0), rel=1e-6)

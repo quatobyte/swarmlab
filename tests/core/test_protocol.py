@@ -34,7 +34,7 @@ class Trickle(io.RawIOBase):
 def test_batches_roundtrip_through_frames():
     sensors = SensorBatch(7, 1, 20.0, {"honey": 20.5}, [{"me": {"id": 3, "pos": [1.0, 2, 3]}}])
     commands = CommandBatch(
-        7, {3: {"move": ["fly_to", 1.0, 2.0, None, None, True]}}, {"breed": [["scout", 1]]},
+        7, {3: {"move": ["fly_to", 1.0, 2.0, None], "wait": 4}}, {"hatch": ["scout"]},
         cpu_ms=1.5, errors=[4], log=["привет"],
     )
     buf = io.BytesIO()

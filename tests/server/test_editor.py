@@ -11,41 +11,38 @@ from swarmlab.server.scripts import check_syntax
 
 #: Пчёлы сидят в улье: ни одной команды, вылетать некому.
 SCRIPT_STAY = '''
-from swarmlab.bees.api import Forager, Scout
-
-_said = False
+from swarmlab.bees.api import Collector, Hive, Scout
 
 
-def hive_step(hive):
-    global _said
-    if not _said:
+class MyHive(Hive):
+    def loop(self):
         print("ВЕРСИЯ A: все сидят в улье")
-        _said = True
+        self.wait(1000)
 
 
 class MyScout(Scout):
-    def step(self, s):
-        pass
+    def loop(self):
+        self.stop()
 
 
-class MyForager(Forager):
-    def step(self, s):
-        pass
+class MyCollector(Collector):
+    def loop(self):
+        self.stop()
 '''
 
 #: Те же классы, но все вылетают и летят на восток от улья.
 SCRIPT_FLY = SCRIPT_STAY.replace("ВЕРСИЯ A: все сидят в улье", "ВЕРСИЯ B: все летят").replace(
-    "        pass\n",
-    "        self.fly_to(s.home.pos.x + 30, s.home.pos.y)\n",
+    "        self.stop()\n",
+    "        self.fly_to(self.home.x + 30, self.home.y)\n",
 )
 
-#: Бесконечный цикл в step() сборщика.
+#: Бесконечный цикл без команд в loop() сборщика.
 SCRIPT_HANG = '''
-from swarmlab.bees.api import Forager
+from swarmlab.bees.api import Collector
 
 
-class MyForager(Forager):
-    def step(self, s):
+class MyCollector(Collector):
+    def loop(self):
         while True:
             pass
 '''
@@ -84,7 +81,7 @@ def test_scripts_list_read_write(server):
     by_name = {s["name"]: s for s in items}
     assert by_name["template.py"]["readonly"] and by_name["example_basic.py"]["readonly"]
     code, tpl = server.json("GET", "/api/scripts/template.py")
-    assert code == 200 and "class MyForager" in tpl["text"]
+    assert code == 200 and "class MyCollector" in tpl["text"]
 
     code, res = server.json("PUT", "/api/scripts/my_bees.py", {"text": tpl["text"]})
     assert code == 200 and res["ok"] and res["errors"] == []
@@ -132,8 +129,8 @@ def test_check_syntax_reports_line_and_column():
 
 
 def test_syntax_error_shown_with_line_server_alive(server):
-    text = SCRIPT_STAY.replace("class MyForager(Forager):", "class MyForager(Forager)")
-    line = text.splitlines().index("class MyForager(Forager)") + 1
+    text = SCRIPT_STAY.replace("class MyCollector(Collector):", "class MyCollector(Collector)")
+    line = text.splitlines().index("class MyCollector(Collector)") + 1
     code, res = server.json("POST", "/api/scripts/check", {"text": text})
     assert code == 200 and not res["ok"] and res["errors"][0]["line"] == line
 
@@ -169,14 +166,15 @@ def _airborne_after(packets, t_min):
 def test_blocks_over_http_error_points_to_block(server):
     """M7b: файл блоков через PUT/GET; ошибка ast — с id блока и в проверке, и при запуске."""
     blocks = {"format": 1, "mode": "blocks", "workspace": {"blocks": {"blocks": []}}}
-    text = "def hive_step(hive):  # block:prog\n    print(hive.time  # block:bad_line\n"
+    text = ("class MyHive(Hive):  # block:prog\n    def loop(self):  # block:prog\n"
+            "        print(self.time  # block:bad_line\n")
     code, res = server.json("PUT", "/api/scripts/my_blocks.py", {"text": text, "blocks": blocks})
     assert code == 200 and not res["ok"] and res["mode"] == "blocks"
     assert res["errors"][0]["block"] == "bad_line"
     code, data = server.json("GET", "/api/scripts/my_blocks.py")
     assert code == 200 and data["blocks"] == blocks
     code, res = server.json("POST", "/api/scripts/check", {"text": text})
-    assert res["errors"][0]["block"] == "bad_line" and res["errors"][0]["line"] == 2
+    assert res["errors"][0]["block"] == "bad_line" and res["errors"][0]["line"] == 3
     code, err = _start_with_script(server, "my_blocks.py", duration=2)
     assert code == 400 and err["detail"]["block"] == "bad_line"
     # Переход в Python: дальше блоки этот файл не пишут.
@@ -215,7 +213,7 @@ def test_edit_restart_changes_behaviour(server):
 
 
 def test_infinite_loop_match_goes_on_with_budget_warning(server):
-    """`while True` в step(): матч доходит до конца, в логе улья — предупреждение о бюджете."""
+    """`while True` без команд в loop(): матч идёт до конца, в логе — предупреждение о бюджете."""
     server.json("PUT", "/api/scripts/hang.py", {"text": SCRIPT_HANG})
     code, info = _start_with_script(
         server, "hang.py", duration=4,

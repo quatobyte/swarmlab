@@ -16,15 +16,12 @@
      "inputs": {
       "DO": {
        "block": {
-        "type": "bees_Forager_collect",
+        "type": "bees_Collector_collect",
         "id": "scout_collect",
-        "fields": {
-         "WAIT": true
-        },
         "inputs": {
-         "flower": {
+         "target": {
           "block": {
-           "type": "bees_Sensors_nearest_flower",
+           "type": "bees_Bee_nearest_flower",
            "id": "nf"
           }
          }
@@ -54,15 +51,12 @@
      "inputs": {
       "STACK": {
        "block": {
-        "type": "bees_Forager_collect",
+        "type": "bees_Collector_collect",
         "id": "unload",
-        "fields": {
-         "WAIT": true
-        },
         "inputs": {
-         "flower": {
+         "target": {
           "block": {
-           "type": "bees_Sensors_nearest_flower",
+           "type": "bees_Bee_nearest_flower",
            "id": "nf2"
           }
          }
@@ -81,16 +75,10 @@
        "block": {
         "type": "bees_Bee_go_home",
         "id": "hive_go_home",
-        "fields": {
-         "WAIT": false
-        },
         "next": {
          "block": {
           "type": "bees_Bee_fly_to",
-          "id": "empty_fly",
-          "fields": {
-           "WAIT": false
-          }
+          "id": "empty_fly"
          }
         }
        }

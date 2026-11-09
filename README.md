@@ -76,38 +76,43 @@ swarmlab serve --open
 2. Поправьте поведение и нажмите «▶ Запустить» (`Ctrl+Enter`). Код сохранится, проверится, и матч перезапустится. Ваш улей играет против `example_basic.py` и `example_smart.py`; соперников, seed, врагов и погоду можно поменять в панели «Матч».
 3. Ошибки и `print` ваших пчёл — во вкладке логов под редактором; синтаксическая ошибка подсвечивается на нужной строке.
 
-Как устроен скрипт: на каждый тип пчелы — свой класс с методом `step(self, s)`. Его вызывают 10 раз в секунду: `s` — что пчела видит, а методы `self.…` — что она делает. Отдельная функция `hive_step(hive)` решает, кого выводить в улье.
+Как устроен скрипт: на каждый тип пчелы — свой класс с методом `loop(self)` — «что делать». Игра выполняет его снова и снова. Команды движения ждут сами: `self.fly_to(flower)` закончится, когда пчела долетит, — поэтому код читается как рассказ. Всё о пчеле — через `self` (`self.energy`, `self.flowers`). Улей — класс `Hive` с тем же `loop()`: кого выводить и когда пчёлам возвращаться.
 
 ```python
-from swarmlab.bees.api import Forager, Hive, Sensors
+from swarmlab.bees.api import Collector, Hive, Scout
 
 
-class MyForager(Forager):
-    def step(self, s: Sensors):
-        if s.me.in_hive and s.me.energy_percent < 80:
-            return                            # в улье: нектар выгружен сам, заправляемся
-        if not s.me.in_hive and (s.me.is_full or s.me.energy_percent < 30):
-            self.go_home()                    # полный груз или мало сил — домой
-            return
-        flower = s.nearest_flower(min_nectar=0.3)
+class MyScout(Scout):
+    def loop(self):
+        flower = self.explore()               # искать цветы вокруг дома
         if flower:
-            self.collect(flower)              # подлететь и собирать нектар (из улья — сразу вылет)
-        else:
-            self.fly_to(s.home.pos.x + 30, s.home.pos.y)   # искать цветы
+            self.go_home()                    # вернуться…
+            self.say("flowers", flower)       # …и рассказать, где цветы
 
 
-def hive_step(hive: Hive):
-    if hive.honey > 30 and not hive.queue:
-        hive.breed("forager")                 # мёд есть — ещё один сборщик
+class MyCollector(Collector):
+    def loop(self):
+        news = [m for m in self.heard if m.word == "flowers"]
+        if news:
+            self.collect(news[-1])            # долететь к месту и набрать нектар
+        if self.is_full:
+            self.go_home()                    # дома нектар выгрузится сам
+
+
+class MyHive(Hive):
+    def loop(self):
+        if self.honey > 30:
+            self.hatch(Collector)             # мёд есть — ещё один сборщик
+        self.wait(5)
 ```
 
-Классы, которые вы не переопределили, ведут себя по умолчанию: разведчики облетают окрестности. Домашние пчёлы кода не требуют — они перерабатывают нектар и нянчат личинок сами.
+Классы, которые вы не переопределили, ведут себя по умолчанию: разведчики ищут цветы и рассказывают о них. Домашние пчёлы (`Worker`) кода не требуют — они перерабатывают нектар и нянчат личинок сами. Когда энергии меньше 30 %, пчела сама летит домой заправиться (порог задаёт улей: `set_home_energy`).
 
 Куда смотреть дальше:
 
 - [`docs/CHEATSHEET.md`](docs/CHEATSHEET.md) — памятка на одну страницу (в редакторе — кнопка «Памятка»);
 - [`docs/PLAYER_API.md`](docs/PLAYER_API.md) — полный справочник: сенсоры, команды, сообщения, феромоны;
-- `examples/bees/template.py` — шаблон, `example_basic.py` — простой улей, `example_smart.py` — разведка, общая карта полян и пауков, которую пчёлы передают друг другу сообщениями.
+- `examples/bees/template.py` — шаблон, `example_basic.py` — простой улей (разведчик рассказал — сборщики полетели), `example_smart.py` — поляны и пауки, которые пчёлы передают друг другу словами, `example_blocks` — то же из блоков.
 
 Скрипт можно писать и в любом редакторе: файлы лежат в `examples/bees/`. Запустить свой матч без браузера — скопировать `configs/matches/demo.yaml` в ту же папку под новым именем, указать в `hives` свой скрипт и выполнить `swarmlab run configs/matches/<новое имя>.yaml`.
 

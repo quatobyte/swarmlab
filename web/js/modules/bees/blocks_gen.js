@@ -1,4 +1,4 @@
-// Генерация Python из блоков пчёл (M7b, DECISIONS №50, 53, 55, 56, 62).
+// Генерация Python из блоков пчёл (M7b, DECISIONS №50, 53, 55, 56, 62; API M8 — №84–85).
 //
 // Вход — JSON рабочей области Blockly (`Blockly.serialization.workspaces.save`), выход — текст
 // `.py` и всё, что нужно редактору: какому блоку принадлежит каждая строка (комментарий
@@ -9,10 +9,10 @@
 import { BLOCKS_API } from "./blocks_api.js";
 import { MESSAGES as M } from "./blocks_ru.js";
 
-/** Типы программ пчёл (порядок в коде) и их классы в api.py. */
-export const BEE_KINDS = ["scout", "forager"];
-const BASE_CLASS = { scout: "Scout", forager: "Forager" };
-const USER_CLASS = { scout: "MyScout", forager: "MyForager" };
+/** Типы программ пчёл (порядок в коде) и их классы в api.py; у всех программ — `loop(self)`. */
+export const BEE_KINDS = ["scout", "collector"];
+const BASE_CLASS = { scout: "Scout", collector: "Collector", hive: "Hive" };
+const USER_CLASS = { scout: "MyScout", collector: "MyCollector", hive: "MyHive" };
 const ALL_SUBJECTS = [...BEE_KINDS, "hive"];
 
 const API = new Map(BLOCKS_API.blocks.map((b) => [b.type, b]));
@@ -42,11 +42,13 @@ const PY_KEYWORDS = new Set([
 ]);
 /** Имена, которые генератор использует сам, — переменной или процедуре их не дать. */
 const RESERVED = new Set([
-  "self", "s", "hive", "wait", "math", "random", "print", "len", "range", "int", "float", "str", "abs",
-  "min", "max", "round", "list", "dict", "hive_step", "HIVE_ID", "_", "Scout", "Forager",
-  "Hive", "Sensors", ...Object.values(USER_CLASS),
+  "self", "loop", "math", "random", "print", "len", "range", "int", "float", "str", "abs",
+  "min", "max", "round", "list", "dict", "_", "Scout", "Collector", "Worker", "Hive", "Point",
+  "Flower", "OtherBee", "Message", ...Object.values(USER_CLASS),
 ]);
 const IDENT = /^[\p{L}_][\p{L}\p{N}_]*$/u;
+/** Параметры API, которые пишутся только по имени (`fly_to(flower, speed=3)`). */
+const KEYWORD_ONLY = new Set(["speed"]);
 
 const MATH_CONST = {
   PI: "math.pi", E: "math.e", GOLDEN_RATIO: "(1 + math.sqrt(5)) / 2", SQRT2: "math.sqrt(2)",
@@ -74,11 +76,6 @@ function enabled(block) {
 
 function field(block, name) {
   return block.fields?.[name];
-}
-
-function checked(block, name) {
-  const v = field(block, name);
-  return v === true || v === "TRUE";
 }
 
 /** Все включённые блоки поддерева (вместе со следующими по цепочке). */
@@ -237,7 +234,7 @@ class Gen {
       const info = {
         block: d, raw, name: this.pyName(raw, d), returns: d.type === "procedures_defreturn",
         params: (d.extraState?.params || []).map((p) => ({ raw: p.name, name: this.pyName(p.name, d) })),
-        subjects: [...ALL_SUBJECTS], waits: false, calls: [], conflict: null,
+        subjects: [...ALL_SUBJECTS], usesSelf: false, calls: [], conflict: null,
       };
       this.procs.set(raw, info);
       this.procNames.add(info.name);
@@ -255,7 +252,7 @@ class Gen {
             if (!info.subjects.length && !info.conflict) {
               info.conflict = { block: b, a: where(before), b: where(a.desc.subjects) };
             }
-            if ((a.desc.waitable && (a.ask || checked(b, "WAIT"))) || a.desc.yields) info.waits = true;
+            if (a.desc.target === "self") info.usesSelf = true;
           } else if (b.type === "procedures_callnoreturn" || b.type === "procedures_callreturn") {
             info.calls.push({ name: b.extraState?.name, block: b });
           }
@@ -277,8 +274,8 @@ class Gen {
             info.subjects = subj;
             changed = true;
           }
-          if (callee.waits && !info.waits) {
-            info.waits = true;
+          if (callee.usesSelf && !info.usesSelf) {
+            info.usesSelf = true;
             changed = true;
           }
         }
@@ -286,10 +283,8 @@ class Gen {
     }
     for (const info of this.procs.values()) {
       if (info.conflict) this.error(info.conflict.block, fmt(M.procMixed, info.conflict));
-      // Как вызывать: пчела — (self, s, …), улей — (hive, …), без контекста — (…).
-      const bees = info.subjects.filter((k) => k !== "hive");
-      info.style = info.subjects.includes("hive") ? (bees.length ? "none" : "hive") : "bee";
-      if (!info.subjects.length) info.style = "none";
+      // Как вызывать: с блоками пчелы или улья — (self, …), без них — (…).
+      info.style = info.usesSelf ? "self" : "none";
     }
     // Рекурсия (DECISIONS №55): предупреждение на вызове, который замыкает цикл.
     const reach = (from, target, seen = new Set(), path = []) => {
@@ -340,21 +335,16 @@ class Gen {
     const doBlock = child(p, "DO");
     const ctx = this.fnContext([kind]);
     this.collectAssigned(ctx, [doBlock].filter(Boolean));
-    if (kind === "hive") {
-      this.emit(0, "def hive_step(hive):", p);
-      this.body(ctx, doBlock, 1, p);
-    } else {
-      this.imports.add(BASE_CLASS[kind]);
-      this.emit(0, `class ${USER_CLASS[kind]}(${BASE_CLASS[kind]}):`, p);
-      this.emit(1, "def step(self, s):", p);
-      this.body(ctx, doBlock, 2, p);
-    }
+    this.imports.add(BASE_CLASS[kind]);
+    this.emit(0, `class ${USER_CLASS[kind]}(${BASE_CLASS[kind]}):`, p);
+    this.emit(1, "def loop(self):", p);
+    this.body(ctx, doBlock, 2, p);
     this.checkReads(ctx);
   }
 
   genProc(d) {
     const info = this.procs.get(field(d, "NAME"));
-    const lead = info.style === "bee" ? ["self", "s"] : info.style === "hive" ? ["hive"] : [];
+    const lead = info.style === "self" ? ["self"] : [];
     const params = info.params.map((p) => p.name);
     const ctx = this.fnContext(info.subjects.length ? info.subjects : ALL_SUBJECTS, { proc: info, params });
     const stack = child(d, "STACK");
@@ -404,8 +394,7 @@ class Gen {
     const a = apiBlock(b.type);
     if (a) {
       const [code] = this.apiCode(ctx, b, a);
-      const waitIt = a.desc.yields || (a.desc.waitable && checked(b, "WAIT"));
-      this.emit(ind, waitIt ? `yield ${code}` : code, b);
+      this.emit(ind, code, b);
       return;
     }
     switch (b.type) {
@@ -481,8 +470,7 @@ class Gen {
         return;
       case "procedures_callnoreturn":
       case "procedures_callreturn": {
-        const [code, waits] = this.callCode(ctx, b);
-        this.emit(ind, waits ? `yield from ${code}` : code, b);
+        this.emit(ind, this.callCode(ctx, b), b);
         return;
       }
       case "procedures_ifreturn": {
@@ -542,8 +530,7 @@ class Gen {
   exprOrder(ctx, b) {
     const a = apiBlock(b.type);
     if (a) {
-      const [code, order] = this.apiCode(ctx, b, a);
-      return a.ask ? [`(yield ${code})`, O.ATOMIC] : [code, order];
+      return this.apiCode(ctx, b, a);
     }
     switch (b.type) {
       case "logic_boolean":
@@ -651,8 +638,7 @@ class Gen {
         return [this.readVar(ctx, b), O.ATOMIC];
       case "procedures_callreturn":
       case "procedures_callnoreturn": {
-        const [code, waits] = this.callCode(ctx, b);
-        return waits ? [`(yield from ${code})`, O.ATOMIC] : [code, O.MEMBER];
+        return [this.callCode(ctx, b), O.MEMBER];
       }
       case "bees_python_expr": {
         const code = String(field(b, "CODE") ?? "").replace(/[\r\n]+/g, " ").trim();
@@ -662,9 +648,16 @@ class Gen {
       }
       case "bees_dict_get":
         return [`${this.val(ctx, b, "dict", O.MEMBER)}.get(${this.val(ctx, b, "key", O.NONE)})`, O.MEMBER];
-      case "bees_literal_Kind":
-      case "bees_literal_Weather":
+      case "bees_literal_Color":
         return [pyString(field(b, "VALUE")), O.ATOMIC];
+      case "bees_literal_BeeType": {
+        const v = String(field(b, "VALUE") || "Collector");
+        this.imports.add(v);
+        return [v, O.ATOMIC];
+      }
+      case "bees_point":
+        this.imports.add("Point");
+        return [`Point(${this.val(ctx, b, "x", O.NONE)}, ${this.val(ctx, b, "y", O.NONE)})`, O.MEMBER];
       default:
         this.error(b, fmt(M.unknownBlock, { type: b.type }));
         return ["None", O.ATOMIC];
@@ -676,32 +669,34 @@ class Gen {
   apiCode(ctx, b, { desc }) {
     const bad = ctx.proc ? [] : ctx.kinds.filter((k) => !desc.subjects.includes(k));
     if (bad.length) this.error(b, fmt(M.wrongSubject, { where: where(bad) }));
-    if (desc.api === "HIVE_ID" || desc.member === "function") this.imports.add(desc.name);
     let target = "";
     if (desc.target === "obj") target = this.val(ctx, b, "obj", O.MEMBER);
     else if (desc.target) target = desc.target;
     const ref = target ? `${target}.${desc.name}` : desc.name;
     if (desc.member === "field" || desc.member === "property" || desc.member === "const") return [ref, O.MEMBER];
     const args = [];
-    // Необязательные — по имени (`fly_to(x, y, speed=3)`); у `wait(5)` — по порядку, как в примерах.
-    let gap = desc.member !== "function";
+    // Необязательные — по порядку, пока нет пропуска (`fly_to(x, y)`, `wait(5)`), дальше — по имени.
+    let gap = false;
     for (const p of desc.params) {
       let code = null;
       if (p.options) {
         const v = field(b, p.name);
-        if (v !== undefined && v !== null) code = pyString(v);
+        if (v !== undefined && v !== null) {
+          code = p.ident ? String(v) : pyString(v);
+          if (p.ident) this.imports.add(code);
+        }
       } else if (child(b, p.name)) {
         code = this.val(ctx, b, p.name, O.NONE);
       }
       if (code === null) {
         if (p.required) {
-          this.error(b, fmt(M.emptyInput, { input: p.name }));
+          this.error(b, fmt(M.emptyInput, { input: M.inputNames[p.name] || p.name }));
           args.push("None");
         } else gap = true;
         continue;
       }
       if (p.vararg) args.push(`*${code.startsWith("(") || /^[\w.]+$|^\[.*\]$/.test(code) ? code : `(${code})`}`);
-      else if (p.required || !gap) args.push(code);
+      else if (!gap && !KEYWORD_ONLY.has(p.name)) args.push(code);
       else args.push(`${p.name}=${code}`);
     }
     return [`${ref}(${args.join(", ")})`, O.MEMBER];
@@ -712,18 +707,15 @@ class Gen {
     const info = this.procs.get(raw);
     if (!info) {
       this.error(b, fmt(M.unknownProc, { name: raw }));
-      return ["None", false];
+      return "None";
     }
     if (!ctx.proc) {
       const bad = ctx.kinds.filter((k) => !info.subjects.includes(k));
       if (bad.length) this.error(b, fmt(M.procWrongSubject, { name: raw, where: where(bad) }));
     }
-    const lead = info.style === "bee" ? ["self", "s"] : info.style === "hive" ? ["hive"] : [];
-    if (ctx.proc && info.style !== "none" && ctx.proc.style !== info.style) {
-      this.error(b, fmt(M.procWrongSubject, { name: raw, where: where(ctx.kinds) }));
-    }
+    const lead = info.style === "self" ? ["self"] : [];
     const args = info.params.map((_, i) => this.val(ctx, b, `ARG${i}`, O.NONE));
-    return [`${info.name}(${[...lead, ...args].join(", ")})`, info.waits];
+    return `${info.name}(${[...lead, ...args].join(", ")})`;
   }
 
   // -------------------------------------------------------------- списки (номера с 1, как в Blockly)

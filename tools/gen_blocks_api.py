@@ -1,10 +1,11 @@
-"""Структура блоков пчёл для редактора в браузере (M7b, DECISIONS №52).
+"""Структура блоков пчёл для редактора в браузере (M7b, DECISIONS №52, M8 — №84–85).
 
 Читает `src/swarmlab/bees/api.py` через `ast` (без импорта) — тем же способом, что
 `tools/gen_api_hints.py`, — и пишет `web/js/modules/bees/blocks_api.js`: по блоку на
-каждую команду пчелы и улья, на каждое поле, свойство и метод сенсоров и объектов,
-на `wait()` и `HIVE_ID`. Русские подписи сюда не попадают — они вручную в
-`web/js/modules/bees/blocks_ru.js`.
+каждую команду, данные и метод пчелы и улья и на каждое поле объектов (цветок, пчела,
+сообщение, точка). Команда с результатом (`fly_to` → удалось ли, `explore` → цветок)
+получает и блок-оператор, и блок-значение. Русские подписи сюда не попадают — они
+вручную в `web/js/modules/bees/blocks_ru.js`.
 
     .venv\\Scripts\\python tools\\gen_blocks_api.py           # перезаписать файл
     .venv\\Scripts\\python tools\\gen_blocks_api.py --check   # только сверить (код 1 — устарел)
@@ -39,31 +40,27 @@ def _hints_module() -> Any:
 
 _H = _hints_module()
 
-FLYERS = ["scout", "forager"]
-EVERYONE = ["scout", "forager", "hive"]
+FLYERS = ["scout", "collector"]
+EVERYONE = ["scout", "collector", "hive"]
 
-#: Классы, у которых есть блоки: класс → (к чему обращается блок, какие программы его видят,
-#: внутренние базы, чьи члены считаются своими). Паук — бот, не игрок.
-CLASSES: dict[str, tuple[str, list[str], tuple[str, ...]]] = {
-    "Bee": ("self", FLYERS, ("_Agent",)),
-    "Forager": ("self", ["forager"], ()),
-    "Hive": ("hive", ["hive"], ()),
-    "Sensors": ("s", FLYERS, ()),
-    "Me": ("s.me", FLYERS, ()),
-    "Home": ("s.home", FLYERS, ()),
-    "Flower": ("obj", EVERYONE, ()),
-    "BeeInfo": ("obj", EVERYONE, ()),
-    "Obstacle": ("obj", EVERYONE, ()),
-    "Message": ("obj", EVERYONE, ()),
-    "Pheromones": ("obj", EVERYONE, ()),
-    "Vec": ("obj", EVERYONE, ()),
-    "Counts": ("obj", EVERYONE, ()),
-    "Larva": ("obj", EVERYONE, ()),
+#: Классы с блоками: подпись в блоках → (класс в api.py, к чему обращается блок, какие
+#: программы его видят). `Agent` — общее у пчёл и улья (`wait`, `say`, `heard`, `time`).
+CLASSES: dict[str, tuple[str, str, list[str]]] = {
+    "Agent": ("_Agent", "self", EVERYONE),
+    "Bee": ("_Flyer", "self", FLYERS),
+    "Collector": ("Collector", "self", ["collector"]),
+    "Hive": ("Hive", "self", ["hive"]),
+    "Flower": ("Flower", "obj", EVERYONE),
+    "OtherBee": ("OtherBee", "obj", EVERYONE),
+    "Message": ("Message", "obj", EVERYONE),
+    "Point": ("Point", "obj", EVERYONE),
 }
 #: Методы, которые игрок переопределяет, а не вызывает.
-_OVERRIDE_ONLY = {"step"}
-#: Глобальные функции и константы с блоками.
-GLOBALS = ("wait", "HIVE_ID")
+_OVERRIDE_ONLY = {"loop"}
+#: Команды с результатом: блок-оператор и блок-значение («удалось ли», «найденный цветок»).
+COMMANDS = {"fly_to", "search", "explore", "collect", "go_home", "refuel", "hatch"}
+#: Типы пчёл для улья (`hatch`, `count`): в Python — имя класса, не строка.
+BEE_TYPES = ["Scout", "Collector", "Worker"]
 
 
 def _literals(tree: ast.Module) -> dict[str, list[str]]:
@@ -76,7 +73,9 @@ def _literals(tree: ast.Module) -> dict[str, list[str]]:
                 and ast.unparse(node.value.value) == "Literal"):
             sl = node.value.slice
             elts = sl.elts if isinstance(sl, ast.Tuple) else [sl]
-            out[node.targets[0].id] = [e.value for e in elts if isinstance(e, ast.Constant)]
+            out[node.targets[0].id.lstrip("_")] = [
+                e.value for e in elts if isinstance(e, ast.Constant)]
+    out["BeeType"] = list(BEE_TYPES)
     return out
 
 
@@ -93,7 +92,7 @@ def _check(ann: str | None, classes: set[str]) -> list[str] | None:
             t = "Number"
         elif head == "bool":
             t = "Boolean"
-        elif head in ("str", "Kind", "Weather"):
+        elif head in ("str", "_Color"):
             t = "String"
         elif head in ("list", "tuple"):
             t = "Array"
@@ -116,9 +115,11 @@ def _params(fn: ast.FunctionDef, literals: dict[str, list[str]],
 
     def one(a: ast.arg, d: ast.expr | None, vararg: bool = False) -> dict[str, Any]:
         ann = ast.unparse(a.annotation) if a.annotation is not None else ""
+        ident = ann == "_BeeType"  # тип пчелы — имя класса в коде
+        options = literals["BeeType"] if ident else literals.get(ann.lstrip("_"))
         return {"name": a.arg, "type": ann, "required": d is None and not vararg,
                 "default": None if d is None else ast.unparse(d), "vararg": vararg,
-                "options": literals.get(ann),
+                "options": options, "ident": ident,
                 "check": ["Array"] if vararg else _check(ann, classes)}
 
     for a, d in zip(plain, defaults, strict=True):
@@ -174,51 +175,27 @@ def build_blocks(api_path: Path = API_PY) -> dict[str, Any]:
 
     blocks: list[dict[str, Any]] = []
     classes: dict[str, Any] = {}
-    for cls_name, (target, subjects, hidden) in CLASSES.items():
-        classes[cls_name] = {"target": target, "subjects": subjects}
-        own: dict[str, dict[str, Any]] = {}
-        for base in reversed(hidden):  # члены внутренних баз — как свои (fly_to у Bee)
-            own.update(dict(members(nodes[base])))
-        own.update(dict(members(nodes[cls_name])))
-        if target == "self":  # у пчёл нет полей для игрока (`kind` — служебное; есть `s.me.kind`)
-            own = {k: v for k, v in own.items() if v["member"] != "field"}
+    for label, (node, target, subjects) in CLASSES.items():
+        classes[label] = {"target": target, "subjects": subjects}
+        own = dict(members(nodes[node]))
         for name in sorted(own):
             m = own[name]
             returns = m["returns"]
+            output = None if returns == "None" else _check(returns, api_classes) or []
+            command = m["member"] == "method" and name in COMMANDS
             blocks.append({
-                "type": f"bees_{cls_name}_{name}",
-                "api": f"{cls_name}.{name}",
-                "cls": cls_name,
+                "type": f"bees_{label}_{name}",
+                "api": f"{label}.{name}",
+                "cls": label,
                 "name": name,
                 "member": m["member"],
                 "target": target,
                 "subjects": subjects,
                 "params": m["params"],
                 "returns": returns,
-                "output": (None if returns in ("None", "Order")
-                           else _check(returns, api_classes) or []),
-                "waitable": returns == "Order",
+                "output": None if command else output,
+                "result": output if command else None,
                 "doc": m["doc"],
-            })
-
-    for node in tree.body:
-        if isinstance(node, ast.FunctionDef) and node.name in GLOBALS:
-            returns = ast.unparse(node.returns) if node.returns is not None else "None"
-            blocks.append({
-                "type": f"bees_{node.name}", "api": node.name, "cls": "", "name": node.name,
-                "member": "function", "target": "", "subjects": EVERYONE,
-                "params": _params(node, literals, api_classes), "returns": returns,
-                "output": None, "waitable": False, "yields": returns == "Wait",
-                "doc": _H._clean(_H._first_line(ast.get_docstring(node))),
-            })
-        elif (isinstance(node, ast.Assign) and len(node.targets) == 1
-              and isinstance(node.targets[0], ast.Name) and node.targets[0].id in GLOBALS):
-            name = node.targets[0].id
-            blocks.append({
-                "type": f"bees_{name}", "api": name, "cls": "", "name": name, "member": "const",
-                "target": "", "subjects": EVERYONE, "params": [], "returns": "int",
-                "output": ["Number"], "waitable": False,
-                "doc": _H._comment_after(lines, node),
             })
     return {"literals": literals, "classes": classes, "blocks": blocks}
 

@@ -7,11 +7,11 @@
    "blocks": [
     {
      "type": "bees_program_bee",
-     "id": "start_forager",
+     "id": "start_collector",
      "x": 30,
      "y": 30,
      "fields": {
-      "KIND": "forager"
+      "KIND": "collector"
      }
     },
     {

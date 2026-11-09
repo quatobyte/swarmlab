@@ -11,7 +11,7 @@
 | Направление   | `t`        | Поля |
 |---------------|------------|------|
 | ядро → раннер | `hello`    | `v, module, team, script, seed, budget_ms, options` |
-| раннер → ядро | `ready`    | `v, ok, classes, hive_step, error, log` |
+| раннер → ядро | `ready`    | `v, ok, classes, error, log` |
 | ядро → раннер | `sensors`  | SensorBatch: `tick, team, budget_ms, team_view, agents` |
 | раннер → ядро | `commands` | CommandBatch: `tick, commands, team_command, cpu_ms, errors, log` |
 | ядро → раннер | `stop`     | — |
@@ -26,7 +26,7 @@ from typing import Any, BinaryIO, Protocol, runtime_checkable
 import msgpack
 
 #: Версия протокола раннера.
-PROTOCOL_VERSION = 1
+PROTOCOL_VERSION = 2
 #: Предел размера кадра: защита от мусора в канале.
 MAX_FRAME_BYTES = 16 * 1024 * 1024
 _HEADER = struct.Struct("<I")
@@ -82,7 +82,7 @@ class CommandBatch:
 
     `commands` — команда для каждого агента, который что-то решил (остальные
     продолжают прошлую команду); `team_command` — решение уровня команды (для
-    пчёлок — `hive_step`); `cpu_ms` — время кода игрока на этот тик, мс; `errors` —
+    пчёлок — улей); `cpu_ms` — время кода игрока на этот тик, мс; `errors` —
     агенты, у которых код упал с исключением; `log` — вывод `print` и трассировки.
     """
 
@@ -219,7 +219,7 @@ class AgentHost(Protocol):
     """
 
     def load(self, hello: dict[str, Any]) -> dict[str, Any]:
-        """Загрузить скрипт игрока; вернуть поля ответа `ready` (`classes`, `hive_step`)."""
+        """Загрузить скрипт игрока; вернуть поля ответа `ready` (`classes`)."""
         ...
 
     def step(self, batch: SensorBatch) -> CommandBatch:

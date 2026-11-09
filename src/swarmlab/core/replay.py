@@ -34,7 +34,8 @@ import zstandard
 from swarmlab.core.module import Frame, ScoreBoard, TeamSpec
 
 MAGIC = b"SWR1"
-FORMAT_VERSION = 1
+#: Версия формата: 2 — API M8 (DECISIONS №88); старые реплеи не открываются.
+FORMAT_VERSION = 2
 #: Уровень сжатия zstd: 9 — хорошее сжатие при малой цене на кадр (~0.1 мс).
 ZSTD_LEVEL = 9
 _LEN = struct.Struct("<I")
@@ -249,6 +250,12 @@ def read_replay(path: str | Path) -> Replay:
         if replay is None:
             if kind != "header":
                 raise ReplayError(f"{path}: первая запись — не заголовок")
+            if rec.get("format") != FORMAT_VERSION:
+                raise ReplayError(
+                    f"{path}: реплей старой версии (формат {rec.get('format')}, "
+                    f"нужен {FORMAT_VERSION}) — такие реплеи больше не открываются, "
+                    "запустите матч заново"
+                )
             replay = Replay(header=rec)
         elif kind == "frame":
             h.update(body)

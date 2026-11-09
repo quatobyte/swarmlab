@@ -138,6 +138,12 @@ class WindParams(_Strict):
 class EnergyParams(_Strict):
     dead_on_ground: bool
     ground_contact_margin: float = Field(ge=0)
+    #: Бак летающей пчелы при рождении: базовый × (1 ± tank_spread), DECISIONS №86.
+    tank_spread: float = Field(ge=0, lt=1)
+    #: Порог автовозврата по умолчанию, % (команда улья `set_home_energy`).
+    home_energy: float = Field(ge=0, le=90)
+    #: Уровень заправки после автовозврата по умолчанию, % (`set_refuel_energy`).
+    refuel_energy: float = Field(gt=0, le=100)
 
 
 class WeatherStateParams(_Strict):
@@ -176,12 +182,13 @@ class SensorParams(_Strict):
 
 class CommsParams(_Strict):
     radius: float = Field(gt=0)
-    max_values: int = Field(ge=1)
+    max_word: int = Field(ge=1)
+    max_say: int = Field(ge=1)
 
 
 class PheromoneParams(_Strict):
     cell: float = Field(gt=0)
-    channels: int = Field(ge=1)
+    channels: Literal[4]  # цвета запахов API: red, blue, green, yellow
     half_life_s: float = Field(gt=0)
     neighborhood: Literal[3]
 
@@ -256,11 +263,17 @@ class HiveTrafficParams(_Strict):
 
 
 class ProgramParams(_Strict):
-    """Ожидание команд в `step()` с `yield` (BEES_SPEC §3.1, DECISIONS №57, №61)."""
+    """Команды, которые ждут выполнения (BEES_SPEC §3.1, DECISIONS №61, №84, №87)."""
 
     arrive_tolerance: float = Field(gt=0)
     arrive_max_speed: float = Field(gt=0)
     command_timeout_s: float = Field(gt=0)
+    #: `search`/`explore` останавливаются у цветка, где нектара не меньше, ед.
+    search_min_nectar: float = Field(ge=0)
+    #: `explore`: случайная точка на таком расстоянии от летка, м.
+    explore_radius: tuple[float, float]
+    #: `collect(место)`: цветок не дальше этого от места, м.
+    collect_place_radius: float = Field(gt=0)
 
 
 class PoolParams(_Strict):

@@ -11,7 +11,7 @@
      "x": 20,
      "y": 20,
      "fields": {
-      "KIND": "forager"
+      "KIND": "collector"
      },
      "inputs": {
       "DO": {
@@ -24,7 +24,7 @@
         "inputs": {
          "IF0": {
           "block": {
-           "type": "bees_Me_in_hive",
+           "type": "bees_Bee_at_home",
            "id": "in_hive"
           }
          },
@@ -46,7 +46,7 @@
               "inputs": {
                "A": {
                 "block": {
-                 "type": "bees_Me_energy_percent",
+                 "type": "bees_Bee_energy",
                  "id": "energy"
                 }
                },
@@ -64,7 +64,7 @@
             },
             "DO": {
              "block": {
-              "type": "bees_wait",
+              "type": "bees_Agent_wait",
               "id": "wait_tick"
              }
             }
@@ -83,7 +83,7 @@
            "inputs": {
             "VALUE": {
              "block": {
-              "type": "bees_Sensors_nearest_flower__full",
+              "type": "bees_Bee_nearest_flower__full",
               "id": "nearest",
               "inputs": {
                "min_nectar": {
@@ -164,56 +164,61 @@
                "block": {
                 "type": "bees_Bee_fly_to",
                 "id": "fly_random",
-                "fields": {
-                 "WAIT": true
-                },
                 "inputs": {
-                 "x": {
+                 "target": {
                   "block": {
-                   "type": "math_random_int",
-                   "id": "rx",
+                   "type": "bees_point",
+                   "id": "fly_random_pt",
                    "inputs": {
-                    "FROM": {
+                    "x": {
                      "block": {
-                      "type": "math_number",
-                      "id": "rx0",
-                      "fields": {
-                       "NUM": -40
+                      "type": "math_random_int",
+                      "id": "rx",
+                      "inputs": {
+                       "FROM": {
+                        "block": {
+                         "type": "math_number",
+                         "id": "rx0",
+                         "fields": {
+                          "NUM": -40
+                         }
+                        }
+                       },
+                       "TO": {
+                        "block": {
+                         "type": "math_number",
+                         "id": "rx1",
+                         "fields": {
+                          "NUM": 40
+                         }
+                        }
+                       }
                       }
                      }
                     },
-                    "TO": {
+                    "y": {
                      "block": {
-                      "type": "math_number",
-                      "id": "rx1",
-                      "fields": {
-                       "NUM": 40
-                      }
-                     }
-                    }
-                   }
-                  }
-                 },
-                 "y": {
-                  "block": {
-                   "type": "math_random_int",
-                   "id": "ry",
-                   "inputs": {
-                    "FROM": {
-                     "block": {
-                      "type": "math_number",
-                      "id": "ry0",
-                      "fields": {
-                       "NUM": -40
-                      }
-                     }
-                    },
-                    "TO": {
-                     "block": {
-                      "type": "math_number",
-                      "id": "ry1",
-                      "fields": {
-                       "NUM": 40
+                      "type": "math_random_int",
+                      "id": "ry",
+                      "inputs": {
+                       "FROM": {
+                        "block": {
+                         "type": "math_number",
+                         "id": "ry0",
+                         "fields": {
+                          "NUM": -40
+                         }
+                        }
+                       },
+                       "TO": {
+                        "block": {
+                         "type": "math_number",
+                         "id": "ry1",
+                         "fields": {
+                          "NUM": 40
+                         }
+                        }
+                       }
                       }
                      }
                     }
@@ -252,13 +257,10 @@
      "inputs": {
       "STACK": {
        "block": {
-        "type": "bees_Forager_collect",
+        "type": "bees_Collector_collect",
         "id": "collect",
-        "fields": {
-         "WAIT": true
-        },
         "inputs": {
-         "flower": {
+         "target": {
           "block": {
            "type": "variables_get",
            "id": "get_param",
@@ -277,7 +279,7 @@
           "inputs": {
            "TEXT": {
             "block": {
-             "type": "bees_Me_cargo",
+             "type": "bees_Bee_nectar",
              "id": "cargo"
             }
            }
@@ -285,10 +287,7 @@
           "next": {
            "block": {
             "type": "bees_Bee_go_home",
-            "id": "home",
-            "fields": {
-             "WAIT": true
-            }
+            "id": "home"
            }
           }
          }
@@ -336,10 +335,10 @@
          },
          "DO0": {
           "block": {
-           "type": "bees_Hive_breed",
+           "type": "bees_Hive_hatch",
            "id": "breed",
            "fields": {
-            "kind": "forager"
+            "kind": "Collector"
            }
           }
          }
@@ -349,7 +348,7 @@
      }
     },
     {
-     "type": "bees_Bee_hover",
+     "type": "bees_Bee_stop",
      "id": "orphan_hover",
      "x": 900,
      "y": 300

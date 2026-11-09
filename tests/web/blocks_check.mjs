@@ -25,15 +25,15 @@ function valueFor(check) {
   if (!check || check.includes("Number")) return num(1);
   if (check.includes("Boolean")) return { block: { type: "logic_boolean", id: id("bool"), fields: { BOOL: "TRUE" } } };
   if (check.includes("Array")) return { block: { type: "lists_create_with", id: id("list"), extraState: { itemCount: 1 }, inputs: { ADD0: num(1) } } };
-  if (check.includes("String")) return { block: { type: "text", id: id("text"), fields: { TEXT: "forager" } } };
+  if (check.includes("String")) return { block: { type: "text", id: id("text"), fields: { TEXT: "flowers" } } };
   return getVar("v_obj");
 }
 
 /** Блок API со всеми входами из подписи. */
 function apiInstance(type) {
-  const { desc, full } = apiBlock(type);
+  const { desc, full, ask } = apiBlock(type);
   const ru = API_RU[desc.api];
-  const label = full ? ru.full : ru.label;
+  const label = ask ? ru.ask || ru.label : full ? ru.full : ru.label;
   const names = [...label.matchAll(/\{(\w+)\}/g)].map((m) => m[1]);
   const b = { type, id: id(type), fields: {}, inputs: {} };
   for (const name of names) {
@@ -45,7 +45,6 @@ function apiInstance(type) {
     if (p.options) b.fields[name] = p.options[0];
     else b.inputs[name] = valueFor(p.check);
   }
-  if (desc.waitable && desc.output === null && !type.startsWith("bees_ask_")) b.fields.WAIT = true;
   return b;
 }
 
@@ -90,6 +89,7 @@ function builtinInstances() {
     B("lists_getIndex", { fields: { MODE: "GET_REMOVE", WHERE: "FROM_START" }, inputs: { VALUE: getVar("v_list"), AT: getVar(v) } }),
     B("bees_dict_get", { inputs: { dict: getVar("v_obj"), key: { block: B("text", { fields: { TEXT: "k" } }) } } }),
     B("bees_python_expr", { fields: { CODE: "1 + 2" } }),
+    B("bees_point", { inputs: { x: num(1), y: num(2) } }),
     ...Object.keys(LITERALS).map((lit) => B(`bees_literal_${lit}`, { fields: { VALUE: Object.keys(LITERALS[lit])[0] } })),
   ];
   return { stmt, values };
@@ -126,7 +126,7 @@ function catalog() {
     if (!ru) continue;
     types.push(desc.type);
     if (ru.full && ru.full !== ru.label) types.push(`${desc.type}__full`);
-    if (desc.waitable) types.push(desc.type.replace(/^bees_/, "bees_ask_"));
+    if (desc.result) types.push(desc.type.replace(/^bees_/, "bees_ask_"));
   }
   for (const type of types) {
     const { desc } = apiBlock(type);
@@ -138,9 +138,9 @@ function catalog() {
     covered.push(type);
   }
   const { stmt, values } = builtinInstances();
-  const forager = bySubject.get("forager") || [];
-  forager.push(...stmt, ...values.map((b) => variablesSet("v_x", { block: b })));
-  bySubject.set("forager", forager);
+  const collector = bySubject.get("collector") || [];
+  collector.push(...stmt, ...values.map((b) => variablesSet("v_x", { block: b })));
+  bySubject.set("collector", collector);
   const blocks = [...bySubject].map(([kind, body]) => program(kind, body));
   const ws = { blocks: { languageVersion: 0, blocks }, variables: VARIABLES };
   const r = generate(ws, { file: "catalog.blocks.json" });
@@ -156,13 +156,14 @@ function ruReport() {
       problems.push(`${desc.api}: нет подписи`);
       continue;
     }
-    for (const [which, label] of [["label", ru.label], ["full", ru.full]]) {
+    for (const [which, label] of [["label", ru.label], ["full", ru.full], ["ask", ru.ask]]) {
       if (!label) continue;
       const names = [...label.matchAll(/\{(\w+)\}/g)].map((m) => m[1]);
       const valid = new Set([...desc.params.map((p) => p.name), ...(desc.target === "obj" ? ["obj"] : [])]);
       for (const nm of names) if (!valid.has(nm)) problems.push(`${desc.api}.${which}: лишнее {${nm}}`);
       const need = [...desc.params.filter((p) => p.required).map((p) => p.name), ...(desc.target === "obj" ? ["obj"] : [])];
       for (const nm of need) if (!names.includes(nm)) problems.push(`${desc.api}.${which}: нет {${nm}}`);
+      if (which === "ask" && !desc.result) problems.push(`${desc.api}.ask: у блока нет результата`);
       if (which === "full") for (const p of desc.params) if (!names.includes(p.name)) problems.push(`${desc.api}.full: нет {${p.name}}`);
       if (!/[а-яё]/i.test(label)) problems.push(`${desc.api}.${which}: подпись не по-русски`);
     }

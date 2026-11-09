@@ -21,16 +21,16 @@
            "type": "bees_python_expr",
            "id": "bad_expr",
            "fields": {
-            "CODE": "hive.honey >"
+            "CODE": "self.honey >"
            }
           }
          },
          "DO0": {
           "block": {
-           "type": "bees_Hive_breed",
+           "type": "bees_Hive_hatch",
            "id": "breed",
            "fields": {
-            "kind": "forager"
+            "kind": "Collector"
            }
           }
          }

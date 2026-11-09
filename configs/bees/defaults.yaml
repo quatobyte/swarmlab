@@ -107,6 +107,9 @@ wind:                        # w(x, y, z, t); базовая сила w_ref — 
 energy:
   dead_on_ground: true       # при E = 0 тяга = 0; после касания земли пчела погибает
   ground_contact_margin: 0.05  # «коснулась земли»: низ сферы ближе к рельефу, м
+  tank_spread: 0.2           # бак при рождении: базовый energy_max × (1 ± 0.2), поток rng «bees.tank» (DECISIONS №86)
+  home_energy: 30.0          # порог автовозврата по умолчанию, % (hive.set_home_energy, 0 — нет)
+  refuel_energy: 100.0       # заправка после автовозврата по умолчанию, % (hive.set_refuel_energy)
 
 # ---------------------------------------------------------------- §3.4 Автопилот
 autopilot:
@@ -147,10 +150,13 @@ economy:
     forager: {cost: 4.0, time_s: 30.0}
     house: {cost: 2.0, time_s: 20.0}
 
-program:                     # §3.1: step() с yield ждёт выполнения команды (DECISIONS №57, №61)
+program:                     # §3.1: команды движения ждут выполнения (DECISIONS №61, №84, №87)
   arrive_tolerance: 0.5      # «прилетела»: ближе к цели автопилота, м
   arrive_max_speed: 0.3      # …и медленнее, м/с
-  command_timeout_s: 60.0    # потолок ожидания одной команды, с игрового времени (yield → False)
+  command_timeout_s: 60.0    # потолок ожидания одной команды, с игрового времени (→ False)
+  search_min_nectar: 0.3     # search/explore останавливаются у цветка, где нектара не меньше, ед.
+  explore_radius: [15.0, 60.0]  # explore: случайная точка на таком расстоянии от летка, м (поток rng «bees.explore»)
+  collect_place_radius: 8.0  # collect(место): ближайший цветок с нектаром не дальше этого от места, м
 
 hive:                        # вход и вылет (уточнение §3.3, DECISIONS №34)
   enter_radius: 1.5          # go_home: ближе к летку — пчела входит в улей, м
@@ -162,16 +168,17 @@ sensors:
   rain_view_multiplier: 0.7  # обзор в дождь
   noise_pos_sigma: 0.3       # шум позиций при sensor_noise, м
   noise_vel_sigma: 0.1       # шум скоростей при sensor_noise, м/с
-  spider_visible_radius: 4.0 # разведчик видит паука ближе, м
+  spider_visible_radius: 4.0 # разведчик видит паука ближе по горизонтали, м
   grid_cell: 5.0             # клетка пространственной сетки поиска соседей, м
 
 comms:
-  radius: 15.0               # радиус связи signal(), м
-  max_values: 8              # чисел в сообщении
+  radius: 15.0               # радиус связи say(), м; пчёлы в улье слышат у летка
+  max_word: 20               # букв в слове сообщения
+  max_say: 4                 # сообщений от пчелы (улья) за тик
 
 pheromones:
   cell: 2.0                  # размер клетки сетки, м
-  channels: 4
+  channels: 4                # цвета запахов: red, blue, green, yellow (только 4)
   half_life_s: 60.0          # полураспад испарения, с
   neighborhood: 3            # пчела видит окно 3×3 клетки
 
@@ -188,7 +195,7 @@ weather:
     rain: {wind: [1.0, 2.0], rain: true}     # M6: было 2–4
 
 # ---------------------------------------------------------------- §7 Враги
-# Враги — встроенные боты (swarmlab/bees/bots/) на том же API, что у игроков.
+# Пауки — правило мира (enemies.py): кусают каждого сборщика, который собирает на их цветке.
 enemies:
   spiders:
     enabled: true

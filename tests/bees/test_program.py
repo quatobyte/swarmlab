@@ -1,373 +1,312 @@
-"""M7a: `step()` с `yield` — блокирующие команды и процедуры (DECISIONS №57–61).
+"""M8: `loop()` без `yield` — хост раннера без процесса (DECISIONS №84–87).
 
-Часть тестов гоняет хост раннера без процесса (точный контроль тиков и статусов),
-часть — настоящий матч с раннером в отдельном процессе.
+Точный контроль тиков и статусов: сенсоры в формате протокола подаются руками,
+команды читаются из `CommandBatch`. Настоящий матч с раннером — `test_m8_match.py`.
 """
 
-import textwrap
-from pathlib import Path
-
-import numpy as np
 import pytest
 
-from swarmlab.bees.api import Forager, Sensors, wait
+from swarmlab.bees.api import Collector, Hive, Scout, Worker
 from swarmlab.bees.player_host import HiveHost
-from swarmlab.bees.state import FREE, IN_HIVE
-from swarmlab.core.config import load_match
 from swarmlab.core.program import DONE, FAILED, RUNNING
-from swarmlab.core.protocol import CommandBatch, SensorBatch
-from swarmlab.core.replay import read_replay
-from swarmlab.core.sim import Simulation
-
-from .helpers import CALM, CONFIGS, FLAT, make_sim, run_for
-
-#: Стартовый состав: uid 0–4 разведчики, 5–19 сборщики, 20–29 домашние.
-FIRST_FORAGER = 5
-#: Хеш реплея `demo.yaml` на 30 с. До M7e — снят кодом до M7a (коммит ddf65c7); M7e убрал
-#: шершней и охранников (DECISIONS №82), мир изменился — эталон снят заново после M7e.
-DEMO30_HASH_BEFORE_M7A = "fc3223f11bb19baf718ce6519faca21d2a1fd7d1df6d638191424ce754bc424b"
+from swarmlab.core.protocol import SensorBatch
 
 
-# ===================================================================== хост без процесса
-
-
-def raw_bee(uid: int, tick: int, *, wait_status=None, x: float = 0.0) -> dict:
-    """Сенсоры летающего сборщика в формате протокола (BEES_SPEC §5.1)."""
+def raw_bee(uid: int, tick: int, *, kind: str = "forager", wait=None, x: float = 0.0,
+            messages=(), epoch: int = 0, auto_home: bool = False, in_hive: bool = False,
+            energy: float = 100.0, found=None, flowers=()) -> dict:
+    """Сенсоры летающей пчелы в формате протокола (sensors.py)."""
     me = {
-        "id": uid, "kind": "forager", "pos": [x, 0.0, 5.0], "vel": [0.0, 0.0, 0.0],
-        "energy": 100.0, "energy_max": 100.0, "cargo": 0.0, "cargo_max": 1.5,
-        "in_hive": False, "alive": True,
+        "id": uid, "kind": kind, "pos": [x, 0.0, 5.0], "energy": energy, "energy_max": 100.0,
+        "cargo": 0.0, "cargo_max": 1.5 if kind == "forager" else 0.0, "in_hive": in_hive,
+        "auto_home": auto_home, "epoch": epoch,
     }
-    if wait_status is not None:
-        me["wait"] = wait_status
+    if wait is not None:
+        me["wait"] = wait
+    if found is not None:
+        me["found"] = found
     return {
-        "tick": tick, "time": round(tick * 0.1, 6), "me": me,
-        "home": {"pos": [0.0, 0.0, 1.0], "dir": [1.0, 0.0, 0.0], "dist": 1.0},
-        "ground_z": 0.0, "airspeed": [0.0, 0.0, 0.0], "weather": "clear",
-        "flowers": [], "bees": [], "obstacles": [], "messages": [],
-        "pheromones": {"values": [], "gradient": []},
+        "time": round(tick * 0.1, 6), "me": me, "home": [0.0, 0.0, 1.0],
+        "flowers": list(flowers), "bees": [], "messages": list(messages),
+        "smell": [0.0] * 4, "smell_way": [[0.0, 0.0]] * 4,
     }
 
 
-def batch(tick: int, *agents: dict) -> SensorBatch:
-    view = {"tick": tick, "time": round(tick * 0.1, 6)}
-    return SensorBatch(tick=tick, team=0, budget_ms=20.0, team_view=view, agents=list(agents))
+def msg(sender: int, word: str, where=None) -> dict:
+    return {"from_id": sender, "word": word, "where": where, "from": [1.0, 2.0, 3.0]}
 
 
-def host_with(cls: type) -> tuple[HiveHost, list[str]]:
+def batch(tick: int, *agents: dict, view: dict | None = None) -> SensorBatch:
+    return SensorBatch(tick=tick, team=0, budget_ms=20.0, team_view=view or {},
+                       agents=list(agents))
+
+
+def hive_view(tick: int, **kw) -> dict:
+    view = {
+        "time": round(tick * 0.1, 6), "honey": 10.0, "nectar": 0.0,
+        "counts": {"scout": {"in_hive": 1, "flying": 2}, "forager": {"in_hive": 3, "flying": 4},
+                   "house": 5},
+        "busy": 15, "max_bees": 20, "costs": {"scout": 3.0, "forager": 4.0, "house": 2.0},
+        "messages": [], "notes": [],
+    }
+    view.update(kw)
+    return view
+
+
+def host_with(**classes: type) -> tuple[HiveHost, list[str]]:
     log: list[str] = []
     host = HiveHost(log.append)
-    host.use_classes({"forager": cls})
+    host.classes.update(classes)
     return host, log
 
 
 EVENTS: list[tuple] = []
 
 
-class Courier(Forager):
-    """Летит, ждёт; в `finally` отмечает закрытие."""
+class Courier(Collector):
+    """Летит, ждёт результата; в `finally` отмечает закрытие."""
 
-    def step(self, s: Sensors):
-        EVENTS.append(("start", s.me.id))
+    def loop(self):
+        EVENTS.append(("start",))
         try:
-            ok = yield self.fly_to(10.0, 0.0)
-            EVENTS.append(("arrived", s.me.id, ok, s.me.pos.x))
-            yield wait()
+            ok = self.fly_to(10.0, 0.0)
+            EVENTS.append(("arrived", ok, self.pos.x))
+            self.wait(1.0)
         finally:
-            EVENTS.append(("finally", s.me.id))
+            EVENTS.append(("finally",))
 
 
-def test_waiting_command_carries_seq_and_resumes_with_fresh_sensors():
+@pytest.fixture(autouse=True)
+def _clear_events():
     EVENTS.clear()
-    host, _ = host_with(Courier)
+
+
+# ===================================================================== команды ждут без yield
+
+
+def test_commands_wait_without_yield_and_resume_with_result():
+    host, log = host_with(forager=Courier)
     out = host.step(batch(0, raw_bee(5, 0)))
     cmd = out.commands[5]
-    assert cmd["move"][0] == "fly_to" and cmd["wait"] >= 1
+    assert cmd["move"] == ["fly_to", 10.0, 0.0, None] and cmd["wait"] > 0
     seq = cmd["wait"]
-    # Модуль подтвердил и ещё ждёт — новых команд нет, пчела продолжает fly_to.
-    assert host.step(batch(1, raw_bee(5, 1, wait_status=[seq, RUNNING], x=4.0))).commands == {}
-    # Выполнено — генератор продолжается; s внутри уже свежий (x = 10).
-    out = host.step(batch(2, raw_bee(5, 2, wait_status=[seq, DONE], x=10.0)))
-    assert EVENTS == [("start", 5), ("arrived", 5, True, 10.0)]
-    assert 5 not in out.commands  # после прибытия — yield wait(): команды нет
+    # Пока модуль говорит «идёт» — пчела продолжает команду, новых команд нет.
+    assert host.step(batch(1, raw_bee(5, 1, wait=[seq, RUNNING, -1]))).commands == {}
+    assert EVENTS == [("start",)]
+    # Выполнено → loop() продолжается со свежими сенсорами.
+    host.step(batch(2, raw_bee(5, 2, wait=[seq, DONE, -1], x=9.8)))
+    assert EVENTS == [("start",), ("arrived", True, 9.8)]
+    assert not log
+
+
+def test_fly_to_false_when_module_says_failed():
+    host, _ = host_with(forager=Courier)
+    seq = host.step(batch(0, raw_bee(5, 0))).commands[5]["wait"]
+    host.step(batch(1, raw_bee(5, 1, wait=[seq, FAILED, -1])))
+    assert EVENTS[-1] == ("arrived", False, 0.0)
+
+
+class Searcher(Collector):
+    def loop(self):
+        EVENTS.append(("found", self.search(20.0, 0.0)))
+        self.wait(100.0)
+
+
+def test_search_returns_flower_or_none():
+    host, _ = host_with(forager=Searcher)
+    seq = host.step(batch(0, raw_bee(5, 0))).commands[5]["wait"]
+    found = [7, 3.0, 4.0, 0.3, 2.5]
+    host.step(batch(1, raw_bee(5, 1, wait=[seq, DONE, 7], found=found)))
+    flower = EVENTS[-1][1]
+    assert flower.pos == (3.0, 4.0, 0.3) and flower.nectar == 2.5 and flower._id == 7
+
+    host, _ = host_with(forager=Searcher)
+    seq = host.step(batch(0, raw_bee(6, 0))).commands[6]["wait"]
+    host.step(batch(1, raw_bee(6, 1, wait=[seq, DONE, -1])))
+    assert EVENTS[-1] == ("found", None)
+
+
+class Counter(Scout):
+    passes = 0
+
+    def loop(self):
+        Counter.passes += 1
+        self.stop()
+
+
+def test_loop_without_waiting_commands_runs_once_per_tick():
+    host, _ = host_with(scout=Counter)
+    Counter.passes = 0
+    for tick in range(10):
+        out = host.step(batch(tick, raw_bee(1, tick, kind="scout")))
+        assert out.commands[1] == {"move": ["stop"]}
+    assert Counter.passes == 10
 
 
 def test_lost_command_is_sent_again_with_same_seq():
-    EVENTS.clear()
-    host, _ = host_with(Courier)
+    host, _ = host_with(forager=Courier)
+    first = host.step(batch(0, raw_bee(5, 0))).commands[5]
+    again = host.step(batch(1, raw_bee(5, 1))).commands[5]  # модуль не прислал статус
+    assert again == first
+
+
+# ===================================================================== heard
+
+
+class Listener(Collector):
+    def loop(self):
+        EVENTS.append(("pass", [(m.word, m._from, m.where) for m in self.heard]))
+        self.fly_to(1.0, 0.0)
+
+
+def test_heard_keeps_messages_while_waiting_last_per_word_and_clears_next_pass():
+    host, _ = host_with(forager=Listener)
     seq = host.step(batch(0, raw_bee(5, 0))).commands[5]["wait"]
-    # Команда не дошла (бюджет, пропуск тика): в сенсорах нет нашего seq.
-    again = host.step(batch(1, raw_bee(5, 1))).commands[5]
-    assert again["wait"] == seq and again["move"][0] == "fly_to"
+    # Пока пчела ждёт fly_to: два сообщения от пчелы 9 со словом «a» и одно «b».
+    host.step(batch(1, raw_bee(5, 1, wait=[seq, RUNNING, -1],
+                               messages=[msg(9, "a", [1.0, 1.0]), msg(8, "c")])))
+    host.step(batch(2, raw_bee(5, 2, wait=[seq, RUNNING, -1],
+                               messages=[msg(9, "a", [2.0, 2.0]), msg(9, "b")])))
+    host.step(batch(3, raw_bee(5, 3, wait=[seq, DONE, -1])))  # конец 1-го прохода
+    seq = host.step(batch(4, raw_bee(5, 4))).commands[5]["wait"]  # 2-й проход
+    assert EVENTS[1] == ("pass", [("c", 8, None), ("a", 9, (2.0, 2.0, 0.0)), ("b", 9, None)])
+    host.step(batch(5, raw_bee(5, 5, wait=[seq, DONE, -1])))
+    host.step(batch(6, raw_bee(5, 6)))  # 3-й проход: услышанное до 2-го прохода забыто
+    assert EVENTS[2] == ("pass", [])
 
 
-def test_death_while_waiting_closes_program_and_new_bee_starts_over():
-    """Критерий M7a: смерть → close(), finally выполнен, новая пчела — с начала."""
-    EVENTS.clear()
-    host, _ = host_with(Courier)
-    seq = host.step(batch(0, raw_bee(5, 0))).commands[5]["wait"]
-    host.step(batch(1, raw_bee(5, 1, wait_status=[seq, RUNNING])))
-    host.step(batch(2))  # пчела 5 погибла — её нет в пакете
-    assert EVENTS == [("start", 5), ("finally", 5)]
-    assert 5 not in host.programs and 5 not in host.agents
-    host.step(batch(3, raw_bee(6, 3)))  # новая пчела того же типа
-    assert EVENTS[-1] == ("start", 6) and 6 in host.programs
+class Waiter(Collector):
+    def loop(self):
+        while not self.heard:
+            self.wait(1.0)
+        EVENTS.append(("heard", self.heard[0].word, self.time))
+        self.wait(100.0)
 
 
-def test_yield_from_procedure_returns_value():
-    """Критерий M7a: `result = yield from proc()` возвращает значение процедуры."""
-    results: list = []
-
-    class Tripper(Forager):
-        def step(self, s: Sensors):
-            results.append((yield from self.trip()))
-
-        def trip(self):
-            ok = yield self.go_home()
-            yield wait()
-            return ("home", ok)
-
-    host, _ = host_with(Tripper)
-    seq = host.step(batch(0, raw_bee(5, 0))).commands[5]["wait"]
-    host.step(batch(1, raw_bee(5, 1, wait_status=[seq, FAILED])))
-    host.step(batch(2, raw_bee(5, 2)))
-    assert results == [("home", False)]
+def test_heard_updates_during_the_pass():
+    host, _ = host_with(forager=Waiter)
+    for tick in range(25):
+        messages = [msg(9, "go")] if tick == 15 else []
+        host.step(batch(tick, raw_bee(5, tick, messages=messages)))
+    assert EVENTS == [("heard", "go", 2.0)]  # ждал по секунде: услышал на ближайшей проверке
 
 
-def test_step_without_yield_keeps_old_semantics():
-    class Plain(Forager):
-        def step(self, s: Sensors):
-            self.hover()
-            self.fly_to(1.0, 2.0)  # последняя команда побеждает
+# ===================================================================== данные только для чтения
 
-    host, _ = host_with(Plain)
+
+class Writer(Collector):
+    def loop(self):
+        self.target = 5  # своё поле — можно
+        EVENTS.append(("target", self.target))
+        self.pos = (1, 2)  # данные пчелы — нельзя
+
+
+def test_writing_bee_property_is_clear_error_own_field_works():
+    host, log = host_with(forager=Writer)
     out = host.step(batch(0, raw_bee(5, 0)))
-    assert out.commands == {5: {"move": ["fly_to", 1.0, 2.0, None, None, True]}}
-    assert host.programs == {}
+    assert EVENTS == [("target", 5)]
+    assert out.errors == [5] and out.commands[5] == {"move": ["stop"]}
+    text = "\n".join(log)
+    assert "self.pos — это данные пчелы, их можно только читать" in text
+    assert "self.my_pos" in text
 
 
-def test_end_of_match_closes_programs():
-    EVENTS.clear()
-    host, _ = host_with(Courier)
+# ===================================================================== ошибки и смерть
+
+
+class Fragile(Collector):
+    def loop(self):
+        EVENTS.append(("start", self.time))
+        self.wait()
+        if self.time < 0.15:
+            raise ZeroDivisionError("бум")
+        self.wait(100.0)
+
+
+class Calm(Scout):
+    def loop(self):
+        EVENTS.append(("calm", self.time))
+        self.stop()
+
+
+def test_error_in_loop_logs_restarts_and_others_keep_working():
+    host, log = host_with(forager=Fragile, scout=Calm)
+    for tick in range(4):
+        out = host.step(batch(tick, raw_bee(1, tick, kind="scout"), raw_bee(5, tick)))
+        if tick == 1:
+            assert out.errors == [5] and out.commands[5] == {"move": ["stop"]}
+            assert out.commands[1] == {"move": ["stop"]}
+    assert ("start", 0.0) in EVENTS and ("start", 0.2) in EVENTS  # с начала на следующем тике
+    assert [e for e in EVENTS if e[0] == "calm"] == [("calm", t / 10) for t in range(4)]
+    assert len(log) == 1 and "ZeroDivisionError: бум" in log[0] and "loop()" in log[0]
+
+
+def test_death_while_waiting_runs_finally_and_new_bee_starts_over():
+    host, _ = host_with(forager=Courier)
+    seq = host.step(batch(0, raw_bee(5, 0))).commands[5]["wait"]
+    host.step(batch(1, raw_bee(5, 1, wait=[seq, RUNNING, -1])))
+    host.step(batch(2, raw_bee(7, 2)))  # пчела 5 погибла, родилась 7
+    assert EVENTS == [("start",), ("finally",), ("start",)]
+
+
+def test_auto_return_epoch_restarts_loop_and_commands_return_false():
+    host, _ = host_with(forager=Courier)
+    seq = host.step(batch(0, raw_bee(5, 0))).commands[5]["wait"]
+    # Модуль начал автовозврат: ждущая команда «не вышло» → False.
+    host.step(batch(1, raw_bee(5, 1, wait=[seq, FAILED, -1], auto_home=True)))
+    assert EVENTS[-1] == ("arrived", False, 0.0)
+    # Заправилась (epoch +1): поток закрыт (finally), loop() с начала.
+    host.step(batch(20, raw_bee(5, 20, epoch=1, in_hive=True)))
+    assert EVENTS[-2:] == [("finally",), ("start",)]
+
+
+class Busy(Collector):
+    def loop(self):
+        EVENTS.append(("go", self.go_home(), self.fly_to(1, 1)))
+        self.wait(100)
+
+
+def test_movement_during_auto_return_returns_false_at_once():
+    host, _ = host_with(forager=Busy)
+    out = host.step(batch(0, raw_bee(5, 0, auto_home=True)))
+    assert EVENTS == [("go", False, False)] and "move" not in out.commands.get(5, {})
+
+
+def test_end_of_match_closes_threads():
+    host, _ = host_with(forager=Courier)
     host.step(batch(0, raw_bee(5, 0)))
     host.close()
-    assert EVENTS == [("start", 5), ("finally", 5)]
+    assert EVENTS == [("start",), ("finally",)]
 
 
-# ===================================================================== настоящий матч
+# ===================================================================== улей
 
 
-def script_sim(tmp_path: Path, code: str, *overrides: str, duration: float = 600.0):
-    script = tmp_path / "player.py"
-    script.write_text(textwrap.dedent(code), encoding="utf-8")
-    cfg = load_match(
-        CONFIGS / "matches" / "m2_economy.yaml",
-        cli_overrides=(
-            f"hives=[{{script: '{script.as_posix()}'}}]",
-            f"duration_s={duration}",
-            "weather.enabled=false",
-            *overrides,
-        ),
-    )
-    return Simulation(cfg)
+class Hatcher(Hive):
+    def loop(self):
+        EVENTS.append((self.hatch(Collector), self.hatch(Worker), self.hatch(Scout),
+                       self.hatch(Collector), round(self.honey, 3)))
+        EVENTS.append((self.count(Scout), self.count(Collector), self.count(Worker)))
+        self.set_home_energy(40)
+        self.say("hello", (1, 2))
+        self.wait(100)
 
 
-def log_lines(sim, prefix: str) -> list[str]:
-    return [ln for ln in sim.runners.logs[0].text().splitlines() if ln.startswith(prefix)]
+def test_hive_hatch_answers_at_once_and_counts():
+    host, _ = host_with(hive=Hatcher)
+    out = host.step(batch(0, view=hive_view(0, honey=10.0, busy=17, max_bees=20)))
+    # 10 мёда: Collector (4) да, Worker (2) да, Scout (3) — места нет (17+2 = 19, +1 = 20).
+    assert EVENTS[0] == (True, True, True, False, 1.0)
+    assert EVENTS[1] == (3, 7, 5)
+    assert out.team_command == {"hatch": ["forager", "house", "scout"], "home_energy": 40.0,
+                                "say": [["hello", 1.0, 2.0]]}
 
 
-def test_yield_fly_to_true_for_reachable_false_after_timeout(tmp_path):
-    """Критерий M7a: `ok = yield fly_to(...)` — True у достижимой цели, False по таймауту."""
-    code = f"""
-        from swarmlab.bees.api import Forager, Sensors, wait
+def test_wrong_kind_and_percent_are_clear_errors():
+    class Bad(Hive):
+        def loop(self):
+            self.hatch("forager")
 
-        class F(Forager):
-            def step(self, s: Sensors):
-                if s.me.id != {FIRST_FORAGER}:
-                    return
-                home = s.home.pos
-                ok = yield self.fly_to(home.x + 12, home.y + 6)
-                print(f"reachable={{ok}} t={{s.time:.1f}} speed={{s.me.vel.length():.2f}}")
-                # Ниже рельефа: автопилот держит просвет, цель недостижима.
-                ok = yield self.fly_to(home.x + 12, home.y + 6, z=s.ground_z - 30)
-                print(f"unreachable={{ok}} t={{s.time:.1f}}")
-                while True:
-                    yield wait()
-    """
-    with script_sim(tmp_path, code, "program.command_timeout_s=15") as sim:
-        run_for(sim, 40.0)
-        reach = log_lines(sim, "reachable=")
-        unreach = log_lines(sim, "unreachable=")
-    assert len(reach) == 1 and reach[0].startswith("reachable=True")
-    t_reach = float(reach[0].split("t=")[1].split()[0])
-    assert t_reach < 15.0
-    assert float(reach[0].split("speed=")[1]) <= 0.3
-    assert len(unreach) == 1 and unreach[0].startswith("unreachable=False")
-    t_fail = float(unreach[0].split("t=")[1])
-    assert t_fail - t_reach == pytest.approx(15.0, abs=0.25)
-
-
-def test_death_in_real_match_runs_finally_and_newborn_starts_over(tmp_path):
-    """Критерий M7a в настоящем раннере: гибель пчелы во время ожидания."""
-    code = """
-        from swarmlab.bees.api import Forager, Sensors
-
-        class F(Forager):
-            def step(self, s: Sensors):
-                print(f"start {s.me.id}")
-                try:
-                    yield self.fly_to(s.home.pos.x + 40, s.home.pos.y)
-                    print(f"arrived {s.me.id}")
-                finally:
-                    print(f"finally {s.me.id}")
-    """
-    with script_sim(tmp_path, code) as sim:
-        m, b = sim.module, sim.module.bees
-        run_for(sim, 2.0)
-        slot = int(np.flatnonzero((b.uid == FIRST_FORAGER) & (b.state != FREE))[0])
-        m.kill(np.array([slot]), "test")
-        run_for(sim, 0.3)
-        assert f"finally {FIRST_FORAGER}" in log_lines(sim, "finally")
-        assert not log_lines(sim, f"arrived {FIRST_FORAGER}")
-        newborn = m.give_birth(0, "forager")
-        run_for(sim, 0.3)
-        assert f"start {newborn}" in log_lines(sim, "start")
-
-
-def test_wait_loop_does_not_trip_cpu_budget(tmp_path):
-    """Критерий M7a: `while …: yield wait()` — один шаг цикла за тик, бюджет не срабатывает."""
-    code = """
-        from swarmlab.bees.api import Forager, Scout, wait
-
-        class F(Forager):
-            def step(self, s):
-                while s.me.energy > 0:
-                    yield wait()
-
-        class S(Scout):
-            def step(self, s):
-                while True:
-                    yield wait()
-
-        def hive_step(hive):
-            while True:
-                yield wait()
-    """
-    with script_sim(tmp_path, code, "runner.budget_ms=20") as sim:
-        run_for(sim, 10.0)
-        stats = sim.runners.stats[0]
-        assert stats.replies == 100 and stats.missed == 0
-        assert stats.over_budget == 0 and stats.agent_errors == 0
-        assert stats.cpu_ms_max < 5.0
-
-
-def test_hive_waits_seconds(tmp_path):
-    """Критерий M7a: `yield wait(секунды)` для улья."""
-    code = """
-        from swarmlab.bees.api import Hive, wait
-
-        def hive_step(hive: Hive):
-            while True:
-                hive.breed("house")
-                print(f"breed t={hive.time:.1f}")
-                yield wait(2)
-    """
-    with script_sim(tmp_path, code) as sim:
-        run_for(sim, 5.05)
-        assert log_lines(sim, "breed") == ["breed t=0.0", "breed t=2.0", "breed t=4.0"]
-        assert sim.module.economy.spent_breeding[0] == pytest.approx(3 * 2.0)
-
-
-def test_yield_from_in_real_runner(tmp_path):
-    code = f"""
-        from swarmlab.bees.api import Forager, wait
-
-        class F(Forager):
-            def step(self, s):
-                if s.me.id != {FIRST_FORAGER}:
-                    return
-                result = yield from self.out_and_count()
-                print(f"result={{result}}")
-                while True:
-                    yield wait()
-
-            def out_and_count(self):
-                ok = yield self.hover()  # в улье — сразу «выполнено»
-                n = 0
-                for _ in range(3):
-                    yield wait()
-                    n += 1
-                return ok, n
-    """
-    with script_sim(tmp_path, code) as sim:
-        run_for(sim, 2.0)
-        assert log_lines(sim, "result=") == ["result=(True, 3)"]
-
-
-# ===================================================================== условия модуля
-
-
-def _team_cmd(sim, uid: int, cmd: dict) -> None:
-    sim.module.apply_commands(0, CommandBatch(tick=0, commands={uid: cmd}))
-
-
-def test_module_wait_conditions():
-    """DECISIONS №61: go_home — в улье; удалённая команда и битый цветок — сразу «не вышло»."""
-    with make_sim(*FLAT, *CALM) as sim:
-        m = sim.module
-        b, c = m.bees, m.control
-        slots = [m.spawn(0, "forager") for _ in range(3)]
-        uids = [int(b.uid[s]) for s in slots]
-        run_for(sim, 0.1)
-        _team_cmd(sim, uids[0], {"move": ["go_home"], "wait": 1})
-        _team_cmd(sim, uids[1], {"move": ["unload"], "wait": 2})  # команды нет (DECISIONS №82)
-        _team_cmd(sim, uids[2], {"move": ["collect", 10**6], "wait": 3})
-        assert c.wait_state[slots[1]] == FAILED and c.wait_state[slots[2]] == FAILED
-        assert c.wait_state[slots[0]] == RUNNING
-        for _ in range(300):
-            run_for(sim, 0.1)
-            if b.state[slots[0]] == IN_HIVE:
-                break
-        run_for(sim, 0.1)
-        assert c.wait_state[slots[0]] == DONE
-        # Новая команда без ожидания снимает ожидание.
-        _team_cmd(sim, uids[0], {"move": ["hover"]})
-        assert c.wait_seq[slots[0]] == 0
-        # Гибель освобождает слот вместе с ожиданием.
-        _team_cmd(sim, uids[1], {"move": ["hover"], "wait": 4})
-        m.kill(np.array([slots[1]]), "test")
-        assert c.wait_seq[slots[1]] == 0
-
-
-# ===================================================================== регрессия
-
-
-def test_step_without_yield_gives_same_replay_hash_as_before_m7a(tmp_path):
-    """Критерий M7a: без `yield` — те же траектории (хеш реплея) и счёт `demo.yaml`, что до M7a.
-
-    Эталон снят кодом до M7a (коммит ddf65c7), после M7e (DECISIONS №82) — заново: без
-    шершней и охранников другой матч. DECISIONS №12: битовый детерминизм MuJoCo — только на
-    одной машине. Бюджет раннера снят: превышение
-    20 мс меряется часами стены и под нагрузкой отбрасывает команды тика — тогда
-    хеш зависел бы от загрузки машины, а не от кода.
-    """
-    from swarmlab.cli import main
-
-    out = tmp_path / "demo30.swr"
-    code = main([
-        "run", str(CONFIGS / "matches" / "demo.yaml"), "--headless",
-        "--set", "duration_s=30",
-        "--set", "runner.budget_ms=100000", "--set", "runner.hard_timeout_ms=100000",
-        "--replay", str(out), "--log-dir", str(tmp_path / "logs"),
-    ])
-    assert code == 0
-    replay = read_replay(out)
-    assert replay.hash == DEMO30_HASH_BEFORE_M7A
-    teams = replay.footer["score"]["teams"]
-    got = {k: (v["place"], round(v["honey"], 6), round(v["delivered"], 6), v["alive"])
-           for k, v in teams.items()}
-    assert got == {
-        "0": (3.0, 16.725968, 6.0, 30.0),
-        "1": (2.0, 20.857459, 4.5, 28.0),
-        "2": (1.0, 21.290178, 7.5, 30.0),
-    }
+    host, log = host_with(hive=Bad)
+    host.step(batch(0, view=hive_view(0)))
+    assert "тип пчелы — Scout, Collector или Worker" in log[0]

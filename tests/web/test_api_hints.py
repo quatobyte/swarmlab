@@ -30,24 +30,21 @@ def test_api_hints_js_in_sync_with_api_py():
 
 def test_api_hints_cover_player_api():
     hints = _gen().build_hints()["classes"]
-    forager = {m["name"]: m for m in hints["Forager"]["members"]}
-    # Команды сборщика — свои и унаследованные от Bee.
-    for name in ("collect", "go_home", "fly_to", "hover", "signal", "mark"):
-        assert forager[name]["kind"] == "method" and forager[name]["doc"], name
-    assert forager["fly_to"]["sig"].startswith("(x, y")
-    assert forager["step"]["kind"] == "override"
-    me = {m["name"]: m for m in hints["Me"]["members"]}
-    assert me["energy_percent"]["kind"] == "property" and me["pos"]["type"] == "Vec"
-    assert "энерги" in me["energy"]["doc"]
-    sensors = {m["name"]: m for m in hints["Sensors"]["members"]}
-    assert sensors["flowers"]["type"] == "list[Flower]"
-    assert sensors["nearest_flower"]["type"] == "Flower | None"
+    coll = {m["name"]: m for m in hints["Collector"]["members"]}
+    # Команды сборщика — свои и унаследованные от общей части пчёл.
+    for name in ("collect", "go_home", "fly_to", "search", "explore", "stop", "say", "mark"):
+        assert coll[name]["kind"] == "method" and coll[name]["doc"], name
+    assert coll["fly_to"]["sig"].startswith("(target, y=None")
+    assert coll["loop"]["kind"] == "override"
+    assert coll["energy"]["kind"] == "property" and coll["pos"]["type"] == "Point"
+    assert "энерги" in coll["energy"]["doc"]
+    assert coll["flowers"]["type"] == "list[Flower]"
+    assert coll["nearest_flower"]["type"] == "Flower | None"
     hive = {m["name"]: m for m in hints["Hive"]["members"]}
-    assert {"honey", "counts", "memory", "breed"} <= set(hive)
-    assert "_Agent" not in hints
-    # Удалённые команды и классы (DECISIONS №82) в подсказки не попадают.
-    assert not {"unload", "leave_hive", "fly_dir", "thrust"} & set(forager)
-    assert not {"Guard", "HouseBee", "Enemy", "Hornet"} & set(hints)
+    assert {"honey", "count", "hatch", "set_home_energy", "say", "heard"} <= set(hive)
+    assert "_Agent" not in hints and "_Flyer" not in hints and "_View" not in hints
+    assert not {"step", "hover", "signal", "cargo", "in_hive"} & set(coll)
+    assert not {"Sensors", "Me", "Forager", "Vec", "Spider", "Counts", "Larva"} & set(hints)
 
 
 @pytest.mark.skipif(shutil.which("node") is None, reason="нет Node.js — JS-проверка пропущена")
@@ -56,18 +53,18 @@ def test_editor_hints_infer_types():
                          text=True, encoding="utf-8", timeout=60)
     assert out.returncode == 0, out.stderr
     js = json.loads(out.stdout)
-    assert {"energy_percent", "pos", "cargo", "in_hive"} <= set(js["s.me."])
-    assert {"collect", "fly_to", "go_home", "signal", "mark"} <= set(js["self."])
-    assert "step" not in js["self."]
+    assert {"collect", "fly_to", "go_home", "say", "mark", "energy", "pos", "heard"} <= set(
+        js["self."])
+    assert "loop" not in js["self."]
     assert js["self.co"] == ["collect"]
-    assert {"nectar", "pos", "dist", "id"} <= set(js["flower="])
-    assert "friend" in js["for"] and "nectar" not in js["for"]  # BeeInfo, не Flower
-    assert {"x", "y", "z", "length", "dist"} <= set(js["index"])  # Vec
+    assert {"nectar", "pos", "distance", "spider"} <= set(js["flower="])
+    assert "friend" in js["for"] and "nectar" not in js["for"]  # OtherBee, не Flower
+    assert {"word", "where", "from_where"} <= set(js["heard"])
+    assert {"x", "y", "distance"} <= set(js["index"])  # Point
     assert "nectar" in js["selfattr"]
-    assert {"honey", "breed", "counts", "memory"} <= set(js["hive"])
-    assert {"forager", "total"} <= set(js["counts"])
-    assert "Forager" in js["global"]
-    assert "step" in js["super"]
+    assert {"honey", "hatch", "count", "set_home_energy"} <= set(js["hive"])
+    assert "Collector" in js["global"]
+    assert "loop" in js["super"]
     md = js["markdown"]
     assert "<table>" in md and "<code>x&lt;y</code>" in md and "<b>ж</b>" in md
     assert "<pre><code>print(1)</code></pre>" in md and "<li>два</li>" in md
