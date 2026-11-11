@@ -8,13 +8,13 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 
 from swarmlab.core.clock import Clock
 from swarmlab.core.config import MatchConfig
-from swarmlab.core.module import Frame, Module, load_module
+from swarmlab.core.module import Frame, Module, check_team_scripts, load_module
 from swarmlab.core.physics import PhysicsBackend
 from swarmlab.core.rng import RngRegistry
 from swarmlab.core.runner_host import RunnerPool
@@ -44,7 +44,10 @@ class Simulation:
         on_frame: FrameCallback | None = None,
         *,
         log_dir: Path | None = None,
+        script_dirs: Sequence[Path] | None = None,
     ) -> None:
+        """`script_dirs` — откуда разрешено брать код команд (портал: папки пользователя и
+        общие примеры); скрипт вне них — `ScriptAccessError` до запуска раннеров."""
         self.cfg = cfg
         self.module = module if module is not None else load_module(cfg.module)
         self.rng = RngRegistry(cfg.seed)
@@ -59,6 +62,8 @@ class Simulation:
                 f"не совпадает с шагом ядра {self.clock.dt}"
             )
         self.teams = self.module.agent_teams()
+        if script_dirs is not None:
+            check_team_scripts(self.teams, script_dirs)
         self.runners: RunnerPool | None = None
         if self.teams:
             self.runners = RunnerPool(

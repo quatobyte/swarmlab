@@ -4,7 +4,8 @@
 Канал — как у раннера (ARCHITECTURE §3.4): stdin/stdout, кадр = u32 LE длина + msgpack.
 
 Сервер → воркер (`core.protocol`): первым — `start {id, match, configs, overrides,
-replay, log_dir, speed}`, дальше управление `pause`, `resume`, `speed {value}`, `stop`.
+replay, log_dir, speed, script_dirs?}` (`script_dirs` — портал: откуда брать код ульев),
+дальше управление `pause`, `resume`, `speed {value}`, `stop`.
 
 Воркер → сервер (msgpack с массивами `{"__nd__": …}`, как в реплее):
 
@@ -36,7 +37,7 @@ from typing import Any, BinaryIO
 
 from swarmlab.core.clock import RealtimePacer
 from swarmlab.core.config import load_match
-from swarmlab.core.module import Replayable
+from swarmlab.core.module import Replayable, ScriptAccessError
 from swarmlab.core.protocol import ProtocolError, read_frame
 from swarmlab.core.replay import ReplayWriter, make_header, pack, score_dict
 from swarmlab.core.sim import Simulation
@@ -161,7 +162,9 @@ class LiveMatch:
                          cli_overrides=list(s.get("overrides") or []))
         self.status()
         log_dir = Path(s["log_dir"]) if s.get("log_dir") else None
-        self.sim = sim = Simulation(cfg, log_dir=log_dir)
+        dirs = s.get("script_dirs")  # портал: код ульев — только из папок пользователя
+        self.sim = sim = Simulation(cfg, log_dir=log_dir,
+                                    script_dirs=[Path(d) for d in dirs] if dirs else None)
         if not isinstance(sim.module, Replayable):
             raise TypeError(f"Модуль {cfg.module} не отдаёт сцену (Replayable) — показать нечего")
         header = make_header(cfg, sim.teams, sim.module.scene())
@@ -285,6 +288,10 @@ def main() -> int:
     try:
         match.build()
         state = match.run()
+    except ScriptAccessError as e:  # чужой код в матче портала — коротко, без трассировки
+        print(f"матч не запущен: {e}", file=sys.stderr)
+        match.close("error", str(e))
+        return 1
     except Exception:
         err = traceback.format_exc()
         print(err, file=sys.stderr)

@@ -206,6 +206,16 @@ class ScriptStore:
         return {**self.info(path), "ok": not problems,
                 "errors": [p.as_dict() for p in problems]}
 
+    def delete(self, name: str) -> None:
+        """Удалить свой скрипт и его файл блоков (справочные — 403, нет — 404)."""
+        path = self.path(name)
+        if is_readonly(name):
+            raise ScriptError(403, f"{name} — справочный скрипт, его не удалить")
+        if not path.is_file():
+            raise ScriptError(404, f"Нет скрипта {name}")
+        self.blocks_path(path).unlink(missing_ok=True)
+        path.unlink()
+
     def check_file(self, name: str) -> tuple[Path, list[SyntaxProblem]]:
         """Существующий скрипт и его синтаксические ошибки (перед запуском матча)."""
         path = self.path(name)

@@ -29,6 +29,10 @@ REST:
 WS:
     /ws/matches/{id}               сервер → бинарный msgpack: header, frame, status, log, footer;
                                    клиент → JSON: pause, resume, speed {value}, stop
+
+Публичный режим (`ServerConfig.public`, `swarmlab serve --public`) — `server/public.py`:
+вход и профиль, свои скрипты, проекты, матчи и реплеи у каждого пользователя (чужое — 404),
+серии выключены (403). Без него всё работает как выше.
 """
 
 from __future__ import annotations
@@ -45,7 +49,7 @@ import struct
 import subprocess
 import sys
 import threading
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Callable
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
@@ -61,8 +65,11 @@ from swarmlab.core import series as sr
 from swarmlab.core.config import ConfigError, load_match, load_yaml
 from swarmlab.core.module import default_module
 from swarmlab.core.protocol import encode
+from swarmlab.server.accounts import PublicSettings
 from swarmlab.server.projects import ProjectStore
+from swarmlab.server.public import SERIES_OFF, Portal, PortalGuard, add_routes, current_user
 from swarmlab.server.scripts import ScriptError, ScriptStore, check_syntax
+from swarmlab.server.storage import UserSpace
 
 log = logging.getLogger("swarmlab.server")
 
@@ -98,6 +105,10 @@ class ServerConfig:
     scripts: Path | None = None
     #: Загруженные проекты `.swarm` (M7c); по умолчанию `<root>/projects`.
     projects: Path | None = None
+    #: Публичный режим (портал, M9a): настройки из `public.yaml`; `None` — локальный режим.
+    public: PublicSettings | None = None
+    #: Данные портала: база и папки пользователей; по умолчанию `<root>/data`.
+    data: Path | None = None
 
     @property
     def series(self) -> Path:
@@ -175,6 +186,10 @@ class MatchProcess:
     created: str
     replay: Path
     loop: asyncio.AbstractEventLoop
+    #: Владелец (id пользователя портала); локальный режим — `None`.
+    owner: int | None = None
+    #: Вызывается в event loop, когда процесс матча вышел (реплей дописан и закрыт).
+    on_exit: Callable[[MatchProcess], None] | None = None
     state: str = "starting"
     time: float = 0.0
     duration_s: float | None = None
@@ -312,6 +327,11 @@ class MatchProcess:
             self._publish(msgpack.unpackb(pkt, raw=False), pkt)
         for sub in self.subscribers:
             sub.close()
+        if self.on_exit is not None:
+            try:
+                self.on_exit(self)
+            except Exception:
+                log.exception("матч %s: ошибка после окончания", self.id)
 
     def subscribe(self) -> Subscriber:
         sub = Subscriber()
@@ -344,6 +364,9 @@ class MatchManager:
         self.scripts = scripts
         self.projects = projects
         self.matches: dict[str, MatchProcess] = {}
+        #: Портал: матч начался / процесс матча вышел (реплеи пользователя в базе).
+        self.on_start: Callable[[MatchProcess], None] | None = None
+        self.on_exit: Callable[[MatchProcess], None] | None = None
 
     def running(self) -> list[MatchProcess]:
         return [m for m in self.matches.values() if m.state not in _TERMINAL]
@@ -357,18 +380,21 @@ class MatchManager:
             raise HTTPException(404, f"Нет матча {stem}.yaml в {self.cfg.configs / 'matches'}")
         return path
 
-    def _new_id(self, stem: str, seed: int) -> str:
+    def _new_id(self, stem: str, seed: int, replays: Path) -> str:
         base = f"{stem}-s{seed}-{datetime.now():%Y%m%d-%H%M%S}"
         mid, n = base, 1
-        while mid in self.matches or (self.cfg.replays / f"{mid}.swr").exists():
+        while mid in self.matches or (replays / f"{mid}.swr").exists():
             n += 1
             mid = f"{base}-{n}"
         return mid
 
-    def check_scripts(self, names: list[str], projects: list[str] | None = None) -> None:
+    def check_scripts(self, names: list[str], projects: list[str] | None = None,
+                      space: UserSpace | None = None) -> None:
         """Синтаксис скриптов и проектов матча — до запуска процесса; ошибка → 400 со строкой."""
-        checks = [(n, self.scripts.check_file, None) for n in dict.fromkeys(names)]
-        checks += [(n, self.projects.check_file, n) for n in dict.fromkeys(projects or [])]
+        scripts = space.scripts if space else self.scripts
+        project_store = space.projects if space else self.projects
+        checks = [(n, scripts.check_file, None) for n in dict.fromkeys(names)]
+        checks += [(n, project_store.check_file, n) for n in dict.fromkeys(projects or [])]
         for name, check, project in checks:
             try:
                 _, problems = check(name)
@@ -389,25 +415,37 @@ class MatchManager:
         except ConfigError as e:
             raise HTTPException(400, f"Ошибка конфига: {e}") from e
 
-    def start(self, req: StartRequest) -> MatchProcess:
+    def start(self, req: StartRequest, space: UserSpace | None = None) -> MatchProcess:
+        """Запустить матч. `space` — пользователь портала: его скрипты, реплеи, логи; новый
+        матч вытесняет только его же матчи (DECISIONS №94)."""
         path = self.match_path(req.match)
-        self.check_scripts(req.scripts, req.projects)
+        self.check_scripts(req.scripts, req.projects, space)
         overrides = list(req.overrides)
         if req.seed is not None:
             overrides.append(f"seed={req.seed}")
         cfg = self.load_config(path, overrides)
-        for old in self.running()[: max(0, len(self.running()) - self.cfg.max_matches + 1)]:
+        owner = space.user_id if space else None
+        running = [m for m in self.running() if m.owner == owner]
+        for old in running[: max(0, len(running) - self.cfg.max_matches + 1)]:
             log.info("новый матч вытесняет %s", old.id)
             old.stop()
-        mid = self._new_id(path.stem, cfg.seed)
+        replays = space.replays if space else self.cfg.replays
+        logs = space.logs if space else self.cfg.logs
+        mid = self._new_id(path.stem, cfg.seed, replays)
         m = MatchProcess(id=mid, match=path.stem, seed=cfg.seed,
                          created=datetime.now().isoformat(timespec="seconds"),
-                         replay=self.cfg.replays / f"{mid}.swr", loop=asyncio.get_running_loop(),
+                         replay=replays / f"{mid}.swr", loop=asyncio.get_running_loop(),
+                         owner=owner, on_exit=self.on_exit if space else None,
                          duration_s=cfg.duration_s, speed=req.speed)
-        m.spawn({"t": "start", "id": mid, "match": str(path), "configs": str(self.cfg.configs),
-                 "overrides": overrides, "replay": str(m.replay),
-                 "log_dir": str(self.cfg.logs / mid), "speed": req.speed},
-                cwd=self.cfg.root)
+        start: dict[str, Any] = {
+            "t": "start", "id": mid, "match": str(path), "configs": str(self.cfg.configs),
+            "overrides": overrides, "replay": str(m.replay), "log_dir": str(logs / mid),
+            "speed": req.speed}
+        if space is not None:
+            start["script_dirs"] = [str(d) for d in space.script_dirs]
+            if self.on_start is not None:
+                self.on_start(m)
+        m.spawn(start, cwd=self.cfg.root)
         self.matches[mid] = m
         self._forget_old()
         log.info("матч %s запущен (%s, seed %s)", mid, path.name, cfg.seed)
@@ -419,11 +457,24 @@ class MatchManager:
             if not m.subscribers:
                 del self.matches[m.id]
 
-    def get(self, mid: str) -> MatchProcess:
+    def get(self, mid: str, owner: int | None = None) -> MatchProcess:
+        """Матч по id; на портале чужой — 404, как несуществующий (не выдаём, что он есть)."""
         m = self.matches.get(mid)
-        if m is None:
+        if m is None or m.owner != owner:
             raise HTTPException(404, f"Нет матча {mid!r}")
         return m
+
+    @staticmethod
+    def wait_exit(matches: list[MatchProcess], timeout: float = _STOP_TIMEOUT_S + 2) -> None:
+        """Дождаться выхода процессов матчей (после `stop`); не вышел — `kill`."""
+        for m in matches:
+            if m.proc is None:
+                continue
+            try:
+                m.proc.wait(timeout)
+            except subprocess.TimeoutExpired:
+                m.proc.kill()
+                m.proc.wait(5)
 
     def shutdown(self) -> None:
         procs = [m.proc for m in self.matches.values() if m.proc and m.proc.poll() is None]
@@ -657,18 +708,48 @@ def create_app(cfg: ServerConfig | None = None) -> FastAPI:
     projects = ProjectStore(cfg.projects or cfg.root / "projects", scripts)
     manager = MatchManager(cfg, scripts, projects)
     series = SeriesManager(cfg, manager)
+    portal: Portal | None = None
+    if cfg.public is not None:
+        portal = Portal(cfg.public, cfg.data or cfg.root / "data", cfg.root, scripts)
+        portal.manager = manager
+        manager.on_start = portal.on_match_start
+        manager.on_exit = portal.on_match_end
 
     @contextlib.asynccontextmanager
     async def lifespan(_: FastAPI) -> AsyncIterator[None]:
+        if portal is not None:
+            portal.startup()
         yield
         loop = asyncio.get_running_loop()
         await asyncio.gather(loop.run_in_executor(None, manager.shutdown),
                              loop.run_in_executor(None, series.shutdown))
+        if portal is not None:
+            portal.close()
 
     app = FastAPI(title="SwarmLab", lifespan=lifespan)
     app.state.manager = manager
     app.state.series = series
     app.state.cfg = cfg
+    app.state.portal = portal
+
+    def owner(request: Request) -> int | None:
+        """Владелец данных запроса: пользователь портала; локальный режим — `None`."""
+        return current_user(request).id if portal is not None else None
+
+    def space(request: Request) -> UserSpace | None:
+        return portal.space(current_user(request)) if portal is not None else None
+
+    def script_store(request: Request) -> ScriptStore:
+        sp = space(request)
+        return sp.scripts if sp else scripts
+
+    def project_store(request: Request) -> ProjectStore:
+        sp = space(request)
+        return sp.projects if sp else projects
+
+    def no_series_on_portal() -> None:
+        if portal is not None:
+            raise HTTPException(403, SERIES_OFF)
 
     @app.middleware("http")
     async def revalidate_static(request: Request, call_next: Any) -> Response:
@@ -687,25 +768,28 @@ def create_app(cfg: ServerConfig | None = None) -> FastAPI:
         return out
 
     @app.get("/api/matches")
-    def list_matches() -> list[dict[str, Any]]:
-        return [m.info() for m in reversed(manager.matches.values())]
+    def list_matches(request: Request) -> list[dict[str, Any]]:
+        uid = owner(request)
+        return [m.info() for m in reversed(manager.matches.values()) if m.owner == uid]
 
     @app.post("/api/matches")
-    async def start_match(req: StartRequest) -> dict[str, Any]:
-        return manager.start(req).info()
+    async def start_match(req: StartRequest, request: Request) -> dict[str, Any]:
+        return manager.start(req, space(request)).info()
 
     @app.get("/api/matches/{mid}")
-    def get_match(mid: str) -> dict[str, Any]:
-        return manager.get(mid).info()
+    def get_match(mid: str, request: Request) -> dict[str, Any]:
+        return manager.get(mid, owner(request)).info()
 
     @app.post("/api/matches/{mid}/stop")
-    def stop_match(mid: str) -> dict[str, Any]:
-        m = manager.get(mid)
+    def stop_match(mid: str, request: Request) -> dict[str, Any]:
+        m = manager.get(mid, owner(request))
         m.stop()
         return m.info()
 
     @app.get("/api/replays")
-    def list_replays() -> list[dict[str, Any]]:
+    def list_replays(request: Request) -> list[dict[str, Any]]:
+        if portal is not None:
+            return portal.replays.list(current_user(request).id)
         if not cfg.replays.is_dir():
             return []
         busy = {m.replay for m in manager.running()}  # ещё пишутся — не дочитаются
@@ -716,10 +800,13 @@ def create_app(cfg: ServerConfig | None = None) -> FastAPI:
                      timespec="seconds")} for p in files]
 
     @app.get("/api/replays/{rid}")
-    def get_replay(rid: str) -> FileResponse:
+    def get_replay(rid: str, request: Request) -> FileResponse:
         stem = rid[:-4] if rid.endswith(".swr") else rid
         if not _NAME.match(stem):
             raise HTTPException(400, "Недопустимое имя реплея")
+        if portal is not None:
+            path = portal.replays.path(current_user(request).id, stem)
+            return FileResponse(path, media_type="application/octet-stream", filename=path.name)
         path = cfg.replays / f"{stem}.swr"
         if not path.is_file():
             raise HTTPException(404, f"Нет реплея {stem}.swr")
@@ -747,8 +834,8 @@ def create_app(cfg: ServerConfig | None = None) -> FastAPI:
         return {"name": path.name, "text": path.read_text(encoding="utf-8")}
 
     @app.get("/api/scripts")
-    def list_scripts() -> list[dict[str, Any]]:
-        return scripts.list()
+    def list_scripts(request: Request) -> list[dict[str, Any]]:
+        return script_store(request).list()
 
     @app.post("/api/scripts/check")
     def check_script(body: ScriptText) -> dict[str, Any]:
@@ -756,52 +843,58 @@ def create_app(cfg: ServerConfig | None = None) -> FastAPI:
         return {"ok": not problems, "errors": [p.as_dict() for p in problems]}
 
     @app.get("/api/scripts/{name}")
-    def read_script(name: str) -> dict[str, Any]:
-        return _script_call(scripts.read, name)
+    def read_script(name: str, request: Request) -> dict[str, Any]:
+        return _script_call(script_store(request).read, name)
 
     @app.put("/api/scripts/{name}")
-    def write_script(name: str, body: ScriptText) -> dict[str, Any]:
-        return _script_call(scripts.write, name, body.text, body.blocks)
+    def write_script(name: str, body: ScriptText, request: Request) -> dict[str, Any]:
+        return _script_call(script_store(request).write, name, body.text, body.blocks)
 
     # ------------------------------------------------------------ проекты (M7c)
 
     @app.get("/api/projects")
-    def list_projects() -> list[dict[str, Any]]:
-        return projects.list()
+    def list_projects(request: Request) -> list[dict[str, Any]]:
+        return project_store(request).list()
 
     @app.post("/api/projects")
     async def upload_project(request: Request) -> dict[str, Any]:
         raw = await request.body()
-        return _script_call(projects.add, raw)
+        return _script_call(project_store(request).add, raw)
 
     @app.get("/api/projects/{name}")
-    def read_project(name: str) -> dict[str, Any]:
-        return _script_call(projects.read, name)
+    def read_project(name: str, request: Request) -> dict[str, Any]:
+        return _script_call(project_store(request).read, name)
 
     @app.post("/api/projects/{name}/to-editor")
-    def project_to_editor(name: str, body: ToEditorRequest | None = None) -> dict[str, Any]:
-        return _script_call(projects.to_editor, name, body.name if body else None)
+    def project_to_editor(name: str, request: Request,
+                          body: ToEditorRequest | None = None) -> dict[str, Any]:
+        return _script_call(project_store(request).to_editor, name, body.name if body else None)
 
     # ------------------------------------------------------------ серии (M7c)
 
     @app.get("/api/series")
     def list_series() -> list[dict[str, Any]]:
+        no_series_on_portal()
         return series.list()
 
     @app.post("/api/series")
     def start_series(req: SeriesRequest) -> dict[str, Any]:
+        no_series_on_portal()
         return series.start(req)
 
     @app.get("/api/series/{sid}")
     def get_series(sid: str) -> dict[str, Any]:
+        no_series_on_portal()
         return series.get(sid)
 
     @app.post("/api/series/{sid}/stop")
     def stop_series(sid: str) -> dict[str, Any]:
+        no_series_on_portal()
         return series.stop(sid)
 
     @app.get("/api/series/{sid}/replays/{seed}")
     def series_replay(sid: str, seed: int) -> FileResponse:
+        no_series_on_portal()
         path = series.replay(sid, seed)
         return FileResponse(path, media_type="application/octet-stream",
                             filename=f"{sid}-{path.name}")
@@ -809,6 +902,8 @@ def create_app(cfg: ServerConfig | None = None) -> FastAPI:
     @app.websocket("/ws/matches/{mid}")
     async def stream(ws: WebSocket, mid: str) -> None:
         m = manager.matches.get(mid)
+        if m is not None and portal is not None and m.owner != current_user(ws).id:
+            m = None  # чужой матч — как несуществующий
         await ws.accept()
         if m is None:  # закрыть с кодом после accept: клиент увидит причину, а не HTTP 403
             await ws.close(code=4404, reason="no such match")
@@ -845,6 +940,9 @@ def create_app(cfg: ServerConfig | None = None) -> FastAPI:
             rx.cancel()
             m.subscribers.discard(sub)
 
+    if portal is not None:
+        add_routes(app, portal, manager)
+        app.add_middleware(PortalGuard, portal=portal)
     if cfg.web.is_dir():
         app.mount("/", StaticFiles(directory=cfg.web, html=True), name="web")
     return app

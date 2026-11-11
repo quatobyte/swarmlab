@@ -140,7 +140,16 @@ def _build_parser() -> argparse.ArgumentParser:
     serve.add_argument("--open", action="store_true", help="открыть вьюер в браузере")
     serve.add_argument("--root", type=Path, help="корень проекта: configs/, replays/, logs/, web/")
     serve.add_argument("--max-matches", type=int, default=1,
-                       help="сколько живых матчей одновременно (новый вытесняет старый)")
+                       help="сколько живых матчей одновременно (новый вытесняет старый; "
+                            "с --public — у каждого пользователя)")
+    serve.add_argument("--public", action="store_true",
+                       help="публичный режим (портал): вход по почте и паролю, свои проекты "
+                            "и реплеи у каждого пользователя")
+    serve.add_argument("--public-config", type=Path,
+                       help="свой YAML настроек портала поверх умолчаний (квоты, лимиты, cookie)")
+    serve.add_argument("--data", type=Path,
+                       help="папка данных портала: база и папки пользователей "
+                            "(по умолчанию <root>/data)")
     serve.set_defaults(handler=_cmd_serve)
     return parser
 
@@ -593,15 +602,33 @@ def _cmd_serve(args: argparse.Namespace) -> int:
     if not cfg.web.is_dir():
         print(f"Нет папки вьюера {cfg.web}", file=sys.stderr)
         return 1
+    if (args.public_config or args.data) and not args.public:
+        print("--public-config и --data работают только с --public", file=sys.stderr)
+        return 2
+    if args.public:
+        from swarmlab.core.config import ConfigError
+        from swarmlab.server.accounts import load_settings
+
+        try:
+            cfg.public = load_settings(args.public_config)
+        except ConfigError as e:
+            print(e, file=sys.stderr)
+            return 2
+        cfg.data = (args.data or cfg.root / "data").resolve()
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(name)s: %(message)s",
                         datefmt="%H:%M:%S")
     url = f"http://{args.host}:{args.port}/"
     print(f"SwarmLab: вьюер — {url}  (остановить — Ctrl+C)")
-    print(f"  матчи: {cfg.configs / 'matches'}; реплеи: {cfg.replays}; логи: {cfg.logs}")
+    if cfg.public is not None:
+        print(f"  публичный режим: вход по почте и паролю; данные пользователей — {cfg.data}")
+    else:
+        print(f"  матчи: {cfg.configs / 'matches'}; реплеи: {cfg.replays}; логи: {cfg.logs}")
     if args.open:
         threading.Timer(1.0, webbrowser.open, args=(url,)).start()
+    # На портале IP клиента и HTTPS за прокси определяет сам сервер — только от доверенных
+    # адресов из настроек (`proxy.trusted`); uvicorn заголовкам X-Forwarded-* не верит.
     uvicorn.run(create_app(cfg), host=args.host, port=args.port, log_level="warning",
-                ws="websockets-sansio")
+                ws="websockets-sansio", proxy_headers=cfg.public is None)
     return 0
 
 

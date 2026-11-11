@@ -1,0 +1,40 @@
+# Настройки публичного режима `swarmlab serve --public` (портал, DECISIONS №91–92, 97).
+# Свой файл (`--public-config путь.yaml`) накладывается поверх этого: достаточно указать
+# только то, что меняется.
+
+accounts:
+  # Длина пароля, символов.
+  password_min: 8
+  password_max: 256
+  # Сколько дней живёт вход (cookie сессии), потом — войти заново.
+  session_days: 30
+
+cookie:
+  # Имя cookie сессии (HTTP-only, SameSite=Lax).
+  name: swarmlab_session
+  # Флаг Secure: auto — когда запрос пришёл по HTTPS (за прокси — по X-Forwarded-Proto
+  # от доверенного адреса), always — всегда, never — никогда.
+  secure: auto
+
+limits:
+  # Регистраций с одного IP за окно.
+  register_per_ip: 3
+  register_window_s: 3600
+  # Неверных паролей к одной почте за окно → вход временно закрыт.
+  login_failures: 5
+  login_window_s: 900
+  login_lockout_s: 900
+
+replays:
+  # Последние незакреплённые реплеи пользователя хранятся сами.
+  keep_last: 10
+  # Квота закреплённых («Сохранить»): штук и мегабайт.
+  pinned_max_count: 50
+  pinned_max_mb: 500
+  # Незакреплённые старше стольких дней удаляются очисткой (конец матча, старт сервера).
+  unpinned_max_age_days: 7
+
+proxy:
+  # Адреса доверенного обратного прокси (Caddy). Только от них сервер верит
+  # X-Forwarded-For (IP клиента) и X-Forwarded-Proto (HTTPS). Пусто — прокси нет.
+  trusted: []
