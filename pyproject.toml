@@ -9,7 +9,7 @@ description = "Модульный 3D-симулятор роевых систе�
 readme = "README.md"
 requires-python = ">=3.10"
 dependencies = [
-    "mujoco>=3.2",
+    # Зависимости ядра. Физика модуля (MuJoCo и др.) — в pyproject.toml ветки модуля.
     "numpy>=1.26",
     "pydantic>=2.6",
     "pyyaml>=6.0",
@@ -30,13 +30,10 @@ dev = [
 [project.scripts]
 swarmlab = "swarmlab.cli:main"
 
-# Модули-сценарии регистрируются здесь; ядро находит их по имени, не импортируя напрямую.
-[project.entry-points."swarmlab.modules"]
-bees = "swarmlab.bees.module:BeesModule"
-
-# Хосты кода игрока для процесса-раннера (`python -m swarmlab.runner`): имя модуля → AgentHost.
-[project.entry-points."swarmlab.agent_hosts"]
-bees = "swarmlab.bees.player_host:HiveHost"
+# Модули-сценарии регистрируются в ветке модуля (DECISIONS №98), в master их нет:
+#   [project.entry-points."swarmlab.modules"]      <имя> = "swarmlab.<имя>.module:<Класс>"
+#   [project.entry-points."swarmlab.agent_hosts"]  <имя> = "swarmlab.<имя>.player_host:<Хост>"
+# Ядро находит модуль по имени, не импортируя его напрямую.
 
 [tool.setuptools.packages.find]
 where = ["src"]
@@ -56,7 +53,3 @@ ignore = [
     "RUF002",
     "RUF003",
 ]
-
-[tool.ruff.lint.per-file-ignores]
-# Сгенерирован из блоков (M7b): длину строк задаёт генератор, а не человек.
-"examples/bees/example_blocks.py" = ["E501"]

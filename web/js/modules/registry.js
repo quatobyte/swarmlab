@@ -2,12 +2,9 @@
 // Ядро (js/core/) знает модули только отсюда. В master список пуст; в ветке модуля —
 // одна запись его модуля. Файл меняется только в ветке модуля.
 
-export const MODULES = {
-  bees: {
-    viewer: () => import("./bees/index.js"),
-    editor: () => import("./bees/editor.js"),
-  },
-};
+// Пример записи в ветке модуля:
+//   bees: { viewer: () => import("./bees/index.js"), editor: () => import("./bees/editor.js") },
+export const MODULES = {};
 
 /** Модуль редактора и формы матча — первый в списке (в ветке модуля он один). */
 export const DEFAULT_MODULE = Object.keys(MODULES)[0] ?? null;
