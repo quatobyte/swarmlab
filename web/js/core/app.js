@@ -9,11 +9,8 @@ import { Editor } from "./ui/editor.js";
 import { FpsMeter, isTyping } from "./ui/fps.js";
 import { Lobby, STATE_RU, fmtTime } from "./ui/lobby.js";
 import { SeriesView } from "./ui/series.js";
+import { MODULES } from "../modules/registry.js";
 
-/** Вьюеры модулей: имя модуля из header.module → загрузчик. */
-const MODULES = {
-  bees: () => import("../modules/bees/index.js"),
-};
 const LIVE_SPEEDS = [0.5, 1, 2, 4, 8];
 const REPLAY_SPEEDS = [0.25, 0.5, 1, 2, 4, 8, 16];
 
@@ -46,7 +43,7 @@ class Session {
 
   async _onHeader(header) {
     if (this.viewer) return;
-    const load = MODULES[header.module];
+    const load = MODULES[header.module]?.viewer; // вьюер модуля из header.module
     if (!load) {
       showBanner(`Вьюер для модуля «${header.module}» не найден`, [["Меню", toLobby]]);
       return;

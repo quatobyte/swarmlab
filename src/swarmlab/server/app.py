@@ -12,7 +12,7 @@ REST:
     GET  /api/replays              реплеи `.swr` в папке реплеев
     GET  /api/replays/{id}         файл реплея (распаковывает вьюер)
     GET  /api/profiles             профили `configs/profiles/*.yaml` (имя, описание, YAML)
-    GET  /api/scripts              скрипты игроков в папке редактора (`examples/bees/`)
+    GET  /api/scripts              скрипты игроков в папке редактора (`examples/<модуль>/`)
     GET  /api/scripts/{name}       текст скрипта и файл блоков (`blocks`, если есть)
     PUT  /api/scripts/{name}       {text, blocks?} → сохранить; {ok, errors[{line, col, …, block}]}
     POST /api/scripts/check        {text} → синтаксические ошибки (`ast.parse`)
@@ -59,6 +59,7 @@ from pydantic import BaseModel, Field
 
 from swarmlab.core import series as sr
 from swarmlab.core.config import ConfigError, load_match, load_yaml
+from swarmlab.core.module import default_module
 from swarmlab.core.protocol import encode
 from swarmlab.server.projects import ProjectStore
 from swarmlab.server.scripts import ScriptError, ScriptStore, check_syntax
@@ -93,7 +94,7 @@ class ServerConfig:
     logs: Path
     web: Path
     max_matches: int = 1
-    #: Папка скриптов редактора (M5); по умолчанию `<root>/examples/bees`.
+    #: Папка скриптов редактора (M5); по умолчанию `<root>/examples/<модуль>` (`default_scripts`).
     scripts: Path | None = None
     #: Загруженные проекты `.swarm` (M7c); по умолчанию `<root>/projects`.
     projects: Path | None = None
@@ -104,13 +105,24 @@ class ServerConfig:
         return self.replays / "series"
 
 
+def default_scripts(root: Path) -> Path:
+    """Папка скриптов редактора: `examples/<модуль>` единственного модуля ветки.
+
+    В `master` модулей нет — `examples/` (редактор пуст, сервер работает).
+    """
+    try:
+        return root / "examples" / default_module()
+    except LookupError:
+        return root / "examples"
+
+
 def default_config(root: Path | None = None) -> ServerConfig:
     root = Path(root or Path.cwd()).resolve()
     web = root / "web"
     if not web.is_dir():  # запуск не из корня проекта — web/ рядом с пакетом
         web = Path(__file__).resolve().parents[3] / "web"
     return ServerConfig(root=root, configs=root / "configs", replays=root / "replays",
-                        logs=root / "logs", web=web, scripts=root / "examples" / "bees",
+                        logs=root / "logs", web=web, scripts=default_scripts(root),
                         projects=root / "projects")
 
 
@@ -641,7 +653,7 @@ def _describe_yaml(path: Path) -> dict[str, Any]:
 
 def create_app(cfg: ServerConfig | None = None) -> FastAPI:
     cfg = cfg or default_config()
-    scripts = ScriptStore(cfg.scripts or cfg.root / "examples" / "bees", cfg.root)
+    scripts = ScriptStore(cfg.scripts or default_scripts(cfg.root), cfg.root)
     projects = ProjectStore(cfg.projects or cfg.root / "projects", scripts)
     manager = MatchManager(cfg, scripts, projects)
     series = SeriesManager(cfg, manager)

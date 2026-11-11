@@ -187,8 +187,23 @@ class Replayable(Protocol):
 
 
 def available_modules() -> list[str]:
-    """Имена установленных модулей."""
-    return sorted(ep.name for ep in entry_points(group=ENTRY_POINT_GROUP))
+    """Имена установленных модулей (без повторов: остатки старых установок дают дубли)."""
+    return sorted({ep.name for ep in entry_points(group=ENTRY_POINT_GROUP)})
+
+
+def default_module() -> str:
+    """Модуль по умолчанию — единственный установленный (в ветке модуля он один).
+
+    Модуль не импортируется: имя берётся из метаданных entry points. Модулей нет
+    или их несколько — `LookupError`: модуль нужно указать явно (`module:` в файле матча).
+    """
+    names = available_modules()
+    if len(names) == 1:
+        return names[0]
+    known = ", ".join(names) or "нет ни одного"
+    raise LookupError(
+        f"Модуль не указан, а выбрать единственный нельзя. Установленные модули: {known}"
+    )
 
 
 def load_module(name: str) -> Module:

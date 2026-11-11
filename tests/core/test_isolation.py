@@ -1,12 +1,23 @@
-"""Инварианты зависимостей: ядро не знает о модулях; MuJoCo — только в bees/physics."""
+"""Инварианты зависимостей: ядро не знает о модулях; MuJoCo — только в `<модуль>/physics`.
+
+Пакеты модулей — все пакеты `src/swarmlab/`, кроме ядра, раннера и сервера (DECISIONS №98:
+в `master` их нет, в ветке модуля — один). Тест один для всех веток.
+"""
 
 import ast
 import subprocess
 import sys
+from importlib.metadata import entry_points
 from pathlib import Path
 
 SRC = Path(__file__).resolve().parents[2] / "src" / "swarmlab"
-FORBIDDEN_IN_CORE = ("swarmlab.bees", "swarmlab.server", "swarmlab.runner", "mujoco")
+SHARED = {"core", "runner", "server"}
+MODULE_PKGS = tuple(
+    f"swarmlab.{d.name}"
+    for d in sorted(SRC.iterdir())
+    if d.is_dir() and d.name not in SHARED and (d / "__init__.py").exists()
+)
+FORBIDDEN_IN_CORE = (*MODULE_PKGS, "swarmlab.server", "swarmlab.runner", "mujoco")
 
 
 def _imports(path: Path) -> set[str]:
@@ -32,12 +43,12 @@ def test_core_has_no_forbidden_imports_static():
     assert not {k: v for k, v in bad.items() if v}
 
 
-def test_mujoco_only_inside_bees_physics():
-    physics = SRC / "bees" / "physics"
+def test_mujoco_only_inside_module_physics():
+    physics = [SRC / pkg.split(".")[1] / "physics" for pkg in MODULE_PKGS]
     offenders = [
         str(f.relative_to(SRC))
         for f in SRC.rglob("*.py")
-        if physics not in f.parents and _hits(_imports(f), ("mujoco",))
+        if not any(p in f.parents for p in physics) and _hits(_imports(f), ("mujoco",))
     ]
     assert offenders == []
 
@@ -54,21 +65,24 @@ def test_core_import_does_not_load_modules_at_runtime():
     assert res.returncode == 0, res.stdout + res.stderr
 
 
-def test_runner_and_player_host_do_not_import_simulation_or_mujoco():
-    """Раннер находит хост модуля по entry point; хост пчёлок не тянет MuJoCo и ядро симуляции."""
+def test_runner_and_player_hosts_do_not_import_simulation_or_mujoco():
+    """Раннер находит хост модуля по entry point; хост не тянет MuJoCo и ядро симуляции."""
     runner = {n for f in (SRC / "runner").rglob("*.py") for n in _imports(f)}
-    assert not _hits(runner, ("swarmlab.bees", "mujoco"))
-    code = (
-        "import sys, swarmlab.bees.player_host\n"
-        "bad = [m for m in sys.modules if m.startswith(('mujoco', 'swarmlab.core.sim', "
-        "'swarmlab.bees.module', 'swarmlab.bees.physics'))]\n"
-        "print(bad); sys.exit(1 if bad else 0)\n"
-    )
-    res = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True)
-    assert res.returncode == 0, res.stdout + res.stderr
+    assert not _hits(runner, (*MODULE_PKGS, "mujoco"))
+    for ep in entry_points(group="swarmlab.agent_hosts"):
+        host = ep.value.split(":")[0]
+        pkg = ".".join(host.split(".")[:2])
+        code = (
+            f"import sys, {host}\n"
+            "bad = [m for m in sys.modules if m.startswith(('mujoco', 'swarmlab.core.sim', "
+            f"'{pkg}.module', '{pkg}.physics'))]\n"
+            "print(bad); sys.exit(1 if bad else 0)\n"
+        )
+        res = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True)
+        assert res.returncode == 0, f"{ep.name}: " + res.stdout + res.stderr
 
 
 def test_server_knows_only_core():
-    """Сервер — клиент ядра (ARCHITECTURE §1): модуль пчёлок и MuJoCo он не импортирует."""
+    """Сервер — клиент ядра (ARCHITECTURE §1): модули и MuJoCo он не импортирует."""
     server = {n for f in (SRC / "server").rglob("*.py") for n in _imports(f)}
-    assert not _hits(server, ("swarmlab.bees", "swarmlab.runner", "mujoco"))
+    assert not _hits(server, (*MODULE_PKGS, "swarmlab.runner", "mujoco"))

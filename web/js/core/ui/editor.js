@@ -1,5 +1,5 @@
 // Редактор кода в браузере (M5): CodeMirror 5 и блоки, вьюер матча, внизу — панель
-// матча и логи ульев. Сервер хранит скрипты в examples/bees/ и проверяет синтаксис (ast.parse).
+// матча и логи ульев. Сервер хранит скрипты в examples/<модуль>/ и проверяет синтаксис (ast.parse).
 // Часть, которая знает модуль (подсказки, форма матча), — js/modules/<модуль>/editor.js.
 //
 // Блоки (M7b, DECISIONS №50–56): у скрипта может быть файл блоков `X.blocks.json`. В режиме
@@ -16,14 +16,12 @@ import { makeProject, parseProject, projectName, projectText, PROJECT_EXT } from
 import { confirmForeignCode } from "../trust.js";
 import { ask, askSeries } from "./dialog.js";
 import { renderMarkdown } from "./markdown.js";
+import { DEFAULT_MODULE, loadModuleEditor } from "../../modules/registry.js";
 
 const $ = (id) => document.getElementById(id);
 const CM = window.CodeMirror;
 
-const MODULE_EDITORS = {
-  bees: () => import("../../modules/bees/editor.js"),
-};
-const DEFAULT_FILE = "my_bees.py";
+const DEFAULT_FILE = `my_${DEFAULT_MODULE ?? "agents"}.py`;
 const TEMPLATE_FILE = "template.py";
 const NAME_RE = /^[A-Za-z_][A-Za-z0-9_]{0,63}\.py$/;
 const MAX_LOG_LINES = 5000;
@@ -100,8 +98,7 @@ export class Editor {
   }
 
   async _init() {
-    const load = MODULE_EDITORS.bees;
-    const [mod, profiles] = await Promise.all([load(), api.profiles()]);
+    const [mod, profiles] = await Promise.all([loadModuleEditor(), api.profiles()]);
     this.mod = mod;
     this.cm = CM($("ed-code"), {
       mode: { name: "python", version: 3 },

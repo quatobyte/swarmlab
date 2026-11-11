@@ -6,13 +6,10 @@ import { parseProject, ProjectError } from "../project.js";
 import { confirmForeignCode } from "../trust.js";
 import { ask, askSeries } from "./dialog.js";
 import { renderSeriesList } from "./series.js";
+// Часть меню, которая знает модуль (форма матча), — js/modules/<модуль>/editor.js из реестра.
+import { loadModuleEditor } from "../../modules/registry.js";
 
 const $ = (id) => document.getElementById(id);
-
-/** Часть меню, которая знает модуль (форма матча), — js/modules/<модуль>/editor.js. */
-const MODULE_FORMS = {
-  bees: () => import("../../modules/bees/editor.js"),
-};
 
 function fmtSize(bytes) {
   return bytes > 1e6 ? `${(bytes / 1e6).toFixed(1)} МБ` : `${Math.max(1, Math.round(bytes / 1e3))} КБ`;
@@ -96,7 +93,7 @@ export class Lobby {
   async _initForm() {
     if (this.panel) return;
     try {
-      const [mod, profiles] = await Promise.all([MODULE_FORMS.bees(), api.profiles()]);
+      const [mod, profiles] = await Promise.all([loadModuleEditor(), api.profiles()]);
       this.mod = mod;
       this.panel = new mod.MatchPanel($("lobby-form"), {
         profiles, prefix: "lf", lockFirst: false, randomSeed: true, storageKey: "swarmlab.lobby.match",

@@ -23,6 +23,7 @@ import yaml
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
 
 from swarmlab.core.clock import Rates
+from swarmlab.core.module import default_module
 
 #: Ключи файла матча, которые принадлежат ядру, а не модулю.
 CORE_KEYS = frozenset(
@@ -77,7 +78,7 @@ class MatchConfig(BaseModel):
 
     model_config = ConfigDict(extra="forbid", frozen=True)
 
-    module: str = "bees"
+    module: str
     seed: int = Field(ge=0)
     profile: str = CUSTOM_PROFILE
     duration_s: float = Field(gt=0)
@@ -151,7 +152,12 @@ def load_match(
     for text in cli_overrides:
         match = _apply_cli_override(match, parse_override(text))
 
-    module = match.get("module", "bees")
+    module = match.get("module")
+    if not module:
+        try:
+            module = default_module()
+        except LookupError as e:
+            raise ConfigError(f"{match_path.name}: нет ключа `module:`. {e}") from None
     profile = match.get("profile", CUSTOM_PROFILE)
 
     defaults = load_yaml(configs / module / "defaults.yaml")
