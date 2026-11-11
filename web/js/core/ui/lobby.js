@@ -1,9 +1,12 @@
 // Стартовое окно: матч из ульев с примерами и проектами (M7c), проекты .swarm, серии матчей,
 // матч из YAML-файла, идущие матчи, реплеи с сервера и с диска.
+// Портал (M9a): «Мои проекты» (свои скрипты и загруженные проекты), «Мои реплеи», профиль;
+// серий нет.
 
 import { api } from "../api.js";
 import { parseProject, ProjectError } from "../project.js";
 import { confirmForeignCode } from "../trust.js";
+import { projectButtons, renderMyReplays, renderMyScripts } from "./account.js";
 import { ask, askSeries } from "./dialog.js";
 import { renderSeriesList } from "./series.js";
 // Часть меню, которая знает модуль (форма матча), — js/modules/<модуль>/editor.js из реестра.
@@ -44,6 +47,7 @@ export class Lobby {
     this.configs = [];
     this.projects = [];
     this.panel = null;
+    this.me = null; // профиль на портале; null — локальный режим
     $("lobby-start").addEventListener("click", () => this._start());
     $("lobby-match").addEventListener("change", () => this._describe());
     $("lobby-watch").addEventListener("click", () => this._watch());
@@ -60,11 +64,22 @@ export class Lobby {
     });
   }
 
+  /** Портал: профиль вошедшего (`null` — локальный режим или выход). */
+  setPortal(me) {
+    this.me = me;
+    document.body.classList.toggle("portal", !!me);
+    $("lobby-user").hidden = !me;
+    $("lobby-user-email").textContent = me ? me.email : "";
+    $("lobby-projects-title").textContent = me ? "Мои проекты" : "Проекты";
+    $("lobby-replays-title").textContent = me ? "Мои реплеи" : "Реплеи";
+    $("lobby-replays-note").hidden = !me;
+  }
+
   async show() {
     this.el.hidden = false;
     this.error(null);
-    await Promise.all([this._loadConfigs(), this._loadLive(), this._loadReplays(), this._loadSeries(),
-      this._initForm().then(() => this._loadProjects())]);
+    await Promise.all([this._loadConfigs(), this._loadLive(), this._loadReplays(),
+      this.me ? null : this._loadSeries(), this._initForm().then(() => this._loadProjects())]);
   }
 
   hide() {
@@ -114,6 +129,8 @@ export class Lobby {
       return;
     }
     this.panel?.setSources(this.mod.lobbySources(scripts, this.projects));
+    const mine = { refresh: () => this._loadProjects(), error: (t) => this.error(t) };
+    if (this.me) renderMyScripts($("lobby-scripts"), scripts, { ...mine, openInEditor: (n) => this.h.openInEditor(n) });
     box.innerHTML = this.projects.length ? ""
       : '<p class="muted small">Загруженных проектов нет. Проект — файл .swarm: «⬇ Экспорт проекта» в редакторе.</p>';
     for (const p of this.projects) {
@@ -130,6 +147,7 @@ export class Lobby {
       btn.title = "Копия проекта станет вашим скриптом в редакторе (с блоками)";
       btn.onclick = () => this._toEditor(p.name);
       row.appendChild(btn);
+      if (this.me) row.append(...projectButtons(p, mine));
       box.appendChild(row);
     }
   }
@@ -269,10 +287,19 @@ export class Lobby {
   async _loadReplays() {
     const box = $("lobby-replays");
     let list = [];
+    let me = null;
     try {
-      list = await api.replays();
+      [list, me] = await Promise.all([api.replays(), this.me ? api.me() : null]);
     } catch {
       box.innerHTML = `<p class="muted small">Список реплеев недоступен.</p>`;
+      return;
+    }
+    if (me) {
+      renderMyReplays(box, $("lobby-replays-note"), list, me.usage, {
+        open: (id, name) => this.h.openReplay(id, name),
+        refresh: () => this._loadReplays(),
+        error: (t) => this.error(t),
+      });
       return;
     }
     box.innerHTML = list.length ? "" : `<p class="muted small">Реплеев пока нет — запустите матч.</p>`;

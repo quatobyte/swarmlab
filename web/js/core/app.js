@@ -1,10 +1,12 @@
 // Точка входа вьюера: лобби → источник кадров (живой матч или реплей) → вьюер модуля.
 // Живой режим и реплей рисуются одним кодом: вьюер получает header и sample() от источника.
+// Портал (M9a): сначала `GET /api/me` — 200 вошли, 401 экран входа, 404 локальный режим.
 
-import { api } from "./api.js";
+import { api, setCsrf } from "./api.js";
 import { LiveSource } from "./live.js";
 import { ReplaySource } from "./replay.js";
 import { QUALITY, QUALITY_ORDER, Stage, saveQuality } from "./stage.js";
+import { AuthScreen, showProfile } from "./ui/account.js";
 import { Editor } from "./ui/editor.js";
 import { FpsMeter, isTyping } from "./ui/fps.js";
 import { Lobby, STATE_RU, fmtTime } from "./ui/lobby.js";
@@ -118,6 +120,7 @@ class Session {
     if (this.source.kind === "live" && footer.replay) {
       const id = footer.replay.replace(/\.swr$/, "");
       actions.push(["Смотреть реплей", () => openReplay(id, footer.replay)]);
+      if (portalUser) actions.push(["📌 Сохранить реплей", () => pinReplay(id)]);
     }
     if (this.source.kind === "replay") actions.push(["Сначала", () => { hideBanner(); this.endShown = false; this.source.seek(0); this.source.resume(); }]);
     actions.push(["Новый матч", toLobby]);
@@ -271,6 +274,17 @@ function showBanner(text, actions = []) {
 
 function hideBanner() {
   $("banner").hidden = true;
+}
+
+/** Портал: закрепить реплей только что закончившегося матча. */
+async function pinReplay(id) {
+  try {
+    await api.pinReplay(id, true);
+    showBanner(`Реплей сохранён — он в «Моих реплеях», пока вы его не удалите.`,
+      [["Новый матч", toLobby], ["Закрыть", hideBanner]]);
+  } catch (e) {
+    showBanner(`Не сохранён: ${e.message}`, [["Мои реплеи", toLobby], ["Закрыть", hideBanner]]);
+  }
 }
 
 function showLoading(text) {
@@ -442,5 +456,66 @@ function route() {
     );
   } else toLobby();
 }
-window.addEventListener("hashchange", route);
-route();
+window.addEventListener("hashchange", () => {
+  if (!auth.visible) route();
+});
+
+// ------------------------------------------------------------------ портал (M9a)
+
+const auth = new AuthScreen();
+let portalUser = null;
+
+function signedIn(me) {
+  portalUser = me;
+  setCsrf(me.csrf);
+  lobby.setPortal(me);
+}
+
+/** Выйти на экран входа: закрыть матч, редактор и меню. */
+async function toAuth(message = "") {
+  portalUser = null;
+  setCsrf(null);
+  lobby.setPortal(null);
+  document.body.classList.add("portal");
+  editor.close();
+  seriesView.hide();
+  session?.close();
+  session = null;
+  hideBanner();
+  hideLoading();
+  $("hud").hidden = true;
+  lobby.hide();
+  history.replaceState(null, "", location.pathname);
+  signedIn(await auth.show(message));
+  route();
+}
+
+$("lobby-logout").onclick = async () => {
+  try {
+    await api.logout();
+  } catch {
+    /* сессия уже кончилась — всё равно на экран входа */
+  }
+  toAuth("Вы вышли.");
+};
+$("lobby-profile").onclick = () => showProfile(portalUser, {
+  onLogout: () => $("lobby-logout").onclick(),
+  onDeleted: () => toAuth("Аккаунт удалён вместе со всеми данными."),
+});
+window.addEventListener("swarmlab:unauthorized", () => {
+  if (portalUser && !auth.visible) toAuth("Вход истёк — войдите снова.");
+});
+
+async function boot() {
+  try {
+    signedIn(await api.me());
+  } catch (e) {
+    if (e.status === 401) {
+      toAuth();
+      return;
+    }
+    // 404 — локальный режим: без входа, как раньше.
+  }
+  route();
+}
+boot();

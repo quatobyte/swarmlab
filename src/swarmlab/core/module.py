@@ -8,6 +8,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from dataclasses import dataclass, field
 from importlib.metadata import entry_points
 from pathlib import Path
@@ -36,6 +37,24 @@ class TeamSpec:
     color: str | None = None
     #: Правила матча для кода игрока (уходят в `hello.options` раннера).
     options: dict[str, Any] = field(default_factory=dict)
+
+
+class ScriptAccessError(PermissionError):
+    """Код команды лежит вне разрешённых папок (`check_team_scripts`)."""
+
+
+def check_team_scripts(teams: Sequence[TeamSpec], allowed: Sequence[Path]) -> None:
+    """Код каждой команды — внутри одной из папок `allowed` (относительный путь — от текущей
+    папки, как у раннера). Иначе `PermissionError`: на портале матч не возьмёт чужой файл,
+    даже если путь подставлен в переопределения конфига."""
+    roots = [Path(a).resolve() for a in allowed]
+    for t in teams:
+        if t.script is None:
+            continue
+        path = Path(t.script).resolve()
+        if not any(path.is_relative_to(r) for r in roots):
+            raise ScriptAccessError(f"Код улья {t.name} недоступен: {Path(t.script).name} — "
+                                  "не ваш скрипт и не общий пример")
 
 
 @dataclass

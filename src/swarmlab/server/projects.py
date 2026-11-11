@@ -210,6 +210,17 @@ class ProjectStore:
         saved = self.scripts.write(candidate, project["code"], blocks)
         return {"name": candidate, "project": project["name"], "script": saved}
 
+    def delete(self, name: str) -> None:
+        """Удалить загруженный проект: `.swarm`, код и блоки (нет — 404)."""
+        stem = name[: -len(PROJECT_SUFFIX)] if name.endswith(PROJECT_SUFFIX) else name
+        swarm = self.path(stem, PROJECT_SUFFIX)
+        if not swarm.is_file():
+            raise ScriptError(404, f"Нет проекта {name}")
+        swarm.unlink()  # первым: без .swarm проект уже не считается загруженным
+        py = self.path(stem)
+        py.with_name(stem + BLOCKS_SUFFIX).unlink(missing_ok=True)
+        py.unlink(missing_ok=True)
+
     def check_file(self, name: str) -> tuple[Path, list[SyntaxProblem]]:
         """Синтаксис проекта перед матчем (код не исполняется)."""
         path = self.path(name)

@@ -111,8 +111,8 @@
         <button class="btn" id="match-stop" disabled>■ Стоп</button>
       </div>
       <div class="match-actions">
-        <button class="btn" id="match-series" title="Тот же матч на разных seed подряд: таблица и реплеи">Серия…</button>
-        <button class="btn" id="match-series-table" hidden title="Открыть таблицу последней серии">📊 Таблица</button>
+        <button class="btn no-portal" id="match-series" title="Тот же матч на разных seed подряд: таблица и реплеи">Серия…</button>
+        <button class="btn no-portal" id="match-series-table" hidden title="Открыть таблицу последней серии">📊 Таблица</button>
       </div>
       <p class="error small" id="match-error" hidden></p>
     </section>
@@ -126,27 +126,53 @@
     <div class="lobby help" id="help-body"></div>
   </div>
 
+  <div id="auth" class="overlay" hidden>
+    <div class="lobby auth">
+      <h1>SwarmLab <small>портал</small></h1>
+      <div class="auth-tabs">
+        <button class="ed-tab active" id="auth-tab-login" type="button">Вход</button>
+        <button class="ed-tab" id="auth-tab-register" type="button">Регистрация</button>
+      </div>
+      <form class="form auth-form" id="auth-form">
+        <label>Почта <input type="email" id="auth-email" autocomplete="username" required></label>
+        <label>Пароль <input type="password" id="auth-password" autocomplete="current-password" required></label>
+        <label id="auth-repeat" hidden>Пароль ещё раз <input type="password" id="auth-password2" autocomplete="new-password"></label>
+        <button class="btn primary" id="auth-submit" type="submit">Войти</button>
+      </form>
+      <p class="small error" id="auth-error" hidden></p>
+      <p class="small muted" id="auth-note"></p>
+    </div>
+  </div>
+
   <div id="lobby" class="overlay">
     <div class="lobby">
-      <h1>SwarmLab <small>рой пчёл</small></h1>
+      <h1>SwarmLab <small>рой пчёл</small>
+        <span class="user-bar" id="lobby-user" hidden>
+          <span class="muted small" id="lobby-user-email"></span>
+          <button class="btn small" id="lobby-profile" title="Пароль, архив проектов, удаление аккаунта">Профиль</button>
+          <button class="btn small" id="lobby-logout">Выйти</button>
+        </span>
+      </h1>
       <section>
         <h2>Матч: рои в ульях</h2>
         <div class="match-form lobby-form" id="lobby-form"><p class="muted small">Загрузка…</p></div>
         <div class="match-actions lobby-actions">
           <button class="btn primary" id="lobby-watch" title="Живой матч в 3D">▶ Смотреть матч</button>
-          <button class="btn" id="lobby-series" title="Тот же матч на разных seed подряд: таблица и реплеи">Серия…</button>
+          <button class="btn no-portal" id="lobby-series" title="Тот же матч на разных seed подряд: таблица и реплеи">Серия…</button>
         </div>
         <p class="small"><button class="btn" id="lobby-editor">✎ Редактор кода</button>
           <span class="muted">— написать свой рой и сразу посмотреть, как он летает</span></p>
       </section>
       <section>
-        <h2>Проекты</h2>
+        <h2 id="lobby-projects-title">Проекты</h2>
+        <div class="list portal-only" id="lobby-scripts"></div>
+        <h3 class="small muted portal-only">Загруженные проекты .swarm</h3>
         <div class="list" id="lobby-projects"><p class="muted small">Загрузка…</p></div>
         <label class="btn file">📂 Загрузить проект .swarm…<input type="file" id="lobby-project-file" accept=".swarm" hidden></label>
         <span class="muted small">или перетащите файл .swarm в окно</span>
         <p class="small" id="lobby-project-msg" hidden></p>
       </section>
-      <section>
+      <section class="no-portal">
         <h2>Серии матчей</h2>
         <div class="list" id="lobby-series-list"><p class="muted small">Загрузка…</p></div>
       </section>
@@ -170,7 +196,8 @@
         <div class="list" id="lobby-live"></div>
       </section>
       <section>
-        <h2>Реплеи</h2>
+        <h2 id="lobby-replays-title">Реплеи</h2>
+        <p class="small muted" id="lobby-replays-note" hidden></p>
         <div class="list" id="lobby-replays"><p class="muted small">Загрузка…</p></div>
         <label class="btn file">Открыть файл .swr…<input type="file" id="lobby-file" accept=".swr" hidden></label>
         <span class="muted small">или перетащите файл в окно</span>
