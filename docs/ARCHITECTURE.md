@@ -30,6 +30,12 @@
 
 ## 2. Структура репозитория
 
+**Ветки (DECISIONS №98).** `master` — ядро и общие документы; `bees`, `city`, `quarry` — ядро + модуль. Ядро правится только в `master` и вливается в ветки модулей (`git merge master`), обратно — никогда. В `master` из дерева ниже есть только общее: `src/swarmlab/{core,runner,server,cli.py}`, `web/js/core/`, `web/vendor/`, `web/js/modules/registry.js` (пустой), `tests/core/`, `tests/web/test_project.py`, общие документы. Всё, что названо ниже по имени модуля (`bees/`, `configs/`, `examples/`, `tools/`, `prompts/`, `BEES_SPEC`, `PLAYER_API`, `CHEATSHEET`, `DEMO`), — в ветке `bees`.
+
+Как ядро находит модуль без имени в коде:
+- Python — entry points `swarmlab.modules` и `swarmlab.agent_hosts` в `pyproject.toml` ветки; `core.module.default_module()` — единственный установленный модуль (файл матча без `module:`, папка скриптов редактора `examples/<модуль>`);
+- браузер — `web/js/modules/registry.js` ветки: `{<модуль>: {viewer, editor}}`; в `master` пусто, лобби пишет «в этой ветке нет модуля».
+
 ```
 swarmlab/
   CLAUDE.md  README.md  pyproject.toml
