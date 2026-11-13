@@ -147,18 +147,24 @@ def default_jobs() -> int:
 def play_match(job: dict[str, Any], on_ready: Callable[[], None] | None = None) -> dict[str, Any]:
     """Матч headless → реплей + счёт + статистика раннеров (в процессе матча серии).
 
-    `job`: `{match, configs?, overrides[], replay, log_dir?}`; seed — среди `overrides`.
-    `on_ready` — вызывается, когда мир собран и раннеры запущены.
+    `job`: `{match, configs?, overrides[], replay, log_dir?, script_dirs?, runner_launch?}`;
+    seed — среди `overrides`; `script_dirs` и `runner_launch` — портал (откуда брать код
+    ульев, префикс запуска раннеров). `on_ready` — вызывается, когда мир собран и раннеры
+    запущены.
     """
     from swarmlab.core.config import load_match
     from swarmlab.core.module import Replayable
     from swarmlab.core.replay import ReplayWriter, make_header, score_dict
+    from swarmlab.core.runner_host import RunnerLaunch
     from swarmlab.core.sim import Simulation
 
     cfg = load_match(job["match"], configs_dir=job.get("configs"),
                      cli_overrides=list(job.get("overrides") or []))
     log_dir = Path(job["log_dir"]) if job.get("log_dir") else None
-    with Simulation(cfg, log_dir=log_dir) as sim:
+    dirs = job.get("script_dirs")
+    with Simulation(cfg, log_dir=log_dir,
+                    script_dirs=[Path(d) for d in dirs] if dirs else None,
+                    launch=RunnerLaunch.from_message(job.get("runner_launch"))) as sim:
         if not isinstance(sim.module, Replayable):
             raise TypeError(f"Модуль {cfg.module} не пишет реплей (нет Replayable)")
         writer = ReplayWriter(job["replay"], make_header(cfg, sim.teams, sim.module.scene()))
@@ -231,6 +237,9 @@ class SeriesSpec:
     configs: Path | None = None
     team: int | None = None
     name: str | None = None
+    #: Портал: откуда разрешено брать код ульев и префикс запуска раннеров (песочница).
+    script_dirs: list[Path] | None = None
+    runner_prefix: list[str] = field(default_factory=list)
 
 
 @dataclass
@@ -267,7 +276,12 @@ class Series:
     def _prepare(self) -> dict[str, Any]:
         """Конфиг первого матча, ульи (скрипты и sha256), колонки таблицы модуля."""
         from swarmlab.core.config import load_match
-        from swarmlab.core.module import ScoreColumns, load_module
+        from swarmlab.core.module import (
+            ScoreColumns,
+            ScriptAccessError,
+            check_team_scripts,
+            load_module,
+        )
         from swarmlab.core.replay import file_sha256
         from swarmlab.core.rng import RngRegistry
 
@@ -277,6 +291,11 @@ class Series:
         module = load_module(cfg.module)
         module.build(cfg, RngRegistry(cfg.seed))  # ульи и скрипты; раннеры не запускаются
         teams = module.agent_teams()
+        if s.script_dirs is not None:  # портал: чужой код в серии не запускается
+            try:
+                check_team_scripts(teams, s.script_dirs)
+            except ScriptAccessError as e:
+                raise SeriesError(str(e)) from e
         columns: list[Column] = []
         if isinstance(module, ScoreColumns):
             columns = [Column(c.key, c.title, c.worst) for c in module.score_columns()]
@@ -350,6 +369,10 @@ class Series:
                "configs": str(self.spec.configs) if self.spec.configs else None,
                "overrides": [*self.spec.overrides, f"seed={seed}"],
                "replay": str(replay), "log_dir": str(logs)}
+        if self.spec.script_dirs is not None:
+            job["script_dirs"] = [str(d) for d in self.spec.script_dirs]
+        if self.spec.runner_prefix:
+            job["runner_launch"] = {"prefix": list(self.spec.runner_prefix)}
         env = dict(os.environ)
         env.update(PYTHONHASHSEED="0", PYTHONIOENCODING="utf-8", PYTHONUNBUFFERED="1")
         flags = getattr(subprocess, "CREATE_NO_WINDOW", 0) if sys.platform == "win32" else 0

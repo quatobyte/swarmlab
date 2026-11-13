@@ -101,6 +101,8 @@ def check_syntax(text: str, filename: str = "<скрипт>") -> list[SyntaxProb
 
 def is_readonly(name: str) -> bool:
     """Справочные скрипты, которые редактор не перезаписывает."""
+    # На Windows смена регистра имени не меняет файл и не должна снимать защиту.
+    name = name.lower()
     return name == "template.py" or name.startswith("example_")
 
 

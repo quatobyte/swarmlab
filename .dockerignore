@@ -1,0 +1,22 @@
+# В образ не попадают окружения, кэши, данные и результаты прогонов (Dockerfile: COPY . /app).
+.git
+.venv
+venv
+**/__pycache__
+**/*.py[cod]
+*.egg-info
+.pytest_cache
+.ruff_cache
+.mypy_cache
+build
+dist
+data
+replays
+projects
+runs
+logs
+*.swr
+.env
+.env.*
+.vscode
+.idea

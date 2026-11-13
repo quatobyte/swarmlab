@@ -24,7 +24,7 @@ function fmtTime(s) {
 }
 
 const STATE_RU = {
-  starting: "запускается", running: "идёт", paused: "пауза",
+  queued: "в очереди", starting: "запускается", running: "идёт", paused: "пауза",
   finished: "закончен", stopped: "остановлен", error: "ошибка",
 };
 
@@ -181,7 +181,7 @@ export class Lobby {
   }
 
   async _liveOk() {
-    const live = (await api.matches()).filter((m) => ["starting", "running", "paused"].includes(m.state));
+    const live = (await api.matches()).filter((m) => ["queued", "starting", "running", "paused"].includes(m.state));
     return !live.length || confirm(`Сейчас идёт матч ${live[0].match}. Остановить его и запустить новый?`);
   }
 
@@ -273,8 +273,9 @@ export class Lobby {
       row.className = "row";
       row.innerHTML = `<span class="name"></span><span class="muted small"></span>`;
       row.querySelector(".name").textContent = `${m.match} · seed ${m.seed}`;
-      row.querySelector(".muted").textContent =
-        `${STATE_RU[m.state] || m.state}, ${fmtTime(m.time)} из ${fmtTime(m.duration_s)}`;
+      row.querySelector(".muted").textContent = m.state === "queued"
+        ? `в очереди: №${m.queue} — начнётся сам`
+        : `${STATE_RU[m.state] || m.state}, ${fmtTime(m.time)} из ${fmtTime(m.duration_s)}`;
       const btn = document.createElement("button");
       btn.className = "btn primary";
       btn.textContent = "Смотреть";

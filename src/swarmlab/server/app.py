@@ -31,8 +31,11 @@ WS:
                                    клиент → JSON: pause, resume, speed {value}, stop
 
 Публичный режим (`ServerConfig.public`, `swarmlab serve --public`) — `server/public.py`:
-вход и профиль, свои скрипты, проекты, матчи и реплеи у каждого пользователя (чужое — 404),
-серии выключены (403). Без него всё работает как выше.
+вход и профиль, свои скрипты, проекты, матчи, серии и реплеи у каждого пользователя (чужое —
+404). Лимиты (M9b, DECISIONS №94, числа — `public.yaml`): матчей на пользователя и на сервер
+(лишние — в очереди с номером, `state: queued`, `queue`), разрешённые профили, остановка без
+зрителей, серии `n` / `jobs` / одна на сервер; раннеры — с префиксом-песочницей (№93).
+Без него всё работает как выше.
 """
 
 from __future__ import annotations
@@ -49,6 +52,7 @@ import struct
 import subprocess
 import sys
 import threading
+import time
 from collections.abc import AsyncIterator, Callable
 from dataclasses import dataclass, field
 from datetime import datetime
@@ -65,9 +69,9 @@ from swarmlab.core import series as sr
 from swarmlab.core.config import ConfigError, load_match, load_yaml
 from swarmlab.core.module import default_module
 from swarmlab.core.protocol import encode
-from swarmlab.server.accounts import PublicSettings
+from swarmlab.server.accounts import MatchLimits, PublicSettings, SeriesLimits
 from swarmlab.server.projects import ProjectStore
-from swarmlab.server.public import SERIES_OFF, Portal, PortalGuard, add_routes, current_user
+from swarmlab.server.public import Portal, PortalGuard, add_routes, current_user
 from swarmlab.server.scripts import ScriptError, ScriptStore, check_syntax
 from swarmlab.server.storage import UserSpace
 
@@ -87,8 +91,14 @@ _KEEP_FINISHED = 20
 #: На остановку воркера после `stop`, с; потом `kill`.
 _STOP_TIMEOUT_S = 8.0
 _TERMINAL = ("finished", "stopped", "error")
+#: Матч ждёт места в очереди портала (процесса ещё нет).
+QUEUED = "queued"
 #: Сколько пакетов `log` помнит матч (их получает зритель, подключившийся позже).
 _KEEP_LOG_PACKETS = 1000
+#: Команда процесса живого матча после интерпретатора (тесты подменяют воркер).
+WORKER_ARGS = ["-m", "swarmlab.server.worker"]
+#: Ключи конфига, которые на портале нельзя менять переопределениями (бюджет, частоты, модуль).
+_LOCKED_ROOTS = ("runner", "timing", "module")
 
 
 @dataclass
@@ -190,7 +200,17 @@ class MatchProcess:
     owner: int | None = None
     #: Вызывается в event loop, когда процесс матча вышел (реплей дописан и закрыт).
     on_exit: Callable[[MatchProcess], None] | None = None
+    #: Портал: снять матч из очереди (`stop` до запуска процесса).
+    on_cancel: Callable[[MatchProcess], None] | None = None
     state: str = "starting"
+    #: Номер в очереди портала (1 — следующий); `None` — не в очереди.
+    queue: int | None = None
+    #: Портал: с какого момента у матча нет зрителей (часы менеджера); `None` — зрители есть.
+    idle_since: float | None = None
+    #: Процесс матча вышел.
+    exited: bool = False
+    #: Матчу уже послан `stop`.
+    stopping: bool = False
     time: float = 0.0
     duration_s: float | None = None
     speed: float = 1.0
@@ -216,7 +236,7 @@ class MatchProcess:
         env.update(PYTHONHASHSEED="0", PYTHONIOENCODING="utf-8", PYTHONUNBUFFERED="1")
         flags = getattr(subprocess, "CREATE_NO_WINDOW", 0) if sys.platform == "win32" else 0
         self.proc = subprocess.Popen(
-            [sys.executable, "-m", "swarmlab.server.worker"],
+            [sys.executable, *WORKER_ARGS],
             stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
             cwd=str(cwd), env=env, creationflags=flags,
         )
@@ -240,16 +260,36 @@ class MatchProcess:
     def control(self, msg: dict[str, Any]) -> None:
         """Команда зрителя → воркер (только известные типы)."""
         t = msg.get("t")
-        if t in ("pause", "resume", "stop"):
+        if t == "stop":
+            self.stop()
+        elif t in ("pause", "resume"):
             self.send({"t": t})
         elif t == "speed":
             self.send({"t": "speed", "value": msg.get("value", 1.0)})
 
+    @property
+    def alive(self) -> bool:
+        """Процесс матча запущен и ещё не вышел (занимает место на сервере)."""
+        return self.proc is not None and not self.exited
+
     def stop(self) -> None:
-        if self.state in _TERMINAL:
+        if self.state in _TERMINAL or self.stopping:
             return
+        if self.state == QUEUED:
+            if self.on_cancel is not None:
+                self.on_cancel(self)
+            return
+        self.stopping = True
         self.send({"t": "stop"})
         threading.Thread(target=self._reap, daemon=True).start()
+
+    def set_status(self, state: str, **extra: Any) -> None:
+        """Пакет `status` от сервера (матч в очереди, снят из очереди) — зрителям и в `info`."""
+        msg = {"t": "status", "match_id": self.id, "state": state, "speed": self.speed,
+               "time": self.time, "duration_s": self.duration_s, "rtf": 0.0,
+               "score": self.score, **extra}
+        pkt = msgpack.packb(msg, use_bin_type=True)
+        self._publish(msgpack.unpackb(pkt, raw=False), pkt)
 
     def _reap(self) -> None:
         proc = self.proc
@@ -316,15 +356,11 @@ class MatchProcess:
             sub.push(kind, body)
 
     def _on_exit(self, code: int | None) -> None:
+        self.exited = True
         if self.state not in _TERMINAL:
             tail = "\n".join(self.stderr_tail)
-            self.state = "error"
             self.error = self.error or f"Процесс матча завершился (код {code}).\n{tail}"
-            pkt = msgpack.packb({"t": "status", "match_id": self.id, "state": "error",
-                                 "speed": self.speed, "time": self.time,
-                                 "duration_s": self.duration_s, "rtf": 0.0,
-                                 "score": self.score, "error": self.error}, use_bin_type=True)
-            self._publish(msgpack.unpackb(pkt, raw=False), pkt)
+            self.set_status("error", error=self.error)
         for sub in self.subscribers:
             sub.close()
         if self.on_exit is not None:
@@ -353,11 +389,17 @@ class MatchProcess:
                 "state": self.state, "time": self.time, "duration_s": self.duration_s,
                 "speed": self.speed, "rtf": self.rtf, "score": self.score, "error": self.error,
                 "replay": self.replay.stem if self.footer is not None else None,
-                "viewers": len(self.subscribers)}
+                "viewers": len(self.subscribers), "queue": self.queue}
 
 
 class MatchManager:
-    """Реестр матчей; одновременно идут не больше `max_matches` (новый вытесняет старый)."""
+    """Реестр матчей; одновременно идут не больше `max_matches` (новый вытесняет старый).
+
+    Портал (`limits`, DECISIONS №94): у пользователя не больше `per_user` матчей (новый
+    вытесняет только его старый), на сервере — не больше `total` процессов матчей, остальные
+    ждут в очереди (FIFO; матч, вытеснивший свой же, — первым) и стартуют, когда место
+    освободится. Матч без зрителей `idle_stop_s` секунд останавливается (`check_idle`).
+    """
 
     def __init__(self, cfg: ServerConfig, scripts: ScriptStore, projects: ProjectStore) -> None:
         self.cfg = cfg
@@ -367,9 +409,137 @@ class MatchManager:
         #: Портал: матч начался / процесс матча вышел (реплеи пользователя в базе).
         self.on_start: Callable[[MatchProcess], None] | None = None
         self.on_exit: Callable[[MatchProcess], None] | None = None
+        #: Портал: лимиты матчей; `None` — локальный режим.
+        self.limits: MatchLimits | None = None
+        #: Префикс запуска раннеров (портал: песочница); пусто — как локально.
+        self.runner_prefix: list[str] = []
+        #: Очередь портала: матчи, ждущие места (у каждого — пакет `start` в `_pending`).
+        self.queue: list[MatchProcess] = []
+        self._pending: dict[str, dict[str, Any]] = {}
+        #: Часы простоя без зрителей; тесты подменяют.
+        self.now: Callable[[], float] = time.monotonic
 
     def running(self) -> list[MatchProcess]:
         return [m for m in self.matches.values() if m.state not in _TERMINAL]
+
+    def active(self) -> int:
+        """Сколько процессов матчей сейчас запущено (вытесняемые, пока не вышли, — тоже)."""
+        return sum(1 for m in self.matches.values() if m.alive)
+
+    # ------------------------------------------------------------ лимиты портала
+
+    def check_limits(self, cfg: Any, overrides: list[str]) -> None:
+        """Портал: профиль из разрешённых; ключи профиля, `runner`, `timing` не переопределять."""
+        limits = self.limits
+        if limits is None:
+            return
+        if cfg.profile not in limits.profiles:
+            raise HTTPException(400, f"Профиль {cfg.profile} на портале недоступен — можно: "
+                                     + ", ".join(limits.profiles))
+        locked = self._profile_keys(cfg.profile, cfg.module)
+        for text in overrides:
+            key = text.partition("=")[0].strip()
+            parts = key.split(".")
+            if parts[0] == "overrides":  # `overrides.x=…` — то же, что `x=…`
+                parts = parts[1:]
+            path = ".".join(parts)
+            if not parts or parts[0] in _LOCKED_ROOTS:
+                raise HTTPException(400, f"На портале нельзя менять «{key}»")
+            for leaf in locked:
+                if path == leaf or leaf.startswith(path + ".") or path.startswith(leaf + "."):
+                    raise HTTPException(
+                        400, f"«{key}» задаёт профиль {cfg.profile} — на портале его не меняют")
+
+    def _profile_keys(self, profile: str, module: str) -> set[str]:
+        """Листья раздела модуля в файле профиля (`world.map_size`, …) — пути в `params`."""
+        try:
+            data = load_yaml(self.cfg.configs / "profiles" / f"{profile}.yaml")
+        except ConfigError:
+            return set()
+        out: set[str] = set()
+
+        def walk(node: Any, prefix: str) -> None:
+            if isinstance(node, dict) and node:
+                for k, v in node.items():
+                    walk(v, f"{prefix}.{k}" if prefix else str(k))
+            elif prefix:
+                out.add(prefix)
+
+        walk(data.get(module) or {}, "")
+        return out
+
+    def _spawn(self, m: MatchProcess, start: dict[str, Any]) -> None:
+        if self.on_start is not None and m.owner is not None:
+            self.on_start(m)
+        m.idle_since = self.now()
+        m.spawn(start, cwd=self.cfg.root)
+
+    def _exited(self, m: MatchProcess) -> None:
+        """Процесс матча вышел (event loop): реплей в базу портала, место — очереди."""
+        try:
+            if self.on_exit is not None and m.owner is not None:
+                self.on_exit(m)
+        finally:
+            self.pump()
+
+    def pump(self) -> None:
+        """Запустить ждущие матчи, пока есть место."""
+        if self.limits is None:
+            return
+        while self.queue and self.active() < self.limits.total:
+            m = self.queue.pop(0)
+            m.queue = None
+            start = self._pending.pop(m.id)
+            log.info("матч %s выходит из очереди", m.id)
+            m.set_status("starting")
+            self._spawn(m, start)
+        self._renumber()
+
+    def _renumber(self) -> None:
+        for i, m in enumerate(self.queue, start=1):
+            if m.queue != i:
+                m.queue = i
+                m.set_status(QUEUED, queue=i)
+
+    def _cancel(self, m: MatchProcess) -> None:
+        """Снять матч из очереди: процесса не было, реплея нет."""
+        if m in self.queue:
+            self.queue.remove(m)
+        self._pending.pop(m.id, None)
+        m.queue = None
+        m.set_status("stopped")
+        for sub in m.subscribers:
+            sub.close()
+        log.info("матч %s снят из очереди", m.id)
+        self._renumber()
+
+    def check_idle(self) -> None:
+        """Портал: матч (и место в очереди) без зрителей `idle_stop_s` секунд — остановить."""
+        if self.limits is None:
+            return
+        now = self.now()
+        for m in list(self.matches.values()):
+            if m.state in _TERMINAL or m.stopping:
+                continue
+            if m.subscribers:
+                m.idle_since = None
+            elif m.idle_since is None:
+                m.idle_since = now
+            elif now - m.idle_since >= self.limits.idle_stop_s:
+                log.info("матч %s без зрителей %.0f с — остановка", m.id,
+                         self.limits.idle_stop_s)
+                m.stop()
+
+    async def watch_idle(self) -> None:
+        """Фоновая задача портала: проверка простоя несколько раз за `idle_stop_s`."""
+        assert self.limits is not None
+        period = min(1.0, self.limits.idle_stop_s / 4)
+        while True:
+            await asyncio.sleep(period)
+            try:
+                self.check_idle()
+            except Exception:
+                log.exception("проверка матчей без зрителей")
 
     def match_path(self, name: str) -> Path:
         if not _NAME.match(name):
@@ -424,10 +594,14 @@ class MatchManager:
         if req.seed is not None:
             overrides.append(f"seed={req.seed}")
         cfg = self.load_config(path, overrides)
+        self.check_limits(cfg, overrides)
         owner = space.user_id if space else None
+        per_user = self.limits.per_user if self.limits else self.cfg.max_matches
         running = [m for m in self.running() if m.owner == owner]
-        for old in running[: max(0, len(running) - self.cfg.max_matches + 1)]:
+        evicted = False
+        for old in running[: max(0, len(running) - per_user + 1)]:
             log.info("новый матч вытесняет %s", old.id)
+            evicted = evicted or old.state != QUEUED
             old.stop()
         replays = space.replays if space else self.cfg.replays
         logs = space.logs if space else self.cfg.logs
@@ -435,7 +609,7 @@ class MatchManager:
         m = MatchProcess(id=mid, match=path.stem, seed=cfg.seed,
                          created=datetime.now().isoformat(timespec="seconds"),
                          replay=replays / f"{mid}.swr", loop=asyncio.get_running_loop(),
-                         owner=owner, on_exit=self.on_exit if space else None,
+                         owner=owner, on_exit=self._exited, on_cancel=self._cancel,
                          duration_s=cfg.duration_s, speed=req.speed)
         start: dict[str, Any] = {
             "t": "start", "id": mid, "match": str(path), "configs": str(self.cfg.configs),
@@ -443,16 +617,28 @@ class MatchManager:
             "speed": req.speed}
         if space is not None:
             start["script_dirs"] = [str(d) for d in space.script_dirs]
-            if self.on_start is not None:
-                self.on_start(m)
-        m.spawn(start, cwd=self.cfg.root)
+        if self.runner_prefix:
+            start["runner_launch"] = {"prefix": list(self.runner_prefix)}
         self.matches[mid] = m
+        if self.limits is not None and self.active() >= self.limits.total:
+            # Место освободит вытесненный матч пользователя — его новый матч ждёт первым.
+            if evicted:
+                self.queue.insert(0, m)
+            else:
+                self.queue.append(m)
+            self._pending[mid] = start
+            m.idle_since = self.now()
+            self._renumber()
+            log.info("матч %s в очереди (№%s)", mid, m.queue)
+        else:
+            self._spawn(m, start)
+            log.info("матч %s запущен (%s, seed %s)", mid, path.name, cfg.seed)
         self._forget_old()
-        log.info("матч %s запущен (%s, seed %s)", mid, path.name, cfg.seed)
         return m
 
     def _forget_old(self) -> None:
-        done = [m for m in self.matches.values() if m.state in _TERMINAL]
+        done = [m for m in self.matches.values()
+                if m.state in _TERMINAL and (m.proc is None or m.exited)]
         for m in done[: max(0, len(done) - _KEEP_FINISHED)]:
             if not m.subscribers:
                 del self.matches[m.id]
@@ -478,8 +664,11 @@ class MatchManager:
 
     def shutdown(self) -> None:
         procs = [m.proc for m in self.matches.values() if m.proc and m.proc.poll() is None]
+        self.queue.clear()  # ждущие просто забываются: процессов у них нет
+        self._pending.clear()
         for m in self.matches.values():
-            m.stop()
+            if m.state != QUEUED:
+                m.stop()
         for p in procs:
             try:
                 p.wait(_STOP_TIMEOUT_S)
@@ -512,42 +701,62 @@ class SeriesManager:
     (процесс серии переписывает его после каждого матча). Прогресс клиент узнаёт опросом
     `GET /api/series/{id}` раз в секунду. Остановка — файл `.stop` в папке серии.
     Одновременно идёт одна серия: на слабой машине вторая только замедлила бы обе.
+
+    Портал (`limits`, DECISIONS №94): папки серий — у каждого пользователя свои
+    (`base` — его `series/`), `n ≤ n_max`, `jobs ≤ jobs_max` (иначе 400), серий на сервере —
+    не больше `total` (409); код ульев — только из папок пользователя, раннеры — в песочнице.
     """
 
     def __init__(self, cfg: ServerConfig, matches: MatchManager) -> None:
         self.cfg = cfg
         self.matches = matches
         self.running: dict[str, SeriesProcess] = {}
+        #: Портал: лимиты серий; `None` — локальный режим (одна серия, `jobs` любые).
+        self.limits: SeriesLimits | None = None
 
-    def folder(self, sid: str) -> Path:
+    def folder(self, sid: str, base: Path | None = None) -> Path:
         if not _NAME.match(sid) or sid.startswith("."):
             raise HTTPException(400, f"Недопустимое имя серии: {sid!r}")
-        path = self.cfg.series / sid
+        path = (base or self.cfg.series) / sid
         if not (path / "series.json").is_file():
             raise HTTPException(404, f"Нет серии {sid}")
         return path
 
-    def start(self, req: SeriesRequest) -> dict[str, Any]:
-        if not sr.N_MIN <= req.n <= sr.N_MAX:
-            raise HTTPException(400, f"Матчей в серии — от {sr.N_MIN} до {sr.N_MAX}")
+    def start(self, req: SeriesRequest, space: UserSpace | None = None) -> dict[str, Any]:
+        limits = self.limits
+        n_max = min(sr.N_MAX, limits.n_max) if limits else sr.N_MAX
+        if not sr.N_MIN <= req.n <= n_max:
+            raise HTTPException(400, f"Матчей в серии — от {sr.N_MIN} до {n_max}")
+        if limits and req.jobs is not None and req.jobs > limits.jobs_max:
+            raise HTTPException(400, f"Процессов серии на портале — не больше {limits.jobs_max}")
         busy = [s for s in self.running.values() if s.alive]
-        if busy:
-            raise HTTPException(409, f"Уже идёт серия {busy[0].id} — дождитесь её или остановите")
+        if len(busy) >= (limits.total if limits else 1):
+            # На портале чужую серию не называем.
+            name = "" if space else f" {busy[0].id}"
+            raise HTTPException(409, f"Уже идёт серия{name} — дождитесь её или остановите")
         path = self.matches.match_path(req.match)
-        self.matches.check_scripts(req.scripts, req.projects)
+        self.matches.check_scripts(req.scripts, req.projects, space)
         seed = [f"seed={req.start_seed}"] if req.start_seed is not None else []
-        self.matches.load_config(path, [*req.overrides, *seed])
+        cfg = self.matches.load_config(path, [*req.overrides, *seed])
+        self.matches.check_limits(cfg, list(req.overrides))
+        out = space.series if space else self.cfg.series
         cmd = [sys.executable, "-m", "swarmlab.cli", "series", str(path), "--n", str(req.n),
-               "--out", str(self.cfg.series), "--configs", str(self.cfg.configs),
+               "--out", str(out), "--configs", str(self.cfg.configs),
                "--progress-json"]
         if req.start_seed is not None:
             cmd += ["--seed", str(req.start_seed)]
-        if req.jobs is not None:
-            cmd += ["--jobs", str(req.jobs)]
+        jobs = req.jobs if req.jobs is not None or limits is None else limits.jobs_max
+        if jobs is not None:
+            cmd += ["--jobs", str(jobs)]
         if req.team is not None:
             cmd += ["--team", str(req.team)]
         for o in req.overrides:
             cmd += ["--set", o]
+        if space is not None:
+            for d in space.script_dirs:
+                cmd += ["--script-dir", str(d)]
+        if self.matches.runner_prefix:
+            cmd += ["--runner-prefix-json", json.dumps(self.matches.runner_prefix)]
         env = dict(os.environ)
         env.update(PYTHONHASHSEED="0", PYTHONIOENCODING="utf-8", PYTHONUNBUFFERED="1")
         flags = getattr(subprocess, "CREATE_NO_WINDOW", 0) if sys.platform == "win32" else 0
@@ -568,7 +777,7 @@ class SeriesManager:
         threading.Thread(target=self._drain, args=(sp,), daemon=True,
                          name=f"series-{sp.id}").start()
         log.info("серия %s запущена (%s, %d матчей)", sp.id, path.name, req.n)
-        return self.get(sp.id)
+        return self.get(sp.id, space.series if space else None)
 
     @staticmethod
     def _drain(sp: SeriesProcess) -> None:
@@ -589,6 +798,8 @@ class SeriesManager:
     def _read(self, path: Path) -> dict[str, Any]:
         data = sr.read_series(path / sr.SERIES_FILE)
         sp = self.running.get(data.get("id", path.name))
+        if sp is not None and sp.dir.resolve() != path.resolve():
+            sp = None  # серия с тем же именем у другого пользователя портала
         if data.get("state") == "running" and (sp is None or not sp.alive):
             data["state"] = "interrupted"  # процесс серии умер (или сервер перезапускали)
             if sp is not None and sp.stderr_tail:
@@ -596,14 +807,15 @@ class SeriesManager:
         data["done"] = len(data.get("matches", []))
         return data
 
-    def get(self, sid: str) -> dict[str, Any]:
-        return self._read(self.folder(sid))
+    def get(self, sid: str, base: Path | None = None) -> dict[str, Any]:
+        return self._read(self.folder(sid, base))
 
-    def list(self) -> list[dict[str, Any]]:
-        if not self.cfg.series.is_dir():
+    def list(self, base: Path | None = None) -> list[dict[str, Any]]:
+        base = base or self.cfg.series
+        if not base.is_dir():
             return []
         out = []
-        for path in sorted(self.cfg.series.iterdir(), reverse=True):
+        for path in sorted(base.iterdir(), reverse=True):
             if not (path / "series.json").is_file():
                 continue
             try:
@@ -618,15 +830,30 @@ class SeriesManager:
                           "played": s.get("played")})
         return out
 
-    def stop(self, sid: str) -> dict[str, Any]:
-        path = self.folder(sid)
+    def stop(self, sid: str, base: Path | None = None) -> dict[str, Any]:
+        path = self.folder(sid, base)
         sp = self.running.get(sid)
-        if sp is not None and sp.alive:
+        if sp is not None and sp.alive and sp.dir.resolve() == path.resolve():
             (path / ".stop").write_text("", encoding="utf-8")
         return self._read(path)
 
-    def replay(self, sid: str, seed: int) -> Path:
-        path = self.folder(sid) / f"s{seed}.swr"
+    def stop_under(self, folder: Path, timeout: float = 30) -> None:
+        """Остановить серии, папки которых внутри `folder` (удаление аккаунта), и дождаться."""
+        root = folder.resolve()
+        mine = [sp for sp in self.running.values()
+                if sp.alive and sp.dir.resolve().is_relative_to(root)]
+        for sp in mine:
+            with contextlib.suppress(OSError):
+                (sp.dir / ".stop").write_text("", encoding="utf-8")
+        for sp in mine:
+            try:
+                sp.proc.wait(timeout)
+            except subprocess.TimeoutExpired:
+                sp.proc.kill()
+                sp.proc.wait(5)
+
+    def replay(self, sid: str, seed: int, base: Path | None = None) -> Path:
+        path = self.folder(sid, base) / f"s{seed}.swr"
         data = self._read(path.parent)
         if not path.is_file() or seed not in {m["seed"] for m in data.get("matches", [])}:
             raise HTTPException(404, f"Нет реплея s{seed}.swr в серии {sid}")
@@ -714,12 +941,19 @@ def create_app(cfg: ServerConfig | None = None) -> FastAPI:
         portal.manager = manager
         manager.on_start = portal.on_match_start
         manager.on_exit = portal.on_match_end
+        manager.limits = cfg.public.matches
+        manager.runner_prefix = list(cfg.public.sandbox.runner_prefix)
+        series.limits = cfg.public.series
 
     @contextlib.asynccontextmanager
     async def lifespan(_: FastAPI) -> AsyncIterator[None]:
+        idle: asyncio.Task[None] | None = None
         if portal is not None:
             portal.startup()
+            idle = asyncio.create_task(manager.watch_idle())
         yield
+        if idle is not None:
+            idle.cancel()
         loop = asyncio.get_running_loop()
         await asyncio.gather(loop.run_in_executor(None, manager.shutdown),
                              loop.run_in_executor(None, series.shutdown))
@@ -747,9 +981,9 @@ def create_app(cfg: ServerConfig | None = None) -> FastAPI:
         sp = space(request)
         return sp.projects if sp else projects
 
-    def no_series_on_portal() -> None:
-        if portal is not None:
-            raise HTTPException(403, SERIES_OFF)
+    def series_dir(request: Request) -> Path | None:
+        sp = space(request)
+        return sp.series if sp else None
 
     @app.middleware("http")
     async def revalidate_static(request: Request, call_next: Any) -> Response:
@@ -873,29 +1107,24 @@ def create_app(cfg: ServerConfig | None = None) -> FastAPI:
     # ------------------------------------------------------------ серии (M7c)
 
     @app.get("/api/series")
-    def list_series() -> list[dict[str, Any]]:
-        no_series_on_portal()
-        return series.list()
+    def list_series(request: Request) -> list[dict[str, Any]]:
+        return series.list(series_dir(request))
 
     @app.post("/api/series")
-    def start_series(req: SeriesRequest) -> dict[str, Any]:
-        no_series_on_portal()
-        return series.start(req)
+    def start_series(req: SeriesRequest, request: Request) -> dict[str, Any]:
+        return series.start(req, space(request))
 
     @app.get("/api/series/{sid}")
-    def get_series(sid: str) -> dict[str, Any]:
-        no_series_on_portal()
-        return series.get(sid)
+    def get_series(sid: str, request: Request) -> dict[str, Any]:
+        return series.get(sid, series_dir(request))
 
     @app.post("/api/series/{sid}/stop")
-    def stop_series(sid: str) -> dict[str, Any]:
-        no_series_on_portal()
-        return series.stop(sid)
+    def stop_series(sid: str, request: Request) -> dict[str, Any]:
+        return series.stop(sid, series_dir(request))
 
     @app.get("/api/series/{sid}/replays/{seed}")
-    def series_replay(sid: str, seed: int) -> FileResponse:
-        no_series_on_portal()
-        path = series.replay(sid, seed)
+    def series_replay(sid: str, seed: int, request: Request) -> FileResponse:
+        path = series.replay(sid, seed, series_dir(request))
         return FileResponse(path, media_type="application/octet-stream",
                             filename=f"{sid}-{path.name}")
 

@@ -17,7 +17,7 @@ from swarmlab.core.config import MatchConfig
 from swarmlab.core.module import Frame, Module, check_team_scripts, load_module
 from swarmlab.core.physics import PhysicsBackend
 from swarmlab.core.rng import RngRegistry
-from swarmlab.core.runner_host import RunnerPool
+from swarmlab.core.runner_host import RunnerLaunch, RunnerPool
 
 FrameCallback = Callable[[Frame], None]
 
@@ -45,9 +45,11 @@ class Simulation:
         *,
         log_dir: Path | None = None,
         script_dirs: Sequence[Path] | None = None,
+        launch: RunnerLaunch | None = None,
     ) -> None:
         """`script_dirs` — откуда разрешено брать код команд (портал: папки пользователя и
-        общие примеры); скрипт вне них — `ScriptAccessError` до запуска раннеров."""
+        общие примеры); скрипт вне них — `ScriptAccessError` до запуска раннеров.
+        `launch` — префикс запуска раннеров (портал: песочница, ARCHITECTURE §3.4)."""
         self.cfg = cfg
         self.module = module if module is not None else load_module(cfg.module)
         self.rng = RngRegistry(cfg.seed)
@@ -67,7 +69,8 @@ class Simulation:
         self.runners: RunnerPool | None = None
         if self.teams:
             self.runners = RunnerPool(
-                self.teams, module=cfg.module, seed=cfg.seed, cfg=cfg.runner, log_dir=log_dir
+                self.teams, module=cfg.module, seed=cfg.seed, cfg=cfg.runner, log_dir=log_dir,
+                launch=launch,
             )
             try:
                 self.runners.start()

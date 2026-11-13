@@ -2,6 +2,11 @@
 .venv/
 venv/
 
+# локальные настройки и секреты (DECISIONS №96)
+.env
+.env.*
+!.env.example
+
 # кэши Python и инструментов
 __pycache__/
 *.py[cod]

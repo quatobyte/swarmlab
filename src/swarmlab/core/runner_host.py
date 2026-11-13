@@ -12,6 +12,11 @@
 Часы стены (`time.monotonic`) здесь нужны только для таймаутов и в состояние
 симуляции не попадают. Если раннер не успел, его тик пропускается — это
 единственное место, где реальное время влияет на матч (ARCHITECTURE §3.4).
+
+Запуск (`RunnerLaunch`, M9b): команда — `префикс + [python, -m, swarmlab.runner]`.
+Префикс — из настроек сервера (на портале — песочница); ядро его не разбирает, только
+подставляет `{python}`, `{script}`, `{script_dir}`. Без префикса — как раньше. Окружение
+раннера — только нужные переменные (`runner_env`), секреты сервера в него не попадают.
 """
 
 from __future__ import annotations
@@ -23,7 +28,7 @@ import sys
 import threading
 import time
 from collections import deque
-from collections.abc import Callable, Iterable
+from collections.abc import Callable, Iterable, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from typing import IO, Any
@@ -48,6 +53,60 @@ STARTING, READY, DEAD, DISABLED = "starting", "ready", "dead", "disabled"
 _STOP_WAIT_S = 1.0
 #: Сообщений о превышении бюджета в лог: первые N, потом каждое M-е.
 _BUDGET_LOG_FIRST, _BUDGET_LOG_EVERY = 5, 100
+#: Переменные Windows, без которых не работает сам интерпретатор (сокеты, временные файлы).
+_WINDOWS_ENV = ("SYSTEMROOT", "WINDIR", "TEMP", "TMP")
+
+
+def package_root() -> Path:
+    """Папка, из которой импортируется пакет `swarmlab` (`src/` или `site-packages/`)."""
+    import swarmlab
+
+    return Path(swarmlab.__file__).resolve().parent.parent
+
+
+def runner_env() -> dict[str, str]:
+    """Окружение процесса раннера: только то, что нужно интерпретатору и протоколу.
+
+    Окружение сервера (пароли, ключи из `.env`) не копируется: код игрока его не видит.
+    """
+    env = {"PYTHONHASHSEED": "0", "PYTHONIOENCODING": "utf-8", "PYTHONUNBUFFERED": "1",
+           "PYTHONPATH": str(package_root())}
+    if sys.platform == "win32":
+        env.update({k: os.environ[k] for k in _WINDOWS_ENV if k in os.environ})
+    return env
+
+
+@dataclass(frozen=True)
+class RunnerLaunch:
+    """Как запускать процесс раннера: префикс команды (обёртка-песочница) перед интерпретатором.
+
+    В элементах префикса подставляются `{python}` (интерпретатор), `{script}` (абсолютный
+    путь к скрипту команды) и `{script_dir}` (его папка). Пустой префикс — запуск как раньше.
+    """
+
+    prefix: tuple[str, ...] = ()
+
+    def command(self, python: str, script: Path,
+                args: Sequence[str] = ("-m", "swarmlab.runner")) -> list[str]:
+        """`префикс + [python, *args]`; `args` — по умолчанию запуск раннера."""
+        script = Path(script).resolve()
+        subs = {"{python}": python, "{script}": str(script), "{script_dir}": str(script.parent)}
+
+        def sub(arg: str) -> str:
+            for key, value in subs.items():
+                arg = arg.replace(key, value)
+            return arg
+
+        return [sub(a) for a in self.prefix] + [python, *args]
+
+    def to_message(self) -> dict[str, Any]:
+        return {"prefix": list(self.prefix)}
+
+    @classmethod
+    def from_message(cls, data: dict[str, Any] | None) -> RunnerLaunch | None:
+        """Из пакета `start` воркера / задания серии; нет или пустой префикс — `None`."""
+        prefix = tuple(str(a) for a in (data or {}).get("prefix") or ())
+        return cls(prefix) if prefix else None
 
 
 @dataclass
@@ -130,6 +189,7 @@ class ProcessLink:
         log: TeamLog,
         clock: Clock = time.monotonic,
         python: str = sys.executable,
+        launch: RunnerLaunch | None = None,
     ) -> None:
         if spec.script is None:
             raise ValueError(f"У команды {spec.name} нет скрипта")
@@ -141,6 +201,7 @@ class ProcessLink:
         self.log = log
         self.clock = clock
         self.python = python
+        self.launch = launch
         self.state = DEAD
         self.busy = False  # ждём ответа на отправленный пакет
         self.started_at = 0.0
@@ -162,15 +223,21 @@ class ProcessLink:
 
     def start(self) -> None:
         """Запустить процесс раннера и поставить в очередь `hello`."""
-        env = dict(os.environ)
-        env.update(PYTHONHASHSEED="0", PYTHONIOENCODING="utf-8", PYTHONUNBUFFERED="1")
+        assert self.spec.script is not None
+        script = self.spec.script
+        if self.launch is not None:
+            # В песочнице скрипт смонтирован по своему абсолютному пути — тот же путь в hello.
+            script = Path(script).resolve()
+            cmd = self.launch.command(self.python, script)
+        else:
+            cmd = [self.python, "-m", "swarmlab.runner"]
         flags = getattr(subprocess, "CREATE_NO_WINDOW", 0) if sys.platform == "win32" else 0
         self._proc = proc = subprocess.Popen(
-            [self.python, "-m", "swarmlab.runner"],
+            cmd,
             stdin=subprocess.PIPE,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
-            env=env,
+            env=runner_env(),
             creationflags=flags,
         )
         # Новые очереди на каждый запуск: потоки прошлого процесса пишут в старые.
@@ -193,7 +260,7 @@ class ProcessLink:
                     "v": PROTOCOL_VERSION,
                     "module": self.module,
                     "team": self.team,
-                    "script": str(self.spec.script),
+                    "script": str(script),
                     "seed": self.seed,
                     "budget_ms": self.cfg.budget_ms,
                     "options": self.options,
@@ -362,6 +429,7 @@ class RunnerPool:
         options: dict[str, Any] | None = None,
         log_dir: Path | None = None,
         clock: Clock = time.monotonic,
+        launch: RunnerLaunch | None = None,
     ) -> None:
         self.cfg = cfg
         self.clock = clock
@@ -380,6 +448,7 @@ class RunnerPool:
                 options={**(options or {}), **spec.options},
                 log=log,
                 clock=clock,
+                launch=launch,
             )
 
     @property

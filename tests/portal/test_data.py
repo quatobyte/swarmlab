@@ -294,10 +294,3 @@ def test_change_and_delete_account_need_current_password_then_nothing_left(porta
     # id не переиспользуется: новый аккаунт не получит старую папку.
     c = portal.user("a@b.ru")
     assert _uid(portal, c) != uid
-
-
-def test_series_off_on_portal_403(portal):
-    a = portal.user("a@b.ru")
-    code, data = a.json("GET", "/api/series")
-    assert code == 403 and "Серии" in data["detail"]
-    assert a.json("POST", "/api/series", {"match": "demo.yaml", "n": 2})[0] == 403

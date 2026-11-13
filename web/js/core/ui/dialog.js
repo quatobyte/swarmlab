@@ -54,31 +54,35 @@ export async function ask(text, { title = "", ok = "Да", cancel = "Отмен�
 
 /** Параметры серии: `{n, start_seed, jobs}` или `null` (отмена). */
 export function askSeries({ n = 10, seed = null, note = "" } = {}) {
+  // Портал (DECISIONS №94): не больше 10 матчей, по одному; реплеи — в аккаунте.
+  const portal = document.body.classList.contains("portal");
+  const nMax = portal ? 10 : 50;
+  const where = portal ? "в вашем аккаунте" : "в <code>replays/series/</code>";
   return modal((box, done) => {
     box.innerHTML = `
       <h3>Серия матчей</h3>
       <p class="modal-text small muted">Один и тот же матч на разных условиях: seed идут подряд от начального.
-        Все реплеи и таблица сохраняются в <code>replays/series/</code>.${note ? ` ${note}` : ""}</p>
+        Все реплеи и таблица сохраняются ${where}.${note ? ` ${note}` : ""}</p>
       <div class="match-form">
         <label for="sd-n">Матчей</label>
-        <input id="sd-n" type="number" min="2" max="50" step="1" autofocus>
+        <input id="sd-n" type="number" min="2" max="${nMax}" step="1" autofocus>
         <label for="sd-seed">Начальный seed</label>
         <input id="sd-seed" type="number" min="0" step="1" placeholder="случайный">
-        <label for="sd-jobs">Одновременно</label>
-        <select id="sd-jobs"><option value="">авто (ядер − 1)</option><option>1</option><option>2</option>
+        <label for="sd-jobs" ${portal ? "hidden" : ""}>Одновременно</label>
+        <select id="sd-jobs" ${portal ? "hidden" : ""}><option value="">авто (ядер − 1)</option><option>1</option><option>2</option>
           <option>3</option><option>4</option></select>
       </div>
       <p class="error small" id="sd-error" hidden></p>`;
     const q = (id) => box.querySelector(`#${id}`);
-    q("sd-n").value = String(n);
+    q("sd-n").value = String(Math.min(n, nMax));
     if (seed !== null && seed !== undefined) q("sd-seed").value = String(seed);
     const row = document.createElement("div");
     row.className = "modal-actions";
     const go = () => {
       const count = Math.floor(Number(q("sd-n").value));
-      if (!(count >= 2 && count <= 50)) {
+      if (!(count >= 2 && count <= nMax)) {
         q("sd-error").hidden = false;
-        q("sd-error").textContent = "Матчей в серии — от 2 до 50";
+        q("sd-error").textContent = `Матчей в серии — от 2 до ${nMax}`;
         return;
       }
       const s = q("sd-seed").value.trim();

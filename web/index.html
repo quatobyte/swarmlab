@@ -111,8 +111,8 @@
         <button class="btn" id="match-stop" disabled>■ Стоп</button>
       </div>
       <div class="match-actions">
-        <button class="btn no-portal" id="match-series" title="Тот же матч на разных seed подряд: таблица и реплеи">Серия…</button>
-        <button class="btn no-portal" id="match-series-table" hidden title="Открыть таблицу последней серии">📊 Таблица</button>
+        <button class="btn" id="match-series" title="Тот же матч на разных seed подряд: таблица и реплеи">Серия…</button>
+        <button class="btn" id="match-series-table" hidden title="Открыть таблицу последней серии">📊 Таблица</button>
       </div>
       <p class="error small" id="match-error" hidden></p>
     </section>
@@ -158,7 +158,7 @@
         <div class="match-form lobby-form" id="lobby-form"><p class="muted small">Загрузка…</p></div>
         <div class="match-actions lobby-actions">
           <button class="btn primary" id="lobby-watch" title="Живой матч в 3D">▶ Смотреть матч</button>
-          <button class="btn no-portal" id="lobby-series" title="Тот же матч на разных seed подряд: таблица и реплеи">Серия…</button>
+          <button class="btn" id="lobby-series" title="Тот же матч на разных seed подряд: таблица и реплеи">Серия…</button>
         </div>
         <p class="small"><button class="btn" id="lobby-editor">✎ Редактор кода</button>
           <span class="muted">— написать свой рой и сразу посмотреть, как он летает</span></p>
@@ -172,7 +172,7 @@
         <span class="muted small">или перетащите файл .swarm в окно</span>
         <p class="small" id="lobby-project-msg" hidden></p>
       </section>
-      <section class="no-portal">
+      <section>
         <h2>Серии матчей</h2>
         <div class="list" id="lobby-series-list"><p class="muted small">Загрузка…</p></div>
       </section>

@@ -1,6 +1,6 @@
 Веха M9b — портал: несколько пользователей сразу, песочница, лимиты.
 
-Прочитай `CLAUDE.md` (особенно «Ветки и рабочие деревья»), `docs/ROADMAP.md` (M9b и «Где идут вехи»), `docs/DECISIONS.md` (решения 43, 90, 93–95, 98), `docs/ARCHITECTURE.md` §3.3–3.4 (протокол и бюджет раннера), §6 («По серверу»), §7 и §7.1. Посмотри запуск раннера (`src/swarmlab/core/runner_host.py` — `ProcessLink.start`, параметр `python`, окружение процесса), раннер (`src/swarmlab/runner/main.py`), сервер (`src/swarmlab/server/app.py` — `MatchManager.start`, `_forget_old`, `MatchProcess`, `Subscriber`, `SeriesManager`; `worker.py`), настройки портала из M9a (`src/swarmlab/server/public.yaml`), серии (`src/swarmlab/core/series.py`).
+Прочитай `AGENTS.md` (особенно «Ветки и рабочие деревья»), `docs/ROADMAP.md` (M9b и «Где идут вехи»), `docs/DECISIONS.md` (решения 43, 90, 93–95, 98), `docs/ARCHITECTURE.md` §3.3–3.4 (протокол и бюджет раннера), §6 («По серверу»), §7 и §7.1. Посмотри запуск раннера (`src/swarmlab/core/runner_host.py` — `ProcessLink.start`, параметр `python`, окружение процесса), раннер (`src/swarmlab/runner/main.py`), сервер (`src/swarmlab/server/app.py` — `MatchManager.start`, `_forget_old`, `MatchProcess`, `Subscriber`, `SeriesManager`; `worker.py`), настройки портала из M9a (`src/swarmlab/server/public.yaml`), серии (`src/swarmlab/core/series.py`).
 
 **Предусловие.**
 - M9a — ✅ в ROADMAP (или Лео явно разрешил начать). Если нет — спроси.
@@ -24,6 +24,6 @@
 - **Где что делается (№98).** Ядро, сервер, Dockerfile, тесты песочницы и лимитов без матчей — в `master`. Тесты с настоящими матчами (вредный код игрока в матче, очередь, остановка без зрителей), замер — в `bees` после `git merge master`.
 - **Замер.** На сервере Лео во временном контейнере из ветки `bees`: `swarmlab bench` и 4 одновременных матча `medium` — RTF каждого ≥ 1.0. Покажи вывод. Если не дотягивает — не меняй лимит сам, покажи цифры Лео.
 - **Документы.** `ARCHITECTURE.md` §3.4 (префикс запуска раннера, окружение), §6, §7.1 (песочница, права контейнера, лимиты), `README.md` (тесты на Linux).
-- **Git.** Коммиты — только после «ок» Лео на текст коммита. Порядок: `master` → `git merge master` в `bees` → тесты в `bees` → коммит в `bees`. Push не делай.
+- **Git.** Коммиты и push Лео делает сам; предложи текст коммита и оставь изменения в рабочем дереве. Порядок: коммит Лео в `master` → `git merge master` в `bees` → тесты в `bees` → коммит Лео в `bees`.
 
 **Критерии приёмки:** см. `docs/ROADMAP.md`, раздел M9b. Веха готова, когда каждый пункт проверен и результат показан; статус в ROADMAP — 🟨.

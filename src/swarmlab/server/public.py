@@ -23,12 +23,16 @@
 иначе 403; вход и регистрация — только с телом JSON (форма с чужого сайта так не пошлёт).
 IP клиента и HTTPS за прокси — из `X-Forwarded-For` / `X-Forwarded-Proto`, только если
 запрос пришёл от доверенного адреса (`proxy.trusted` в настройках).
+
+Лимиты матчей и серий, очередь и песочница раннеров (M9b) — в `server/app.py`
+(`MatchManager`, `SeriesManager`), настройки — разделы `sandbox`, `matches`, `series`.
 """
 
 from __future__ import annotations
 
 import asyncio
 import hmac
+import shutil
 import time
 from datetime import datetime
 from pathlib import Path
@@ -53,8 +57,21 @@ OPEN_PATHS = frozenset({"/api/auth/register", "/api/auth/login"})
 SAFE_METHODS = frozenset({"GET", "HEAD", "OPTIONS"})
 CSRF_HEADER = "x-csrf-token"
 NEED_LOGIN = "Нужно войти"
-SERIES_OFF = ("Серии матчей на портале пока выключены — запускайте матчи по одному "
-              "(лимиты серий появятся позже)")
+
+
+def check_sandbox(settings: PublicSettings) -> str | None:
+    """Есть ли программа песочницы из `sandbox.runner_prefix`; ошибка — текст для человека.
+
+    Без песочницы портал не стартует молча: пустой префикс — явный выбор (`None`).
+    """
+    prefix = settings.sandbox.runner_prefix
+    if not prefix:
+        return None
+    if shutil.which(prefix[0]) is None:
+        return (f"Песочница кода игрока не найдена: {prefix[0]} (sandbox.runner_prefix в "
+                "настройках портала). Портал запускается в образе Docker (Dockerfile); для "
+                "пробы на своём компьютере — --public-config с `sandbox: {runner_prefix: []}`.")
+    return None
 
 
 class Credentials(BaseModel):
@@ -304,6 +321,8 @@ def add_routes(app: FastAPI, portal: Portal, manager: MatchManager) -> None:
         await loop.run_in_executor(None, manager.wait_exit, mine)
         for m in mine:
             manager.matches.pop(m.id, None)
+        await loop.run_in_executor(None, app.state.series.stop_under,
+                                   user_dir(portal.data, user.id))
         portal.accounts.delete_user(user.id)
         await loop.run_in_executor(None, remove_tree, user_dir(portal.data, user.id))
         portal.clear_cookie(response)

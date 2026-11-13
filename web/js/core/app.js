@@ -85,7 +85,16 @@ class Session {
     }
     this._autoQuality(lagging);
     updatePlayButton(this);
+    if (st.state === "queued") {
+      // Портал: на сервере уже идут все разрешённые матчи — этот ждёт и стартует сам.
+      badge.textContent = `в очереди: №${st.queue}`;
+      showLoading(`Сервер занят — матч в очереди: №${st.queue}. Начнётся сам, как только освободится место.`);
+    }
     if (st.state === "starting") showLoading("Сборка мира и запуск кода ульев…");
+    if (st.state === "stopped" && !this.source.header) {
+      hideLoading(); // снят из очереди, не начавшись (стоп или долго без зрителей)
+      showBanner("Матч снят из очереди — он так и не начался.", [["Меню", toLobby]]);
+    }
     if (st.state === "error") {
       hideLoading();
       showBanner(`Матч завершился с ошибкой:\n${st.error || "неизвестная ошибка"}`,

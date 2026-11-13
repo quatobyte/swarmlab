@@ -72,6 +72,7 @@ html, body { margin: 0; height: 100%; overflow: hidden; background: #cfe3f2; }
 .badge { font-size: 11px; padding: 2px 8px; border-radius: 10px; background: rgba(255, 255, 255, 0.15); }
 .badge.running { background: rgba(95, 211, 141, 0.25); color: #bff3d2; }
 .badge.paused { background: rgba(245, 183, 0, 0.3); color: #ffe39a; }
+.badge.queued { background: rgba(120, 160, 255, 0.3); color: #d4e0ff; }
 .badge.error { background: rgba(255, 93, 93, 0.3); }
 .badge.lagging { background: rgba(255, 150, 60, 0.35); color: #ffd9b0; cursor: help; }
 .weather { font-size: 15px; gap: 6px; }

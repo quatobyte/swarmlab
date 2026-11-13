@@ -79,6 +79,24 @@ class ProxySettings(_Strict):
     trusted: list[str] = Field(default_factory=list)
 
 
+class SandboxSettings(_Strict):
+    #: Префикс команды запуска раннера кода игрока (DECISIONS №93); пусто — без песочницы.
+    runner_prefix: list[str] = Field(default_factory=list)
+
+
+class MatchLimits(_Strict):
+    per_user: int = Field(1, ge=1)
+    total: int = Field(4, ge=1)
+    profiles: list[str] = Field(default_factory=lambda: ["small", "medium"])
+    idle_stop_s: float = Field(60, gt=0)
+
+
+class SeriesLimits(_Strict):
+    n_max: int = Field(10, ge=2)
+    jobs_max: int = Field(1, ge=1)
+    total: int = Field(1, ge=1)
+
+
 class PublicSettings(_Strict):
     """Настройки публичного режима (`public.yaml` + свой `--public-config`)."""
 
@@ -87,6 +105,9 @@ class PublicSettings(_Strict):
     limits: LimitSettings = LimitSettings()
     replays: ReplaySettings = ReplaySettings()
     proxy: ProxySettings = ProxySettings()
+    sandbox: SandboxSettings = SandboxSettings()
+    matches: MatchLimits = MatchLimits()
+    series: SeriesLimits = SeriesLimits()
 
 
 def load_settings(path: str | Path | None = None) -> PublicSettings:

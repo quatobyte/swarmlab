@@ -30,7 +30,7 @@
 
 ## 2. Структура репозитория
 
-**Ветки (DECISIONS №98).** `master` — ядро и общие документы; `bees`, `city`, `quarry` — ядро + модуль. Ядро правится только в `master` и вливается в ветки модулей (`git merge master`), обратно — никогда. В `master` из дерева ниже есть только общее: `src/swarmlab/{core,runner,server,cli.py}`, `web/js/core/`, `web/vendor/`, `web/js/modules/registry.js` (пустой), `tests/core/`, `tests/web/test_project.py`, общие документы. Всё, что названо ниже по имени модуля (`bees/`, `configs/`, `examples/`, `tools/`, `prompts/`, `BEES_SPEC`, `PLAYER_API`, `CHEATSHEET`, `DEMO`), — в ветке `bees`.
+**Ветки (DECISIONS №98).** `master` — ядро и общие документы; `bees`, `city`, `quarry` — ядро + модуль. Ядро правится только в `master` и вливается в ветки модулей (`git merge master`), обратно — никогда. В `master` из дерева ниже есть общее: `src/swarmlab/{core,runner,server,cli.py}`, `web/js/core/`, `web/vendor/`, `web/js/modules/registry.js` (пустой), `tests/core/`, `tests/portal/`, `tests/web/`, общие документы и промты ядра `prompts/M9a.md`, `prompts/M9b.md`. Код и материалы модуля (`bees/`, `configs/`, `examples/`, `tools/`, `BEES_SPEC`, `PLAYER_API`, `CHEATSHEET`, `DEMO`) — в ветке `bees`; там же промты M0–M8 и M9c. Рабочие заготовки Dockerfile и `docker/` для M9b — в `master`.
 
 Как ядро находит модуль без имени в коде:
 - Python — entry points `swarmlab.modules` и `swarmlab.agent_hosts` в `pyproject.toml` ветки; `core.module.default_module()` — единственный установленный модуль (файл матча без `module:`, папка скриптов редактора `examples/<модуль>`);
@@ -38,9 +38,9 @@
 
 ```
 swarmlab/
-  CLAUDE.md  README.md  pyproject.toml
+  AGENTS.md  CLAUDE.md (указатель на AGENTS.md)  README.md  pyproject.toml
   docs/        PRD, ARCHITECTURE, BEES_SPEC, ROADMAP, DECISIONS, WORKFLOW, PLAYER_API (справочник игрока), CHEATSHEET (памятка школьника)
-  prompts/     M0.md … M6.md
+  prompts/     M9a.md, M9b.md — master; M0–M8, M9c — bees
   configs/
     profiles/  small.yaml medium.yaml large.yaml   # timing: + секция на модуль (bees: …)
     matches/   demo.yaml sandbox.yaml
@@ -53,7 +53,6 @@ swarmlab/
       config.py       # загрузка/слияние YAML, валидация (pydantic)
       rng.py          # seed → независимые потоки RNG по подсистемам
       spatial.py      # равномерная сетка поиска соседей, O(N·k)
-      state.py        # базовые SoA-хранилища
       module.py       # контракт Module
       physics.py      # контракт PhysicsBackend
       protocol.py     # сообщения раннера: SensorBatch / CommandBatch
@@ -79,7 +78,7 @@ swarmlab/
       api.py          # то, что видит игрок: Scout, Collector, Worker, Hive, Point… (DECISIONS №85)
     server/
       app.py          # FastAPI: REST, WS-стрим, статика web/
-      scripts.py      # скрипты редактора: только examples/bees/, проверка имени, ast.parse, файл блоков X.blocks.json
+      scripts.py      # скрипты редактора: папка выбранного модуля, проверка имени, ast.parse, файл блоков X.blocks.json
       projects.py     # проекты .swarm: проверка формата, папка projects/, копия в редактор (M7c)
       worker.py       # процесс живого матча (python -m swarmlab.server.worker)
       public.py       # портал (serve --public, M9a): вход, охрана API и WS, CSRF, маршруты профиля
@@ -93,6 +92,9 @@ swarmlab/
   replays/            # реплеи матчей; replays/series/<YYYYMMDD-HHMMSS>-<проект>/ — серии (s<seed>.swr, series.json, results.csv, logs/)
   tools/              # calibrate.py, balance.py, gen_api_hints.py, gen_blocks_api.py, blocks_to_py.mjs — служебные скрипты разработчика
   tests/
+    core/             # общие контракты и механизмы ядра
+    portal/           # аккаунты, хранение и лимиты без настоящего модуля
+    web/              # общие JS-форматы; запуск проверок через Node.js
 ```
 
 ## 3. Контракты ядра
@@ -247,7 +249,9 @@ class PhysicsBackend(Protocol):
 
 ### 7.1 Публичный режим — портал (M9a–M9c, DECISIONS №90–97)
 
-- `swarmlab serve --public [--public-config мой.yaml] [--data папка]` — те же приложение, REST и WS, плюс аккаунты и разделение данных по пользователям (M9a), песочница и лимиты (M9b), админка (M9c). Без флага сервер работает как выше (локально, без входа, Windows): ни одного нового маршрута, ни cookie, ни CSRF. Целевой запуск портала — Linux в Docker (№95); M9a работает и на Windows (проверка локально).
+Согласованный объём портала описан в DECISIONS №90–97. Реализация M9a и начатая M9b ещё требуют полной приёмки по ROADMAP; наличие кода и конфигов не подтверждает изоляцию или производительность. Админка и развёртывание M9c остаются планом.
+
+- `swarmlab serve --public [--public-config мой.yaml] [--data папка]` — те же приложение, REST и WS, плюс аккаунты и разделение данных по пользователям (M9a), песочница и лимиты (M9b). Без флага сервер работает как выше (локально, без входа, Windows): ни одного нового маршрута, ни cookie, ни CSRF. Целевой запуск портала — Linux в Docker (№95). Для локальной проверки аккаунтов на Windows текущий конфиг требует явно отключить песочницу (`sandbox: {runner_prefix: []}`) и слушать только localhost; команда — в README.
 - Код: `server/public.py` (`Portal`, охрана `PortalGuard`, маршруты портала), `server/accounts.py` (настройки, база, пароли, сессии, лимиты частоты), `server/storage.py` (папки пользователей, скрипты поверх общих примеров, реплеи с квотой, архив кода). Настройки — `server/public.yaml` (квоты реплеев, лимиты, длина пароля, cookie, доверенный прокси); `--public-config` накладывается поверх.
 - Аккаунты (№91, №97): SQLite одним файлом (`<data>/swarmlab.db`, `sqlite3`, WAL, версия схемы — `PRAGMA user_version`), пароли argon2id, сессия — случайный токен в cookie `swarmlab_session` (HTTP-only, `SameSite=Lax`, `Secure` — когда запрос пришёл по HTTPS); в базе — sha256 токена. Почта — логин, в нижнем регистре. Роли `user` и `admin` (админка — M9c).
 
@@ -265,7 +269,7 @@ class PhysicsBackend(Protocol):
   - `GET /api/me` → `{email, role, csrf, usage}` (`usage` — реплеи и квота); клиент по нему узнаёт режим: 200 — вошли, 401 — экран входа, 404 — локальный режим;
   - `POST /api/me/password` `{current, new}` — неверный текущий — 403, остальные сессии закрываются; `DELETE /api/me` `{password}` — останавливает матчи пользователя и ждёт выхода процессов, удаляет строки в базе и папку; `GET /api/me/export` — zip: `scripts/<имя>.swarm` (собран из кода и блоков, как «Экспорт проекта» в редакторе) и `projects/<имя>.swarm` (оригиналы);
   - `POST /api/replays/{id}/pin` `{pinned}` (сверх квоты — 409 с текстом), `DELETE /api/replays/{id}`, `DELETE /api/scripts/{name}`, `DELETE /api/projects/{name}`.
-  - Прежние маршруты на портале работают с данными вошедшего: `/api/scripts*`, `/api/projects*` — его папки; `GET /api/matches` — его матчи; `GET /api/matches/{id}`, `stop`, WS, `GET /api/replays/{id}` — чужое — 404 (WS — 4404), как несуществующее; `GET /api/replays` — его реплеи с `pinned`. Серии (`/api/series*`) в M9a выключены — 403 (лимиты серий — M9b). `--max-matches` — у каждого пользователя: новый матч вытесняет только его матч.
+  - Прежние маршруты на портале работают с данными вошедшего: `/api/scripts*`, `/api/projects*` — его папки; `GET /api/matches` — его матчи; `GET /api/matches/{id}`, `stop`, WS, `GET /api/replays/{id}` — чужое — 404 (WS — 4404), как несуществующее; `GET /api/replays` — его реплеи с `pinned`. В объёме M9a серии были выключены (403). В рабочей реализации M9b `/api/series*` включены с разделением по владельцам и лимитами из `public.yaml`; лимиты живых матчей тоже берутся из него. `--max-matches` относится к локальному режиму.
 - Данные пользователя (№92), папка `--data` (по умолчанию `<root>/data`, в `.gitignore`); пути — только из числового id:
 
   ```
@@ -278,9 +282,9 @@ class PhysicsBackend(Protocol):
 
   Общие примеры — только справочные файлы папки редактора модуля (`template.py`, `example_*.py`): видны всем, только для чтения (запись и удаление — 403); остальные файлы той папки (`my_*.py` локального режима) на портале не видны. Матч пользователя берёт код ульев только из его папок и общих примеров: сервер передаёт воркеру `script_dirs`, `Simulation` проверяет `TeamSpec.script` каждой команды до запуска раннеров (`core.module.check_team_scripts`); чужой путь в переопределениях конфига — матч `error` «код улья недоступен», чужой код не запускается.
 - Реплеи (№92): строка в `replays` появляется при старте матча (`finished = 0`, в списке не видна), при выходе процесса матча — размер и `finished = 1`, затем очистка. Очистка (конец матча и старт сервера): у незакреплённых остаются `keep_last` последних и не старше `unpinned_max_age_days`; закреплённые («Сохранить») не трогаются, их квота — `pinned_max_count` штук и `pinned_max_mb`. На старте сервера недописанные строки сверяются с диском, файлы без строки вносятся в список.
-- Клиент: `js/core/ui/account.js` — экран входа и регистрации, профиль (смена пароля, архив проектов, удаление аккаунта, выход), «Мои проекты» (свои скрипты: открыть, скачать `.swarm`, удалить; загруженные проекты: скачать, удалить), «Мои реплеи» (смотреть, сохранить, скачать `.swr`, удалить; квота). На портале у `body` класс `portal`: элементы `.no-portal` (серии) скрыты. После живого матча — «📌 Сохранить реплей». 401 на любой запрос — экран входа «Вход истёк».
-- Раннер — тот же `python -m swarmlab.runner`, обёрнутый в nsjail (№93): без сети, файловая система только для чтения, лимиты CPU, памяти и процессов.
-- Развёртывание (№96): compose-проект в `/opt/swarmlab` на VPS Лео, наружу — через существующий Caddy (`swarmlab.kmashinist.ru`, HTTPS, `wss://`); `tools/deploy.ps1` — обновление и скачивание бэкапа. Подробности — `docs/DEPLOY.md` (M9c).
+- Клиент: `js/core/ui/account.js` — экран входа и регистрации, профиль (смена пароля, архив проектов, удаление аккаунта, выход), «Мои проекты» (свои скрипты: открыть, скачать `.swarm`, удалить; загруженные проекты: скачать, удалить), «Мои реплеи» (смотреть, сохранить, скачать `.swr`, удалить; квота). На портале у `body` класс `portal`. После живого матча — «📌 Сохранить реплей». 401 на любой запрос — экран входа «Вход истёк».
+- Рабочая реализация M9b: `RunnerLaunch` в `core/runner_host.py` добавляет префикс к команде `python -m swarmlab.runner`. `ProcessLink.start()` формирует ограниченное окружение через `runner_env()` при каждом запуске, с префиксом и без него. Префикс nsjail задаёт `public.yaml`; Dockerfile и профили в `docker/` предназначены для требований №93: без сети, файловая система только для чтения, лимиты CPU, памяти и процессов. Набор прав контейнера, фактическая изоляция и нагрузка ещё требуют проверки в Linux; это не подтверждённая схема запуска.
+- План M9c (№96): compose-проект в `/opt/swarmlab` на VPS Лео, наружу — через существующий Caddy (`swarmlab.kmashinist.ru`, HTTPS, `wss://`); `tools/deploy.ps1` — обновление и скачивание бэкапа. Инструкция `docs/DEPLOY.md` будет создана в этой вехе.
 
 ## 8. Мост к реальным роботам (позже)
 

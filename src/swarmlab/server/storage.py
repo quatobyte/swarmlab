@@ -125,6 +125,7 @@ class UserSpace:
         self.projects = ProjectStore(self.dir / "projects", self.scripts)
         self.replays = self.dir / "replays"
         self.logs = self.dir / "logs"
+        self.series = self.dir / "series"
         #: Откуда матчу пользователя можно брать код ульев: свои папки и общие примеры.
         self.script_dirs = [self.scripts.folder, self.projects.folder, shared.folder]
 

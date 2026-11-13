@@ -44,6 +44,9 @@ where = ["src"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+markers = [
+    "sandbox: песочница nsjail портала — только Linux в контейнере (README, DECISIONS 95)",
+]
 
 [tool.ruff]
 line-length = 100

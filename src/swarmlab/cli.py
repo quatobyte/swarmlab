@@ -112,6 +112,9 @@ def _build_parser() -> argparse.ArgumentParser:
                         help="папка configs/ (по умолчанию — рядом с матчем)")
     series.add_argument("--progress-json", action="store_true",
                         help="печатать ход серии строками JSON (для сервера)")
+    # Для сервера портала (не для людей): откуда брать код ульев и префикс запуска раннеров.
+    series.add_argument("--script-dir", type=Path, action="append", help=argparse.SUPPRESS)
+    series.add_argument("--runner-prefix-json", help=argparse.SUPPRESS)
     series.set_defaults(handler=_cmd_series)
 
     replay = sub.add_parser("replay", help="показать реплей: счёт, события, проверка хеша")
@@ -352,7 +355,8 @@ def _cmd_series(args: argparse.Namespace) -> int:
     jobs = args.jobs if args.jobs is not None else sr.default_jobs()
     spec = sr.SeriesSpec(match=args.match, overrides=overrides, start_seed=start, n=args.n,
                          jobs=jobs, out=args.out, configs=args.configs, team=args.team,
-                         name=args.name)
+                         name=args.name, script_dirs=args.script_dir,
+                         runner_prefix=json.loads(args.runner_prefix_json or "[]"))
     try:
         series = sr.Series(spec)
     except sr.SeriesError as e:
@@ -608,11 +612,16 @@ def _cmd_serve(args: argparse.Namespace) -> int:
     if args.public:
         from swarmlab.core.config import ConfigError
         from swarmlab.server.accounts import load_settings
+        from swarmlab.server.public import check_sandbox
 
         try:
             cfg.public = load_settings(args.public_config)
         except ConfigError as e:
             print(e, file=sys.stderr)
+            return 2
+        problem = check_sandbox(cfg.public)
+        if problem:
+            print(problem, file=sys.stderr)
             return 2
         cfg.data = (args.data or cfg.root / "data").resolve()
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(name)s: %(message)s",
@@ -621,6 +630,9 @@ def _cmd_serve(args: argparse.Namespace) -> int:
     print(f"SwarmLab: вьюер — {url}  (остановить — Ctrl+C)")
     if cfg.public is not None:
         print(f"  публичный режим: вход по почте и паролю; данные пользователей — {cfg.data}")
+        if not cfg.public.sandbox.runner_prefix:
+            print("  ВНИМАНИЕ: песочница выключена (sandbox.runner_prefix: []) — код игрока "
+                  "получает все права сервера. Только для пробы на своём компьютере.")
     else:
         print(f"  матчи: {cfg.configs / 'matches'}; реплеи: {cfg.replays}; логи: {cfg.logs}")
     if args.open:

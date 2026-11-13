@@ -4,7 +4,8 @@
 Канал — как у раннера (ARCHITECTURE §3.4): stdin/stdout, кадр = u32 LE длина + msgpack.
 
 Сервер → воркер (`core.protocol`): первым — `start {id, match, configs, overrides,
-replay, log_dir, speed, script_dirs?}` (`script_dirs` — портал: откуда брать код ульев),
+replay, log_dir, speed, script_dirs?, runner_launch?}` (портал: `script_dirs` — откуда брать
+код ульев, `runner_launch` — префикс запуска раннеров, песочница),
 дальше управление `pause`, `resume`, `speed {value}`, `stop`.
 
 Воркер → сервер (msgpack с массивами `{"__nd__": …}`, как в реплее):
@@ -40,6 +41,7 @@ from swarmlab.core.config import load_match
 from swarmlab.core.module import Replayable, ScriptAccessError
 from swarmlab.core.protocol import ProtocolError, read_frame
 from swarmlab.core.replay import ReplayWriter, make_header, pack, score_dict
+from swarmlab.core.runner_host import RunnerLaunch
 from swarmlab.core.sim import Simulation
 
 _LEN = struct.Struct("<I")
@@ -164,7 +166,8 @@ class LiveMatch:
         log_dir = Path(s["log_dir"]) if s.get("log_dir") else None
         dirs = s.get("script_dirs")  # портал: код ульев — только из папок пользователя
         self.sim = sim = Simulation(cfg, log_dir=log_dir,
-                                    script_dirs=[Path(d) for d in dirs] if dirs else None)
+                                    script_dirs=[Path(d) for d in dirs] if dirs else None,
+                                    launch=RunnerLaunch.from_message(s.get("runner_launch")))
         if not isinstance(sim.module, Replayable):
             raise TypeError(f"Модуль {cfg.module} не отдаёт сцену (Replayable) — показать нечего")
         header = make_header(cfg, sim.teams, sim.module.scene())
