@@ -6,12 +6,15 @@ import io
 import json
 import os
 import sqlite3
+import time
 import zipfile
 from pathlib import Path
 
 import pytest
 from websockets.exceptions import ConnectionClosed
 from websockets.sync.client import connect
+
+from swarmlab.core.replay import unpack
 
 from swarmlab.core.module import ScriptAccessError, TeamSpec, check_team_scripts
 from swarmlab.server.accounts import Database, ReplaySettings
@@ -294,3 +297,43 @@ def test_change_and_delete_account_need_current_password_then_nothing_left(porta
     # id не переиспользуется: новый аккаунт не получит старую папку.
     c = portal.user("a@b.ru")
     assert _uid(portal, c) != uid
+
+
+def test_real_bees_match_replay_and_websocket_belong_to_owner(make_portal):
+    """Настоящий матч пчёл: приватность потока и реплея проверяется через HTTP и WS."""
+    portal = make_portal(real_matches=True)
+    a, b = portal.user("a@b.ru"), portal.user("b@b.ru")
+    code, match = a.json("POST", "/api/matches", {
+        "match": "m2_economy.yaml", "overrides": ["duration_s=5"],
+    })
+    assert code == 200, match
+    mid = match["id"]
+    assert b.json("GET", "/api/matches")[1] == []
+    assert b.json("GET", f"/api/matches/{mid}")[0] == 404
+    assert b.json("POST", f"/api/matches/{mid}/stop")[0] == 404
+    with connect(f"{portal.ws}/ws/matches/{mid}",
+                 additional_headers={"Cookie": b.cookie_header(), "Origin": portal.base}) as ws:
+        with pytest.raises(ConnectionClosed) as closed:
+            ws.recv(timeout=10)
+    assert closed.value.rcvd.code == 4404
+    with connect(f"{portal.ws}/ws/matches/{mid}",
+                 additional_headers={"Cookie": a.cookie_header(), "Origin": portal.base}) as ws:
+        assert unpack(ws.recv(timeout=10))["t"] in ("header", "status")
+
+    deadline = time.monotonic() + 45
+    while time.monotonic() < deadline:
+        state = a.json("GET", f"/api/matches/{mid}")[1]["state"]
+        if state in ("finished", "stopped", "error"):
+            break
+        time.sleep(0.1)
+    assert state == "finished"
+    # Статус finished приходит из воркера до его выхода и фиксации реплея в базе.
+    while time.monotonic() < deadline:
+        if mid in {r["id"] for r in a.json("GET", "/api/replays")[1]}:
+            break
+        time.sleep(0.1)
+    assert mid in {r["id"] for r in a.json("GET", "/api/replays")[1]}
+    assert b.json("GET", "/api/replays")[1] == []
+    assert b.raw("GET", f"/api/replays/{mid}")[0] == 404
+    code, _, replay = a.raw("GET", f"/api/replays/{mid}")
+    assert code == 200 and len(replay) > 100

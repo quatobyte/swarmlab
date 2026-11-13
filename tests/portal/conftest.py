@@ -128,13 +128,16 @@ def shared_examples(folder: Path) -> Path:
 def make_portal(tmp_path: Path) -> Iterator[Callable[..., Portal]]:
     servers: list[tuple[uvicorn.Server, threading.Thread]] = []
 
-    def make(public: bool = True, **settings: Any) -> Portal:
+    def make(public: bool = True, real_matches: bool = False, **settings: Any) -> Portal:
         n = len(servers)
         root = tmp_path / f"root{n}"
         root.mkdir()
-        cfg = ServerConfig(root=root, configs=root / "configs", replays=root / "replays",
+        cfg = ServerConfig(root=ROOT if real_matches else root,
+                           configs=ROOT / "configs" if real_matches else root / "configs",
+                           replays=root / "replays",
                            logs=root / "logs", web=ROOT / "web",
-                           scripts=shared_examples(root / "examples"),
+                           scripts=ROOT / "examples" / "bees" if real_matches
+                           else shared_examples(root / "examples"),
                            projects=root / "projects",
                            public=_settings(**settings) if public else None,
                            data=root / "data")
