@@ -1,5 +1,7 @@
 Веха M9a — портал: аккаунты и хранение.
 
+**Актуализация 13.11 (DECISIONS №99).** Весь код ядра и пчёлок, тесты и документы теперь в одном дереве `master`; указания ниже о ветке `bees`, переносе через merge и двух окружениях устарели. Все проверки выполняются из `D:\Files\Projects\swarmlab`. Существующие изменения этой вехи сохраняй; чистота рабочего дерева больше не является предусловием продолжения.
+
 Прочитай `AGENTS.md` (особенно «Ветки и рабочие деревья»), `docs/ROADMAP.md` (M9a и абзац «Где идут вехи»), `docs/DECISIONS.md` (решения 90–92, 95, 97, 98), `docs/ARCHITECTURE.md` §7 и §7.1, `docs/PRD.md` («Портал для своих»). Посмотри сервер (`src/swarmlab/server/app.py` — `ServerConfig`, `MatchManager`, `SeriesManager`, маршруты; `scripts.py`, `projects.py`, `worker.py`), команду `serve` (`src/swarmlab/cli.py`), клиент (`web/js/core/api.js`, `app.js`, `ui/lobby.js`, `ui/editor.js`, `web/index.html`, `web/style.css`), тесты ядра (`tests/`). В ветке `bees` (`D:\Files\Projects\swarmlab-worktrees\bees`) — тесты сервера `tests/server/` и `tests/test_series.py`: они покажут, как сервер проверяется на настоящих матчах.
 
 **Предусловие.**

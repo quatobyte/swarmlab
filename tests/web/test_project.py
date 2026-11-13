@@ -19,9 +19,7 @@ from swarmlab.server.projects import code_sha256, parse_project
 
 ROOT = Path(__file__).resolve().parents[2]
 CHECK = Path(__file__).with_name("project_check.mjs")
-#: Файлы скрипта для проверки формата `.swarm` — свои, без примеров модуля (в master их нет).
-CODE = "# пример\nclass Agent:\n    def loop(self):\n        self.wait()\n"
-WORKSPACE = {"blocks": {"languageVersion": 0, "blocks": []}}
+EXAMPLES = ROOT / "examples" / "bees"
 
 needs_node = pytest.mark.skipif(shutil.which("node") is None,
                                 reason="нет Node.js — JS-проверка проекта пропущена")
@@ -38,16 +36,12 @@ def _node(*args: str) -> str:
 @pytest.mark.parametrize("mode", ["python", "blocks"])
 def test_export_then_open_gives_same_code_and_blocks(tmp_path, mode):
     """Критерий M7c: экспорт → открытие проекта даёт тот же код и те же блоки (оба режима)."""
-    py = tmp_path / "my_agents.py"
-    py.write_text(CODE, encoding="utf-8")
     if mode == "blocks":
-        blocks_file = tmp_path / "my_agents.blocks.json"
-        blocks_file.write_text(json.dumps({"format": 1, "mode": "blocks", "workspace": WORKSPACE}),
-                               encoding="utf-8")
-        args = ["export", "my_agents", "blocks", str(py), str(blocks_file)]
+        py, blocks_file = EXAMPLES / "example_blocks.py", EXAMPLES / "example_blocks.blocks.json"
+        args = ["export", "example_blocks", "blocks", str(py), str(blocks_file)]
     else:
-        blocks_file = None
-        args = ["export", "my_agents.py", "python", str(py)]
+        py, blocks_file = EXAMPLES / "example_smart.py", None
+        args = ["export", "example_smart.py", "python", str(py)]
     text = _node(*args)
     swarm = tmp_path / "p.swarm"
     swarm.write_text(text, encoding="utf-8")

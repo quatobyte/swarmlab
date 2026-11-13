@@ -1,0 +1,91 @@
+{
+ "format": 1,
+ "mode": "blocks",
+ "workspace": {
+  "blocks": {
+   "languageVersion": 0,
+   "blocks": [
+    {
+     "type": "bees_program_bee",
+     "id": "prog_scout",
+     "x": 10,
+     "y": 10,
+     "fields": {
+      "KIND": "scout"
+     },
+     "inputs": {
+      "DO": {
+       "block": {
+        "type": "bees_Collector_collect",
+        "id": "scout_collect",
+        "inputs": {
+         "target": {
+          "block": {
+           "type": "bees_Bee_nearest_flower",
+           "id": "nf"
+          }
+         }
+        },
+        "next": {
+         "block": {
+          "type": "procedures_callnoreturn",
+          "id": "scout_calls_unload",
+          "extraState": {
+           "name": "выгрузка",
+           "params": []
+          }
+         }
+        }
+       }
+      }
+     }
+    },
+    {
+     "type": "procedures_defnoreturn",
+     "id": "def_unload",
+     "x": 400,
+     "y": 10,
+     "fields": {
+      "NAME": "выгрузка"
+     },
+     "inputs": {
+      "STACK": {
+       "block": {
+        "type": "bees_Collector_collect",
+        "id": "unload",
+        "inputs": {
+         "target": {
+          "block": {
+           "type": "bees_Bee_nearest_flower",
+           "id": "nf2"
+          }
+         }
+        }
+       }
+      }
+     }
+    },
+    {
+     "type": "bees_program_hive",
+     "id": "prog_hive",
+     "x": 10,
+     "y": 300,
+     "inputs": {
+      "DO": {
+       "block": {
+        "type": "bees_Bee_go_home",
+        "id": "hive_go_home",
+        "next": {
+         "block": {
+          "type": "bees_Bee_fly_to",
+          "id": "empty_fly"
+         }
+        }
+       }
+      }
+     }
+    }
+   ]
+  }
+ }
+}

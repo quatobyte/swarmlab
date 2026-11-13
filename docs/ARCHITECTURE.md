@@ -30,17 +30,17 @@
 
 ## 2. Структура репозитория
 
-**Ветки (DECISIONS №98).** `master` — ядро и общие документы; `bees`, `city`, `quarry` — ядро + модуль. Ядро правится только в `master` и вливается в ветки модулей (`git merge master`), обратно — никогда. В `master` из дерева ниже есть общее: `src/swarmlab/{core,runner,server,cli.py}`, `web/js/core/`, `web/vendor/`, `web/js/modules/registry.js` (пустой), `tests/core/`, `tests/portal/`, `tests/web/`, общие документы и промты ядра `prompts/M9a.md`, `prompts/M9b.md`. Код и материалы модуля (`bees/`, `configs/`, `examples/`, `tools/`, `BEES_SPEC`, `PLAYER_API`, `CHEATSHEET`, `DEMO`) — в ветке `bees`; там же промты M0–M8 и M9c. Рабочие заготовки Dockerfile и `docker/` для M9b — в `master`.
+**Одна рабочая папка (DECISIONS №99).** `master` содержит ядро, модуль пчёлок, сервер, клиент, конфиги, примеры, тесты и документы. Город и карьер остаются идеями на будущее. Код ядра сохраняет независимость от модуля.
 
 Как ядро находит модуль без имени в коде:
-- Python — entry points `swarmlab.modules` и `swarmlab.agent_hosts` в `pyproject.toml` ветки; `core.module.default_module()` — единственный установленный модуль (файл матча без `module:`, папка скриптов редактора `examples/<модуль>`);
-- браузер — `web/js/modules/registry.js` ветки: `{<модуль>: {viewer, editor}}`; в `master` пусто, лобби пишет «в этой ветке нет модуля».
+- Python — entry points `swarmlab.modules` и `swarmlab.agent_hosts` в `pyproject.toml`; `core.module.default_module()` — единственный установленный модуль (файл матча без `module:`, папка скриптов редактора `examples/<модуль>`);
+- браузер — `web/js/modules/registry.js`: `{<модуль>: {viewer, editor}}`.
 
 ```
 swarmlab/
   AGENTS.md  CLAUDE.md (указатель на AGENTS.md)  README.md  pyproject.toml
   docs/        PRD, ARCHITECTURE, BEES_SPEC, ROADMAP, DECISIONS, WORKFLOW, PLAYER_API (справочник игрока), CHEATSHEET (памятка школьника)
-  prompts/     M9a.md, M9b.md — master; M0–M8, M9c — bees
+  prompts/     M0–M9c — промты вех
   configs/
     profiles/  small.yaml medium.yaml large.yaml   # timing: + секция на модуль (bees: …)
     matches/   demo.yaml sandbox.yaml

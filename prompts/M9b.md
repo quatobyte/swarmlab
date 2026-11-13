@@ -1,5 +1,7 @@
 Веха M9b — портал: несколько пользователей сразу, песочница, лимиты.
 
+**Актуализация 13.11 (DECISIONS №99).** Ядро и пчёлки, тесты и документы находятся в одном дереве `master`; указания ниже о ветке `bees`, переносе через merge и двух окружениях устарели. Все проверки выполняются из `D:\Files\Projects\swarmlab`. Существующие изменения сохраняй; чистота рабочего дерева больше не является предусловием продолжения.
+
 Прочитай `AGENTS.md` (особенно «Ветки и рабочие деревья»), `docs/ROADMAP.md` (M9b и «Где идут вехи»), `docs/DECISIONS.md` (решения 43, 90, 93–95, 98), `docs/ARCHITECTURE.md` §3.3–3.4 (протокол и бюджет раннера), §6 («По серверу»), §7 и §7.1. Посмотри запуск раннера (`src/swarmlab/core/runner_host.py` — `ProcessLink.start`, параметр `python`, окружение процесса), раннер (`src/swarmlab/runner/main.py`), сервер (`src/swarmlab/server/app.py` — `MatchManager.start`, `_forget_old`, `MatchProcess`, `Subscriber`, `SeriesManager`; `worker.py`), настройки портала из M9a (`src/swarmlab/server/public.yaml`), серии (`src/swarmlab/core/series.py`).
 
 **Предусловие.**
