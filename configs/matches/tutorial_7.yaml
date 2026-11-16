@@ -1,0 +1,21 @@
+# Обучение, миссия 7 «Мёд в зачёт» (M11, DECISIONS №100): предел роя.
+# Счёт — мёд в улье к концу матча. Соперник «Копилка» растёт до семи сборщиков и дальше копит.
+# Мир как в миссии 6, матч длиннее.
+
+seed: 55
+profile: small
+duration_s: 600
+
+hives:
+  - {script: examples/bees/template.py, color: "#f5b700"}
+  - {script: examples/bees/example_rival_hoarder.py, color: "#3a86ff"}
+
+weather: {enabled: true}
+enemies:
+  spiders: {enabled: true, flower_fraction: 0.15, kill_prob_per_s: 0.5}
+world:
+  n_hives: 2
+  flowers: {clusters_per_hive: 4, flowers_per_cluster: 12, cluster_distance: [20.0, 50.0], nectar_max: 6.0, regen_per_s: 0.02}
+economy:
+  start_honey: 10.0
+  start_bees: {scout: 1, forager: 4, house: 3}
