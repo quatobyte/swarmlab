@@ -353,3 +353,29 @@ body:not(.portal) .portal-only { display: none !important; }
 .modal.profile { width: min(560px, calc(100vw - 32px)); max-height: calc(100vh - 32px); overflow: auto; }
 .modal.profile h4 { margin: 14px 0 6px; font-size: 14px; color: var(--muted); }
 .modal.profile .form input { padding: 5px 8px; }
+
+/* ---------------------------------------------------------------- обучение (M11) */
+.tutorial h1 .btn { float: right; }
+.mission-list { display: flex; flex-direction: column; gap: 6px; margin-top: 12px; }
+.mission-row { display: flex; align-items: center; gap: 12px; padding: 8px 12px; background: rgba(255,255,255,0.05);
+  border-radius: 10px; }
+.mission-row.locked { opacity: 0.5; }
+.mission-num { width: 28px; height: 28px; border-radius: 50%; display: grid; place-items: center; font-weight: 700;
+  background: rgba(255,255,255,0.12); flex: none; }
+.mission-row.done .mission-num { background: var(--ok); color: #10241a; }
+.mission-text { flex: 1 1 auto; min-width: 0; }
+.mission-text .name { font-weight: 600; }
+body.mission .dock-match, body.mission #ed-file, body.mission #ed-new, body.mission #ed-save-as,
+body.mission .ed-toolbar label.file { display: none; }
+.dock-mission { padding: 8px 10px; overflow: auto; border-right: 1px solid #000; font-size: 13px; }
+.dock .dock-mission h3 { color: var(--accent); font-size: 14px; }
+.mission-brief { margin-top: 10px; padding-top: 8px; border-top: 1px solid var(--line); }
+.mission-brief p { margin: 0 0 6px; line-height: 1.4; }
+.mission-fresh { color: #cfe8ff; }
+.mission-goal { font-weight: 600; margin-top: 4px; }
+.mission-progress { color: var(--ok); font-variant-numeric: tabular-nums; min-height: 1.2em; margin-top: 2px; }
+#mission-error { margin: 8px 0 0; }
+.mission-hints { list-style: none; margin: 10px 0 0; padding: 0; display: flex; flex-direction: column; gap: 4px; }
+.mission-hints li { background: rgba(245,183,0,0.12); border-left: 3px solid var(--accent); border-radius: 6px;
+  padding: 4px 8px; line-height: 1.35; }
+.mission-hints .t { color: var(--muted); margin-right: 6px; font-size: 11px; }

@@ -49,6 +49,7 @@ where = ["src"]
 testpaths = ["tests"]
 markers = [
     "sandbox: песочница nsjail портала — только Linux в контейнере (README, DECISIONS 95)",
+    "tutorial: прогоны обучающих миссий на настоящем движке — долгие (M11, DECISIONS 100)",
 ]
 
 [tool.ruff]

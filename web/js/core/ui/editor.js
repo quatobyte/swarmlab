@@ -66,6 +66,7 @@ export class Editor {
     this.gen = null; // последний результат генерации из блоков
     this.savedBlocks = "";
     this._regenTimer = 0;
+    this.mission = null; // обучение (M11): MissionRun из ui/tutorial.js или null
   }
 
   // ------------------------------------------------------------ вход и выход
@@ -154,6 +155,10 @@ export class Editor {
     };
     $("match-start").onclick = () => this.start();
     $("match-stop").onclick = () => this.h.stop();
+    $("mission-start").onclick = () => this.start();
+    $("mission-stop").onclick = () => this.h.stop();
+    $("mission-list").onclick = () => this.h.missions?.();
+    $("mission-free").onclick = () => this.setMission(null).then(() => history.replaceState(null, "", "#editor"));
     $("match-error").onclick = () => this._jumpToError();
     $("ed-status").onclick = () => this._jumpToError();
     window.addEventListener("beforeunload", (e) => {
@@ -505,6 +510,37 @@ export class Editor {
     await api.saveScript(name, gen.code, { format: 1, mode: "blocks", workspace });
   }
 
+  // ------------------------------------------------------------ обучение (M11)
+
+  /**
+   * Режим миссии (DECISIONS №100): программа — файл кампании (создаётся из стартовых блоков
+   * модуля), вместо формы матча — панель миссии. `null` — обычный редактор.
+   * `false` — не вышло (пользователь не бросил несохранённые правки другого файла).
+   */
+  async setMission(run) {
+    await this._ready;
+    if (this.mission) this.mission.decided = true; // прежняя миссия больше не судит матч
+    this.mission = null;
+    document.body.classList.remove("mission");
+    $("mission").hidden = true;
+    if (!run) return true;
+    const name = run.script;
+    await this._loadScripts();
+    if (!this.scripts.some((s) => s.name === name)) {
+      const workspace = run.campaign.starterWorkspace();
+      const gen = this.mod.generateBlocks(workspace, { file: blocksName(name) });
+      await api.saveScript(name, gen.code, { format: 1, mode: "blocks", workspace });
+      await this._loadScripts();
+    }
+    if (this.file?.name !== name) await this._switchFile(name);
+    if (this.file?.name !== name) return false;
+    this.mission = run;
+    document.body.classList.add("mission");
+    $("mission").hidden = false;
+    this._showStartError(null);
+    return true;
+  }
+
   /** Новый скрипт из блоков (режим по умолчанию для новых скриптов, DECISIONS №51). */
   async newBlocksScript() {
     if (!this.mod.BlocksEditor) return;
@@ -614,7 +650,8 @@ export class Editor {
 
   _showStartError(text, data) {
     this._startError = data && (data.line || data.block) ? data : null;
-    const el = $("match-error");
+    $(this.mission ? "match-error" : "mission-error").hidden = true;
+    const el = $(this.mission ? "mission-error" : "match-error");
     el.hidden = !text;
     el.textContent = text ? `${text}${this._startError ? " — нажмите, чтобы перейти к строке" : ""}` : "";
   }
@@ -639,15 +676,16 @@ export class Editor {
     if (!this.file) return;
     this._showStartError(null);
     if (!(await this._readyToRun())) return;
-    const body = this.panel.build();
-    $("match-start").disabled = true;
+    const body = this.mission ? this.mission.request(this.file.name, this.scripts) : this.panel.build();
+    const btn = $(this.mission ? "mission-start" : "match-start");
+    btn.disabled = true;
     try {
       await this.h.start(body);
     } catch (e) {
       this._showStartError(`Матч не запущен: ${e.message}`, e.data);
       if (this._startError) this._jumpToError();
     } finally {
-      $("match-start").disabled = false;
+      btn.disabled = false;
     }
   }
 
@@ -668,12 +706,16 @@ export class Editor {
     source.on("log", (msg) => this._onLog(msg));
     source.on("status", (st) => this.setRunning(!["finished", "stopped", "error"].includes(st.state)));
     source.on("close", () => this.setRunning(false));
+    // Судья миссии получает код, с которым матч запущен (сохранён перед стартом).
+    if (this.mission) this.mission.attach(source, this._payload(this.file.name).text);
   }
 
   setRunning(running) {
     this.running = running;
     $("match-stop").disabled = !running;
     $("match-start").textContent = running ? "↻ Перезапустить" : "▶ Запустить";
+    $("mission-stop").disabled = !running;
+    $("mission-start").textContent = running ? "↻ Начать заново" : "▶ Начать миссию";
   }
 
   // ------------------------------------------------------------ логи

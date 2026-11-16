@@ -116,6 +116,22 @@
       </div>
       <p class="error small" id="match-error" hidden></p>
     </section>
+    <section class="dock-mission" id="mission" hidden>
+      <h3 id="mission-title"></h3>
+      <div class="mission-goal" id="mission-goal"></div>
+      <div class="mission-progress" id="mission-progress"></div>
+      <div class="match-actions">
+        <button class="btn primary" id="mission-start" title="Сохранить программу и начать миссию (Ctrl+Enter)">▶ Начать миссию</button>
+        <button class="btn" id="mission-stop" disabled>■ Стоп</button>
+      </div>
+      <div class="match-actions">
+        <button class="btn" id="mission-list" title="Список миссий">Все миссии</button>
+        <button class="btn" id="mission-free" title="Выйти из обучения в обычный редактор">Свободная игра</button>
+      </div>
+      <p class="error small" id="mission-error" hidden></p>
+      <ul class="mission-hints" id="mission-hints"></ul>
+      <div class="mission-brief" id="mission-brief"></div>
+    </section>
     <section class="dock-logs">
       <div class="log-tabs" id="log-tabs"></div>
       <div class="log-body" id="log-body"></div>
@@ -144,6 +160,15 @@
     </div>
   </div>
 
+  <div id="tutorial" class="overlay" hidden>
+    <div class="lobby tutorial">
+      <h1><span id="tutorial-title">Обучение</span>
+        <button class="btn small" id="tutorial-back">← Меню</button></h1>
+      <p class="muted" id="tutorial-intro"></p>
+      <div class="mission-list" id="tutorial-list"></div>
+    </div>
+  </div>
+
   <div id="lobby" class="overlay">
     <div class="lobby">
       <h1>SwarmLab <small>рой пчёл</small>
@@ -153,6 +178,10 @@
           <button class="btn small" id="lobby-logout">Выйти</button>
         </span>
       </h1>
+      <section id="lobby-tutorial-section" hidden>
+        <p class="small"><button class="btn primary" id="lobby-tutorial">🎓 Обучение</button>
+          <span class="muted">— миссии по порядку: каждая учит новому приёму прямо в матче</span></p>
+      </section>
       <section>
         <h2>Матч: рои в ульях</h2>
         <div class="match-form lobby-form" id="lobby-form"><p class="muted small">Загрузка…</p></div>

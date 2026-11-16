@@ -1,0 +1,20 @@
+# Обучение, миссия 1 «Первый нектар» (M11, DECISIONS №100): цикл сборщика.
+# Цель и подсказки — web/js/modules/bees/missions_ru.js; улей 1 подменяет редактор (tutorial.py).
+#   swarmlab run configs/matches/tutorial_1.yaml --headless
+# Мир подобран прогонами: эталон проходит, пустая программа и сбор без «лететь домой» — нет.
+
+seed: 11
+profile: small
+duration_s: 180
+
+hives:
+  - {script: examples/bees/template.py, color: "#f5b700"}
+
+weather: {enabled: false}
+enemies:
+  spiders: {enabled: false}
+world:
+  flowers: {clusters_per_hive: 3, cluster_distance: [15.0, 30.0]}   # цветы рядом с ульем
+economy:
+  start_honey: 10.0
+  start_bees: {scout: 0, forager: 3, house: 3}

@@ -6,6 +6,7 @@ export const MODULES = {
   bees: {
     viewer: () => import("./bees/index.js"),
     editor: () => import("./bees/editor.js"),
+    missions: () => import("./bees/missions.js"), // обучение (M11, DECISIONS №100)
   },
 };
 
