@@ -95,29 +95,78 @@ function messageRe(key) {
   return new RegExp(src);
 }
 
-/** Какой совет (`ERRORS_RU`) к какому сообщению: первое совпадение. */
-const ERROR_RULES = [
-  ...["emptyInput", "wrongSubject", "unsetVariable", "duplicate", "badName"].map((key) => [messageRe(key), key]),
-  [/'NoneType' object has no attribute/, "nothingAttr"],
-  [/say: первым идёт слово/, "sayWord"],
-  [/say: не больше \d+ сообщений/, "sayMany"],
-  [/получено None|NoneType/, "nothing"],
-  [/нужно (?:обычное )?число/, "needNumber"],
-  [/их можно только читать/, "readonly"],
-  [/ZeroDivisionError/, "zero"],
-  [/UnboundLocalError|NameError/, "unsetVariable"],
-  [/не ответил за|бесконечный цикл|работал .* при бюджете|RecursionError/, "slow"],
-  [/не загрузился/, "load"],
+/** Сообщения генератора блоков об ошибках: у каждого свой совет с тем же ключом. */
+export const GENERATOR_ERRORS = [
+  "emptyInput", "wrongSubject", "procWrongSubject", "procMixed", "unsetVariable", "duplicate", "badName",
+  "reservedName", "nameClash", "recursion", "unknownProc", "returnOutside", "flowOutside", "unknownBlock", "emptyCode",
 ];
+
+/**
+ * Какой совет (`ERRORS_RU`) к какому сообщению: первое совпадение. Порядок — от точного к общему:
+ * редактор блоков, команды пчёл (api.py), Python, ядро и сервер, в конце — совет по классу ошибки.
+ */
+const ERROR_RULES = [
+  ...GENERATOR_ERRORS.map((key) => [messageRe(key), key]),
+  // Команды пчёл и улья.
+  [/say: первым идёт слово/, "sayWord"],
+  [/say: слово не длиннее/, "sayLong"],
+  [/say: не больше .+ сообщений/, "sayMany"],
+  [/после x нужен y|y пишут только после числа x/, "coords"],
+  [/получено None/, "nothing"],
+  [/куда\?/, "badTarget"],
+  [/нужно (?:обычное )?число/, "needNumber"],
+  [/скорость больше нуля/, "speed"],
+  [/цвет запаха/, "color"],
+  [/от 0 до .+ \(%\)/, "percent"],
+  [/секунды не могут быть отрицательными/, "waitNegative"],
+  [/их можно только читать/, "readonly"],
+  [/Данные появятся/, "early"],
+  [/тип пчелы/, "kind"],
+  [/Ждать можно только внутри/, "outsideLoop"],
+  // Python.
+  [/'NoneType' object has no attribute/, "nothingAttr"],
+  [/object is not iterable/, "notList"],
+  [/(?:not supported between|unsupported operand).*NoneType/, "nothingValue"],
+  [/not supported between|unsupported operand|can only concatenate|must be str, not/, "typeMix"],
+  [/NoneType/, "nothing"],
+  [/positional arguments?|unexpected keyword argument/, "args"],
+  [/ZeroDivisionError|division by zero|modulo by zero/, "zero"],
+  [/UnboundLocalError|NameError/, "unsetVariable"],
+  [/RecursionError/, "deep"],
+  [/IndexError/, "index"],
+  [/KeyError/, "key"],
+  [/IndentationError|Ошибка отступа/, "indent"],
+  [/SyntaxError|Синтаксическая ошибка|Ошибка в тексте/, "syntax"],
+  [/ImportError|ModuleNotFoundError|FileNotFoundError|Нет файла/, "import"],
+  [/has no attribute/, "attr"],
+  // Ядро и сервер.
+  [/улей отключён/, "disabled"],
+  [/раннер перезапускается/, "restart"],
+  [/не ответил за|бесконечный цикл/, "slow"],
+  [/работал .* при бюджете/, "budget"],
+  [/не загрузился/, "load"],
+  [/раннер завершился|раннер не работает/, "crash"],
+  [/битый ответ|Поток отдал хосту|Неизвестный тип|Ошибка конфига|Нет матча|Недопустимое имя/, "game"],
+  [/Failed to fetch|NetworkError|Load failed/, "server"],
+  // Незнакомое сообщение знакомого класса.
+  [/TypeError/, "typeOther"],
+  [/ValueError/, "value"],
+  [/AttributeError/, "attr"],
+];
+
+/** Ключ совета (`ERRORS_RU`) к сообщению; незнакомая ошибка — `other`. */
+export function errorKind(message) {
+  const text = String(message || "");
+  const rule = ERROR_RULES.find(([re]) => re.test(text));
+  return rule ? rule[1] : "other";
+}
 
 /**
  * Как исправить ошибку: совет к сообщению генератора блоков, к ошибке Python во время матча
  * или к предупреждению ядра. Незнакомая ошибка — общий совет.
  */
 export function explainError(message) {
-  const text = String(message || "");
-  const rule = ERROR_RULES.find(([re]) => re.test(text));
-  return ERRORS_RU[rule ? rule[1] : "other"];
+  return ERRORS_RU[errorKind(message)];
 }
 
 // ------------------------------------------------------------------ запуск

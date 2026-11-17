@@ -4,10 +4,11 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { BLOCKS_API } from "../../web/js/modules/bees/blocks_api.js";
 import { toolbox, toolboxBlocks } from "../../web/js/modules/bees/blocks_editor.js";
-import { API_RU, CATEGORIES, CUSTOM_RU } from "../../web/js/modules/bees/blocks_ru.js";
+import { API_RU, CATEGORIES, CUSTOM_RU, MESSAGES } from "../../web/js/modules/bees/blocks_ru.js";
 import { generate } from "../../web/js/modules/bees/blocks_gen.js";
 import {
-  MISSIONS, createTracker, editorSetup, explainError, matchRequest, programParts, starterWorkspace,
+  GENERATOR_ERRORS, MISSIONS, createTracker, editorSetup, errorKind, explainError, matchRequest, programParts,
+  starterWorkspace,
 } from "../../web/js/modules/bees/missions.js";
 import { PICTURES, inProgram } from "../../web/js/modules/bees/missions_pics.js";
 import { ERRORS_RU, HINTS_RU, RESULT_RU } from "../../web/js/modules/bees/missions_ru.js";
@@ -145,7 +146,8 @@ const fixOf = (hints, key) => hints.find(([, h]) => h.id === key)?.[1].fix;
   for (const v of Object.values(CUSTOM_RU)) words.add(label(v.label));
   for (const [name] of Object.values(CATEGORIES)) words.add(name);
   // Не блоки: кнопки, Blockly и значения.
-  for (const w of ["↻ Начать заново", "▶ Начать миссию", "если … то …", "ничего", "ничто", "присвоить", "повторять, пока", "и", "или", "ложь", "цветок", "Памятка", "Свободная игра", "Программе пчелы сборщик", "Программа пчелы разведчик",
+  for (const w of ["↻ Начать заново", "▶ Начать миссию", "если … то …", "ничего", "ничто", "присвоить", "повторять, пока", "для каждого элемента", "вернуть", "выйти из цикла",
+    "перейти к следующему шагу цикла", "и", "или", "ложь", "цветок", "Памятка", "Свободная игра", "Программе пчелы сборщик", "Программа пчелы разведчик",
     "Программу пчелы сборщик", "Программы пчелы сборщик", "Программу улья", "Программе улья",
     "Программа пчелы сборщик", "Программа улья", "Программе улья", "перебрать все цветы", "Копилка", "Орда",
     "вывести сборщик", "вывести разведчик", "сколько пчёл: сборщик", "сколько пчёл: разведчик"]) words.add(w);
@@ -258,24 +260,103 @@ const fixOf = (hints, key) => hints.find(([, h]) => h.id === key)?.[1].fix;
   for (const call of ["self.explore()", "self.collect(", "self.go_home()", "is not None"]) assert.ok(code.includes(call), call);
 }
 
-// Совет, как исправить ошибку (DECISIONS №104): по сообщению генератора, ошибке Python, ядру.
+// Совет, как исправить ошибку (DECISIONS №104): у каждой ошибки, которую может увидеть игрок, — свой.
 {
-  const cases = [
-    ["Не заполнено: цель.", "emptyInput"],
-    ["Этот блок не для программы «разведчик».", "wrongSubject"],
-    ["Переменная «цветок» здесь ещё не задана.", "unsetVariable"],
-    ["UnboundLocalError: cannot access local variable 'цветок' where it is not associated with a value", "unsetVariable"],
-    ["TypeError: collect: куда? Нужна цель — цветок, пчела, сообщение, точка или x, y; а получено None", "nothing"],
-    ["AttributeError: 'NoneType' object has no attribute 'nectar'", "nothingAttr"],
-    ["TypeError: wait: нужно число, а получено 'пять'", "needNumber"],
-    ["TypeError: say: первым идёт слово в кавычках, например say(\"flowers\"), а получено 3", "sayWord"],
-    ["ValueError: say: не больше 4 сообщений за тик", "sayMany"],
-    ["ZeroDivisionError: division by zero", "zero"],
-    ["3 тика подряд без ответа — раннер перезапускается (№1); всё, что пчёлы хранили в self, потеряно", "other"],
-    ["тик 12 пропущен: код улья не ответил за 100 мс при бюджете 20 мс — бесконечный цикл без команд в loop()?", "slow"],
-    ["KeyError: 'x'", "other"],
+  const seen = new Set();
+  const kind = (message) => {
+    const k = errorKind(message);
+    assert.equal(explainError(message), ERRORS_RU[k], message);
+    seen.add(k);
+    return k;
+  };
+  // Общие советы: годятся только для ошибки, которой нет в списках ниже.
+  const FALLBACK = new Set(["other", "typeOther", "value", "attr"]);
+
+  // 1. Редактор блоков: каждое сообщение об ошибке из blocks_ru.js — со своим советом.
+  const NOT_ERRORS = new Set(["askPrefix", "fullSuffix", "header", "header2", "header3"]);
+  const genKeys = Object.keys(MESSAGES).filter((k) => typeof MESSAGES[k] === "string" && !NOT_ERRORS.has(k));
+  assert.deepEqual([...GENERATOR_ERRORS].sort(), [...genKeys].sort(), "у каждого сообщения генератора есть совет");
+  for (const key of genKeys) {
+    assert.ok(ERRORS_RU[key], `нет совета для сообщения генератора ${key}`);
+    assert.equal(kind(`В блоках есть ошибки: ${MESSAGES[key].replace(/\{\w+\}/g, "нечто")}`), key);
+  }
+
+  // 2. Команды пчёл и раннер: каждое `raise` с текстом в исходниках — не общий совет.
+  const source = (path) => readFileSync(new URL(`../../src/swarmlab/${path}`, import.meta.url), "utf8");
+  const raised = (src) => {
+    const out = [];
+    for (const m of src.matchAll(/raise (\w+)\(/g)) {
+      let i = m.index + m[0].length;
+      for (let depth = 1; depth > 0 && i < src.length; i++) depth += src[i] === "(" ? 1 : src[i] === ")" ? -1 : 0;
+      const call = src.slice(m.index + m[0].length, i - 1);
+      const text = [...call.matchAll(/f?"((?:[^"\\]|\\.)*)"/g)].map((x) => x[1]).join("")
+        .replace(/\{[^{}]*\}/g, "нечто").replace(/\\"/g, '"');
+      if (text) out.push(`${m[1]}: ${text}`);
+    }
+    return out;
+  };
+  const api = raised(source("bees/api.py"));
+  assert.equal(api.length, 15, "ошибок с текстом в api.py — столько, сколько проверено здесь");
+  const runner = [...raised(source("core/program.py")), ...raised(source("bees/player_host.py"))];
+  assert.equal(runner.length, 5);
+  for (const message of [...api, ...runner]) assert.ok(!FALLBACK.has(kind(message)), `только общий совет: ${message}`);
+  // «Ничто» в команде — отдельный совет, каким бы ни было остальное сообщение.
+  assert.equal(kind("TypeError: collect: куда? Нужна цель — цветок, пчела, сообщение, точка или x, y; а получено None"), "nothing");
+  assert.equal(kind("TypeError: wait: нужно число, а получено None"), "nothing");
+  assert.equal(kind("TypeError: fly_to: куда? Нужна цель — цветок, пчела, сообщение, точка или x, y; а получено 'flowers'"), "badTarget");
+  assert.equal(kind("TypeError: say: первым идёт слово в кавычках, например say(\"flowers\"), а получено None"), "sayWord");
+
+  // 3. Ядро: все сообщения `[ядро]` из runner_host.py — восемь предупреждений и «запуск раннера»
+  // (не ошибка); «тик пропущен» бывает с двумя причинами.
+  const CORE = [
+    ["раннер завершился при запуске: код 1", "crash"],
+    ["скрипт не загрузился:\nTraceback (most recent call last):", "load"],
+    ["раннер завершился: код 1", "crash"],
+    ["битый ответ раннера отброшен: 'tick'", "game"],
+    ["тик 40: код работал 31.5 мс при бюджете 20 мс — команды тика отброшены (превышений: 3)", "budget"],
+    ["тик 12 пропущен: код улья не ответил за 200 мс при бюджете 20 мс — бесконечный цикл без команд в loop()? (1 подряд, всего 1)", "slow"],
+    ["тик 12 пропущен: раннер не работает (1 подряд, всего 1)", "crash"],
+    ["3 тика подряд без ответа; лимит перезапусков (20) исчерпан — улей отключён, пчёлы продолжают последние команды", "disabled"],
+    ["3 тика подряд без ответа — раннер перезапускается (№1); всё, что пчёлы хранили в self, потеряно", "restart"],
   ];
-  for (const [message, key] of cases) assert.equal(explainError(message), ERRORS_RU[key], message);
+  const coreLines = source("core/runner_host.py").match(/"\[ядро\] /g).length;
+  assert.equal(coreLines, 9, "сообщений ядра в runner_host.py — столько, сколько проверено здесь");
+  for (const [message, key] of CORE) assert.equal(kind(message), key, message);
+
+  // 4. Python и запуск матча: типовые ошибки.
+  const PYTHON = [
+    ["AttributeError: 'NoneType' object has no attribute 'nectar'", "nothingAttr"],
+    ["AttributeError: 'Flower' object has no attribute 'word'", "attr"],
+    ["TypeError: '<' not supported between instances of 'NoneType' and 'int'", "nothingValue"],
+    ["TypeError: unsupported operand type(s) for +: 'NoneType' and 'int'", "nothingValue"],
+    ["TypeError: '<' not supported between instances of 'str' and 'int'", "typeMix"],
+    ["TypeError: unsupported operand type(s) for +: 'int' and 'str'", "typeMix"],
+    ["TypeError: can only concatenate str (not \"int\") to str", "typeMix"],
+    ["TypeError: 'NoneType' object is not iterable", "notList"],
+    ["TypeError: 'int' object is not iterable", "notList"],
+    ["TypeError: 'NoneType' object is not subscriptable", "nothing"],
+    ["TypeError: MyCollector.loop() takes 0 positional arguments but 1 was given", "args"],
+    ["TypeError: найти() missing 1 required positional argument: 'x'", "args"],
+    ["TypeError: 'int' object is not callable", "typeOther"],
+    ["IndexError: list index out of range", "index"],
+    ["KeyError: 'x'", "key"],
+    ["ZeroDivisionError: division by zero", "zero"],
+    ["NameError: name 'цветок' is not defined", "unsetVariable"],
+    ["UnboundLocalError: cannot access local variable 'цветок' where it is not associated with a value", "unsetVariable"],
+    ["RecursionError: maximum recursion depth exceeded", "deep"],
+    ["ValueError: math domain error", "value"],
+    ["ModuleNotFoundError: No module named 'numpy'", "import"],
+    ["Матч не запущен: tutorial.py, строка 7: Синтаксическая ошибка: invalid syntax", "syntax"],
+    ["Матч не запущен: tutorial.py, строка 7: Ошибка отступа: unexpected indent", "indent"],
+    ["SyntaxError: invalid syntax", "syntax"],
+    ["Матч не запущен: Ошибка конфига: hives: нужен список", "game"],
+    ["Матч не запущен: Failed to fetch", "server"],
+    ["MemoryError", "other"],
+  ];
+  for (const [message, key] of PYTHON) assert.equal(kind(message), key, message);
+
+  // Нет советов, до которых не добраться.
+  assert.deepEqual(Object.keys(ERRORS_RU).filter((k) => !seen.has(k)), [], "советы без правила");
 }
 
 console.log("ok");

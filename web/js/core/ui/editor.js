@@ -806,8 +806,9 @@ export class Editor {
     }
     if (text.startsWith("[ядро]") || text.startsWith("[сервер]")) {
       if (/пропущен|бюджет|отключ|перезапуск/.test(text)) t.warn += 1;
-      // Обучение (DECISIONS №104): программа игрока зависла или не загрузилась — окном с советом.
-      if (this.mission && baseName(t.script) === this.file?.name && /перезапуск|отключ|не загрузился/.test(text)) {
+      // Обучение (DECISIONS №104): программа игрока зависла, не загрузилась или третий раз не уложилась
+      // в бюджет тика — окном с советом.
+      if (this.mission && baseName(t.script) === this.file?.name && /перезапуск|отключ|не загрузился|превышений: 3\)/.test(text)) {
         this.unlock("logs");
         this.mission.runError(text.replace(/^\[ядро\]\s*/, ""), null);
       }
