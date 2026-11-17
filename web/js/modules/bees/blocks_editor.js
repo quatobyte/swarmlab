@@ -279,6 +279,46 @@ const THEME = {
 
 const GRID = 32; // шаг сетки рабочей области
 
+function theme() {
+  const Bl = B();
+  return Bl.Theme.defineTheme(THEME.name, { base: Bl.Themes.Classic, ...THEME });
+}
+
+/**
+ * Картинка из блоков (обучение, DECISIONS №104): рабочая область только для чтения внутри `el`,
+ * по размеру блоков. `el` должен быть в документе (размеры текста). Возвращает «убрать картинку».
+ */
+export function renderBlocks(el, workspace, { scale = 0.75, minScale = 0.5, pad = 10 } = {}) {
+  defineBlocks();
+  const Bl = B();
+  const ws = Bl.inject(el, {
+    readOnly: true, renderer: "zelos", theme: theme(), media: "vendor/blockly/media/", sounds: false,
+    scrollbars: false, trashcan: false, zoom: { controls: false, wheel: false, startScale: scale },
+    move: { scrollbars: false, drag: false, wheel: false },
+  });
+  Bl.Events.disable();
+  try {
+    Bl.serialization.workspaces.load(workspace, ws);
+  } finally {
+    Bl.Events.enable();
+  }
+  Bl.renderManagement.finishQueuedRenders().then(() => {
+    if (!el.isConnected) return;
+    const box = ws.getBlocksBoundingBox();
+    // Широкая картинка уменьшается до ширины рамки (но не мельче minScale: дальше рамка прокручивается).
+    const frame = el.parentElement;
+    const cs = frame ? getComputedStyle(frame) : null;
+    const room = cs ? frame.clientWidth - parseFloat(cs.paddingLeft) - parseFloat(cs.paddingRight) : Infinity;
+    const k = Math.max(minScale, Math.min(scale, (room - 2 * pad) / (box.right - box.left)));
+    if (k !== scale) ws.setScale(k);
+    el.style.width = `${Math.ceil((box.right - box.left) * k + 2 * pad)}px`;
+    el.style.height = `${Math.ceil((box.bottom - box.top) * k + 2 * pad)}px`;
+    Bl.svgResize(ws);
+    ws.scroll(pad - box.left * k, pad - box.top * k);
+  });
+  return () => ws.dispose();
+}
+
 export class BlocksEditor {
   /** onChange() — после каждого изменения рабочей области (не во время перетаскивания). */
   constructor(el, { onChange }) {
@@ -291,7 +331,7 @@ export class BlocksEditor {
     this.ws = Bl.inject(el, {
       toolbox: this.tb,
       media: "vendor/blockly/media/",
-      theme: Bl.Theme.defineTheme(THEME.name, { base: Bl.Themes.Classic, ...THEME }),
+      theme: theme(),
       grid: { spacing: GRID, length: 2, colour: "#26303b", snap: true },
       zoom: { controls: true, wheel: true, startScale: 0.75, maxScale: 2, minScale: 0.35 },
       trashcan: true,

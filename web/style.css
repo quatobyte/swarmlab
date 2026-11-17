@@ -392,7 +392,7 @@ body.lock-help #ed-help { display: none; }
 body.lock-project #ed-export { display: none; }
 body.lock-free #mission-free { display: none; }
 /* Окна обучения посреди экрана: брифинг, подсказки, итог. */
-.mission-window .modal { width: min(560px, calc(100vw - 32px)); padding: 20px 22px; border-color: var(--accent);
+.mission-window .modal { width: min(680px, calc(100vw - 32px)); padding: 20px 22px; border-color: var(--accent);
   box-shadow: 0 18px 60px rgba(0, 0, 0, 0.6); }
 .mission-window h3 { font-size: 21px; margin: 0 0 10px; }
 .mw-kicker { color: var(--accent); font-size: 12px; font-weight: 700; letter-spacing: 0.04em; text-transform: uppercase; margin-bottom: 4px; }
@@ -400,6 +400,13 @@ body.lock-free #mission-free { display: none; }
 .mw-body p { margin: 0 0 10px; font-size: 16px; line-height: 1.5; white-space: pre-wrap; }
 .mw-body .mw-goal { font-size: 18px; font-weight: 600; }
 .mw-body .mw-stats { color: var(--muted); font-size: 14px; }
+.mw-body .mw-error { font: 13px/1.45 Consolas, "Cascadia Mono", monospace; color: #ffb4a8; background: rgba(230, 57, 70, 0.12);
+  border-left: 3px solid var(--bad, #e63946); border-radius: 6px; padding: 8px 10px; }
+/* Картинка-пример из блоков (DECISIONS №104): настоящие блоки, только для чтения. */
+.mw-picture { margin: 4px 0 10px; padding: 6px; background: #161b22; border: 1px solid var(--line); border-radius: 10px;
+  overflow: auto; max-height: 46vh; }
+.mw-canvas { width: 480px; height: 160px; pointer-events: none; }
+.mw-canvas .blocklyMainBackground { stroke: none; fill: transparent; }
 .mw-note { margin: 4px 0 0; color: var(--muted); font-size: 13px; line-height: 1.4; }
 .mission-window .modal-actions { align-items: center; margin-top: 16px; }
 .mw-foot { margin-right: auto; }

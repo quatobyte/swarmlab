@@ -3,7 +3,9 @@
 // Ядро не знает, чему учит кампания: миссии, их цели, подсказки и тексты даёт модуль
 // (`missions` в registry.js). Модуль кампании отдаёт:
 //   CAMPAIGN {title, intro, script}           — название, вступление, файл программы игрока;
-//   MISSIONS [{id, title, brief[], fresh, goal}] — по порядку прохождения;
+//   MISSIONS [{id, title, brief[], examples[{pic, title, text}], fresh, goal}] — по порядку;
+//   illustrate(el, pic)                        — нарисовать картинку примера в `el` → «убрать»;
+//   explainError(message)                      — совет, как исправить ошибку программы;
 //   starterWorkspace()                         — блоки новой программы игрока;
 //   editorSetup(mission)                       — что открыто в редакторе: {features[], blocks};
 //   matchRequest(mission, {script, scripts})   — тело POST /api/matches;
@@ -11,7 +13,8 @@
 //       update(frame) → {progress, hints[{id, text, fix}], result?};  finish(score, stopped) → result.
 //   result = {win, title, text, stats}.
 // Ядро хранит прогресс в браузере и показывает: список миссий, полосу миссии над полем (цель,
-// прогресс, кнопки) и окна посреди экрана — брифинг по страницам, подсказки и итог (№103).
+// прогресс, кнопки) и окна посреди экрана — брифинг по страницам с картинками-примерами,
+// подсказки, ошибки программы с советом и итог (№103, №104).
 
 import { DEFAULT_MODULE, MODULES } from "../../modules/registry.js";
 
@@ -110,12 +113,13 @@ export function closeWindow() {
 }
 
 /**
- * Окно посреди экрана (DECISIONS №103): `{kicker, title, body[], note, foot, actions, esc}`.
- * body — абзацы: строка или `{text, cls}`; actions — `[[подпись, действие, главная?]]`, действие
+ * Окно посреди экрана (DECISIONS №103): `{kicker, title, body[], note, foot, actions, esc, draw}`.
+ * body — абзацы: строка, `{text, cls}` или картинка `{picture}` — её рисует `draw(el, picture)`
+ * (возвращает «убрать картинку»); actions — `[[подпись, действие, главная?]]`, действие
  * выполняется после закрытия окна; esc — действие по Esc (без него Esc окно не закрывает).
  * Новое окно заменяет прежнее.
  */
-export function showWindow({ kicker = "", title = "", body = [], note = "", foot = "", actions = [], esc = null }) {
+export function showWindow({ kicker = "", title = "", body = [], note = "", foot = "", actions = [], esc = null, draw = null }) {
   closeWindow();
   const back = el("div", "modal-back mission-window");
   const box = el("div", "modal");
@@ -123,12 +127,24 @@ export function showWindow({ kicker = "", title = "", body = [], note = "", foot
   if (kicker) box.append(el("div", "mw-kicker", kicker));
   if (title) box.append(el("h3", "", title));
   const text = el("div", "mw-body");
-  for (const p of body) text.append(typeof p === "string" ? el("p", "", p) : el("p", p.cls || "", p.text));
+  const pictures = []; // [элемент, данные] — рисуются, когда окно уже в документе
+  for (const p of body) {
+    if (typeof p === "string") text.append(el("p", "", p));
+    else if (p.picture !== undefined) {
+      const frame = el("div", "mw-picture");
+      const canvas = el("div", "mw-canvas");
+      frame.append(canvas);
+      text.append(frame);
+      pictures.push([canvas, p.picture]);
+    } else text.append(el("p", p.cls || "", p.text));
+  }
   box.append(text);
+  const cleanup = [];
   if (note) box.append(el("p", "mw-note", note));
   const row = el("div", "modal-actions");
   if (foot) row.append(el("span", "mw-foot muted small", foot));
   const close = () => {
+    for (const undo of cleanup) undo();
     back.remove();
     window.removeEventListener("keydown", onKey, true);
     if (windowClose === close) windowClose = null;
@@ -152,6 +168,11 @@ export function showWindow({ kicker = "", title = "", body = [], note = "", foot
   window.addEventListener("keydown", onKey, true);
   document.body.append(back);
   windowClose = close;
+  for (const [canvas, picture] of pictures) {
+    const undo = draw?.(canvas, picture);
+    if (typeof undo === "function") cleanup.push(undo);
+    else canvas.parentElement.remove(); // картинку нарисовать нечем — страница остаётся с текстом
+  }
   box.querySelector(".btn.primary")?.focus();
 }
 
@@ -162,7 +183,7 @@ export function showPages(pages, { last = "Понятно", done = null } = {}, 
   const actions = [];
   if (i > 0) actions.push(["← Назад", () => showPages(pages, { last, done }, i - 1)]);
   actions.push(end ? [last, done, true] : ["Далее →", () => showPages(pages, { last, done }, i + 1), true]);
-  showWindow({ ...page, foot: pages.length > 1 ? `${i + 1} из ${pages.length}` : "", actions, esc: done || (() => {}) });
+  showWindow({ draw: null, ...page, foot: pages.length > 1 ? `${i + 1} из ${pages.length}` : "", actions, esc: done || (() => {}) });
 }
 
 const clock = (time) => `${Math.floor(time / 60)}:${String(Math.floor(time % 60)).padStart(2, "0")}`;
@@ -209,10 +230,14 @@ export class MissionRun {
     this._renderHints();
   }
 
-  /** Брифинг по страницам: сюжет, что нового, цель (DECISIONS №103). */
+  /** Брифинг по страницам: сюжет, примеры с картинками, что нового, цель (DECISIONS №103, №104). */
   brief() {
     const m = this.mission;
+    const draw = (canvas, pic) => this.campaign.illustrate?.(canvas, pic);
     const pages = m.brief.map((text) => ({ kicker: this.name, title: "Задание", body: [text] }));
+    for (const ex of m.examples || []) {
+      pages.push({ kicker: this.name, title: ex.title, body: [ex.text, { picture: ex.pic }], draw });
+    }
     if (m.fresh) pages.push({ kicker: this.name, title: "Что нового", body: [{ text: m.fresh, cls: "mission-fresh" }] });
     pages.push({
       kicker: this.name, title: "Цель миссии", body: [{ text: m.goal.replace(/^./, (c) => c.toUpperCase()), cls: "mw-goal" }],
@@ -281,12 +306,28 @@ export class MissionRun {
     this._ask();
   }
 
-  /** Ошибка во время матча в программе игрока (редактор) — то же окно, что у важной подсказки. */
+  /**
+   * Ошибка во время матча в программе игрока (редактор): окно с паузой, как у важной подсказки,
+   * с советом кампании, как исправить (DECISIONS №104). Одна на матч. `show` — показать место.
+   */
   runError(message, show) {
     if (this.decided || this.erred) return;
     this.erred = true;
-    this.queue.push({ text: `В программе ошибка: ${message}`, show });
+    this.queue.push({ error: message, show });
     this._ask();
+  }
+
+  /** Программа не запустилась (ошибка в блоках, отказ сервера) — окно с советом. */
+  startError(message, show) {
+    showWindow({
+      kicker: this.name, title: "⚠ Программа не запустилась", body: this._errorBody(message),
+      actions: [show ? ["Показать блок", show, true] : ["Понятно", null, true]], esc: () => {},
+    });
+  }
+
+  _errorBody(message) {
+    const advice = this.campaign.explainError?.(message) || "";
+    return [{ text: message, cls: "mw-error" }, ...(advice ? [{ text: advice }] : [])];
   }
 
   _ask() {
@@ -294,7 +335,7 @@ export class MissionRun {
     this.asking = true;
     this.h.pause();
     const item = this.queue.shift();
-    const text = typeof item === "string" ? item : item.text;
+    const error = typeof item === "object";
     const fix = () => {
       // Игрок идёт править программу: матч больше не нужен, окна итога не будет.
       this.asking = false;
@@ -309,8 +350,9 @@ export class MissionRun {
       else this.h.resume();
     };
     showWindow({
-      kicker: this.name, title: "💡 Подсказка", body: [text], note: "Матч на паузе.",
-      actions: [["Продолжить матч", go], ["Поправить программу", fix, true]], esc: go,
+      kicker: this.name, title: error ? "⚠ Ошибка в программе" : "💡 Подсказка",
+      body: error ? this._errorBody(item.error) : [item], note: "Матч на паузе.",
+      actions: [["Продолжить матч", go], [error && item.show ? "Показать блок" : "Поправить программу", fix, true]], esc: go,
     });
   }
 

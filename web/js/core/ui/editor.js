@@ -683,6 +683,8 @@ export class Editor {
     const el = $(this.mission ? "mission-error" : "match-error");
     el.hidden = !text;
     el.textContent = text ? `${text}${this._startError ? " — нажмите, чтобы перейти к строке" : ""}` : "";
+    // Обучение (DECISIONS №104): ошибка запуска — ещё и окном с советом, как исправить.
+    if (text && this.mission) this.mission.startError(text, this._startError ? () => this._jumpToError() : null);
   }
 
   // ------------------------------------------------------------ матч
@@ -804,6 +806,11 @@ export class Editor {
     }
     if (text.startsWith("[ядро]") || text.startsWith("[сервер]")) {
       if (/пропущен|бюджет|отключ|перезапуск/.test(text)) t.warn += 1;
+      // Обучение (DECISIONS №104): программа игрока зависла или не загрузилась — окном с советом.
+      if (this.mission && baseName(t.script) === this.file?.name && /перезапуск|отключ|не загрузился/.test(text)) {
+        this.unlock("logs");
+        this.mission.runError(text.replace(/^\[ядро\]\s*/, ""), null);
+      }
       return "core";
     }
     return "";

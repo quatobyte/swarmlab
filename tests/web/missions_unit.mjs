@@ -7,9 +7,10 @@ import { toolbox, toolboxBlocks } from "../../web/js/modules/bees/blocks_editor.
 import { API_RU, CATEGORIES, CUSTOM_RU } from "../../web/js/modules/bees/blocks_ru.js";
 import { generate } from "../../web/js/modules/bees/blocks_gen.js";
 import {
-  MISSIONS, createTracker, editorSetup, matchRequest, programParts, starterWorkspace,
+  MISSIONS, createTracker, editorSetup, explainError, matchRequest, programParts, starterWorkspace,
 } from "../../web/js/modules/bees/missions.js";
-import { HINTS_RU, RESULT_RU } from "../../web/js/modules/bees/missions_ru.js";
+import { PICTURES, inProgram } from "../../web/js/modules/bees/missions_pics.js";
+import { ERRORS_RU, HINTS_RU, RESULT_RU } from "../../web/js/modules/bees/missions_ru.js";
 
 const ref = (name) => readFileSync(new URL(`../bees/tutorial/${name}`, import.meta.url), "utf8").replace(/\r\n/g, "\n");
 const COLS = ["scout", "forager", "house", "in_hive"];
@@ -144,13 +145,13 @@ const fixOf = (hints, key) => hints.find(([, h]) => h.id === key)?.[1].fix;
   for (const v of Object.values(CUSTOM_RU)) words.add(label(v.label));
   for (const [name] of Object.values(CATEGORIES)) words.add(name);
   // Не блоки: кнопки, Blockly и значения.
-  for (const w of ["↻ Начать заново", "▶ Начать миссию", "если … то …", "ничего", "ничто", "присвоить", "повторять, пока", "и", "или", "Памятка", "Свободная игра", "Программе пчелы сборщик", "Программа пчелы разведчик",
-    "Программу пчелы сборщик", "Программе улья",
+  for (const w of ["↻ Начать заново", "▶ Начать миссию", "если … то …", "ничего", "ничто", "присвоить", "повторять, пока", "и", "или", "ложь", "цветок", "Памятка", "Свободная игра", "Программе пчелы сборщик", "Программа пчелы разведчик",
+    "Программу пчелы сборщик", "Программы пчелы сборщик", "Программу улья", "Программе улья",
     "Программа пчелы сборщик", "Программа улья", "Программе улья", "перебрать все цветы", "Копилка", "Орда",
     "вывести сборщик", "вывести разведчик", "сколько пчёл: сборщик", "сколько пчёл: разведчик"]) words.add(w);
   const texts = [
-    ...Object.values(HINTS_RU), ...Object.values(RESULT_RU.need),
-    ...MISSIONS.flatMap((m) => [m.fresh, m.goal, ...m.brief]),
+    ...Object.values(HINTS_RU), ...Object.values(RESULT_RU.need), ...Object.values(ERRORS_RU),
+    ...MISSIONS.flatMap((m) => [m.fresh, m.goal, ...m.brief, ...(m.examples || []).flatMap((e) => [e.title, e.text])]),
   ];
   const bad = [];
   for (const text of texts) {
@@ -219,6 +220,62 @@ const fixOf = (hints, key) => hints.find(([, h]) => h.id === key)?.[1].fix;
   assert.deepEqual(editorSetup(mission(1)).blocks.programs, ["collector"]);
   assert.ok(editorSetup(mission(3)).features.includes("logs"));
   assert.equal(editorSetup(mission(6)).blocks.blocks, null, "с миссии 6 открыт весь редактор");
+}
+
+// Картинки-примеры в задании (DECISIONS №104): у каждой страницы есть картинка, картинка собрана
+// из блоков, открытых в своей миссии, и генератор принимает её без ошибок.
+{
+  const used = new Set();
+  const types = (b, out = []) => {
+    if (!b) return out;
+    out.push(b.type);
+    for (const v of Object.values(b.inputs || {})) types(v.block, out);
+    return types(b.next?.block, out);
+  };
+  for (const m of MISSIONS) {
+    const open = editorSetup(m).blocks.blocks;
+    for (const ex of m.examples || []) {
+      const pic = PICTURES[ex.pic];
+      assert.ok(pic, `миссия ${m.id}: нет картинки ${ex.pic}`);
+      assert.ok(ex.title && ex.text, `миссия ${m.id}: у примера ${ex.pic} нет подписи`);
+      used.add(ex.pic);
+      const g = generate(inProgram(pic), { file: "pic.blocks.json" });
+      assert.deepEqual(g.errors, [], `картинка ${ex.pic}: ${JSON.stringify(g.errors)}`);
+      assert.match(g.code, new RegExp(`class My${pic.kind[0].toUpperCase()}${pic.kind.slice(1)}\\b`), ex.pic);
+      if (open) {
+        const allowed = new Set([...open, "bees_program_bee", "bees_program_hive"]);
+        if (allowed.has("variables")) ["variables_get", "variables_set"].forEach((t) => allowed.add(t));
+        for (const top of pic.workspace.blocks.blocks) {
+          for (const t of types(top)) assert.ok(allowed.has(t), `картинка ${ex.pic}: блок ${t} в миссии ${m.id} ещё закрыт`);
+        }
+      }
+    }
+  }
+  assert.deepEqual(Object.keys(PICTURES).filter((k) => !used.has(k)), [], "картинка без страницы в задании");
+  assert.ok(MISSIONS.slice(0, 5).every((m) => m.examples?.length), "в миссиях 1–5 есть пример с картинкой");
+  // Первая программа на картинке — рабочая: та же, что эталон миссии 1.
+  const code = programParts(generate(PICTURES.m1_program.workspace, {}).code).collector;
+  for (const call of ["self.explore()", "self.collect(", "self.go_home()", "is not None"]) assert.ok(code.includes(call), call);
+}
+
+// Совет, как исправить ошибку (DECISIONS №104): по сообщению генератора, ошибке Python, ядру.
+{
+  const cases = [
+    ["Не заполнено: цель.", "emptyInput"],
+    ["Этот блок не для программы «разведчик».", "wrongSubject"],
+    ["Переменная «цветок» здесь ещё не задана.", "unsetVariable"],
+    ["UnboundLocalError: cannot access local variable 'цветок' where it is not associated with a value", "unsetVariable"],
+    ["TypeError: collect: куда? Нужна цель — цветок, пчела, сообщение, точка или x, y; а получено None", "nothing"],
+    ["AttributeError: 'NoneType' object has no attribute 'nectar'", "nothingAttr"],
+    ["TypeError: wait: нужно число, а получено 'пять'", "needNumber"],
+    ["TypeError: say: первым идёт слово в кавычках, например say(\"flowers\"), а получено 3", "sayWord"],
+    ["ValueError: say: не больше 4 сообщений за тик", "sayMany"],
+    ["ZeroDivisionError: division by zero", "zero"],
+    ["3 тика подряд без ответа — раннер перезапускается (№1); всё, что пчёлы хранили в self, потеряно", "other"],
+    ["тик 12 пропущен: код улья не ответил за 100 мс при бюджете 20 мс — бесконечный цикл без команд в loop()?", "slow"],
+    ["KeyError: 'x'", "other"],
+  ];
+  for (const [message, key] of cases) assert.equal(explainError(message), ERRORS_RU[key], message);
 }
 
 console.log("ok");

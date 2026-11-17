@@ -8,7 +8,10 @@
 // Сценарий и тексты — missions_ru.js. Ядро (core/ui/tutorial.js) зовёт createTracker и
 // показывает подсказки и итог.
 
-import { CAMPAIGN, HINTS_RU, MISSIONS, RESULT_RU } from "./missions_ru.js";
+import { renderBlocks } from "./blocks_editor.js";
+import { MESSAGES } from "./blocks_ru.js";
+import { PICTURES } from "./missions_pics.js";
+import { CAMPAIGN, ERRORS_RU, HINTS_RU, MISSIONS, RESULT_RU } from "./missions_ru.js";
 
 export { CAMPAIGN, MISSIONS };
 
@@ -76,6 +79,45 @@ export function editorSetup(mission) {
       emptyKinds: Object.values(KINDS),
     },
   };
+}
+
+// ------------------------------------------------------------------ картинки и ошибки
+
+/** Нарисовать картинку из блоков (`examples[].pic`) в `el`; возвращает «убрать картинку». */
+export function illustrate(el, pic) {
+  const p = PICTURES[pic];
+  return p ? renderBlocks(el, p.workspace) : null;
+}
+
+/** Сообщение генератора блоков (`MESSAGES[key]`) → регулярное выражение: `{имя}` — что угодно. */
+function messageRe(key) {
+  const src = MESSAGES[key].replace(/[.*+?^$()|[\]\\]/g, "\\$&").replace(/\{\w+\}/g, ".+");
+  return new RegExp(src);
+}
+
+/** Какой совет (`ERRORS_RU`) к какому сообщению: первое совпадение. */
+const ERROR_RULES = [
+  ...["emptyInput", "wrongSubject", "unsetVariable", "duplicate", "badName"].map((key) => [messageRe(key), key]),
+  [/'NoneType' object has no attribute/, "nothingAttr"],
+  [/say: первым идёт слово/, "sayWord"],
+  [/say: не больше \d+ сообщений/, "sayMany"],
+  [/получено None|NoneType/, "nothing"],
+  [/нужно (?:обычное )?число/, "needNumber"],
+  [/их можно только читать/, "readonly"],
+  [/ZeroDivisionError/, "zero"],
+  [/UnboundLocalError|NameError/, "unsetVariable"],
+  [/не ответил за|бесконечный цикл|работал .* при бюджете|RecursionError/, "slow"],
+  [/не загрузился/, "load"],
+];
+
+/**
+ * Как исправить ошибку: совет к сообщению генератора блоков, к ошибке Python во время матча
+ * или к предупреждению ядра. Незнакомая ошибка — общий совет.
+ */
+export function explainError(message) {
+  const text = String(message || "");
+  const rule = ERROR_RULES.find(([re]) => re.test(text));
+  return ERRORS_RU[rule ? rule[1] : "other"];
 }
 
 // ------------------------------------------------------------------ запуск
