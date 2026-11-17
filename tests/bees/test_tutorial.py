@@ -1,7 +1,8 @@
 """Обучение (M11, DECISIONS №100): миры миссий на настоящем движке.
 
 Для каждой миссии эталон (`tests/bees/tutorial/ref_N.py`) проходит цель, а программа прошлой
-миссии — нет: без нового приёма миссию не пройти. Цель судит тот же
+миссии — нет: без нового приёма миссию не пройти. Миссия 8 — экзамен без нового приёма
+(DECISIONS №102): её не проходит программа миссии 5. Цель судит тот же
 `web/js/modules/bees/missions.js`, что и браузер, — под Node (`tests/web/missions_check.mjs`)
 по счёту матча раз в секунду. Без Node.js прогоны пропускаются.
 
@@ -27,6 +28,8 @@ CONFIGS = ROOT / "configs"
 REF = Path(__file__).parent / "tutorial"
 JUDGE = ROOT / "tests" / "web" / "missions_check.mjs"
 MATCHES = sorted((CONFIGS / "matches").glob("tutorial_*.yaml"))
+# Чья программа обязана провалить миссию, если не программа прошлой (DECISIONS №102).
+FAILS_WITH = {1: "empty.py", 8: "ref_5.py"}
 NODE = shutil.which("node")
 
 
@@ -113,7 +116,7 @@ def test_missions_js_knows_every_tutorial_match():
 def test_reference_passes_and_previous_program_fails(n, tmp_path):
     ok = play(n, REF / f"ref_{n}.py", tmp_path)
     assert ok["win"], f"эталон миссии {n} не прошёл: {ok}"
-    prev = REF / ("empty.py" if n == 1 else f"ref_{n - 1}.py")
+    prev = REF / FAILS_WITH.get(n, f"ref_{n - 1}.py")
     bad = play(n, prev, tmp_path)
     assert bad["win"] is False, (
         f"миссию {n} прошла программа без нового приёма ({prev.name}): {bad}")

@@ -1,0 +1,23 @@
+# Обучение, миссия 8 «Турнир трёх ульев» (M11, DECISIONS №100, №102): экзамен без нового приёма.
+# Счёт — мёд в улье к концу матча. Соперники: «Копилка» (предел 7 сборщиков) и «Орда»
+# (три разведчика, до 14 сборщиков). Мир как в миссиях 6–7, поле больше на три улья.
+
+seed: 65
+profile: small
+duration_s: 720
+
+hives:
+  - {script: examples/bees/template.py, color: "#f5b700"}
+  - {script: examples/bees/example_rival_hoarder.py, color: "#3a86ff"}
+  - {script: examples/bees/example_rival_horde.py, color: "#e63946"}
+
+weather: {enabled: true}
+enemies:
+  spiders: {enabled: true, flower_fraction: 0.15, kill_prob_per_s: 0.5}
+world:
+  n_hives: 3
+  map_size: 180.0
+  flowers: {clusters_per_hive: 4, flowers_per_cluster: 12, cluster_distance: [20.0, 50.0], nectar_max: 6.0, regen_per_s: 0.02}
+economy:
+  start_honey: 10.0
+  start_bees: {scout: 1, forager: 4, house: 3}
