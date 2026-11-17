@@ -278,7 +278,9 @@ class LiveMatch:
 
 
 def main() -> int:
-    channel_in = sys.stdin.buffer
+    # Daemon-поток может ждать новый кадр, когда главный поток уже закончил матч.
+    # Небуферизованный FileIO не держит lock BufferedReader при завершении Python.
+    channel_in = sys.stdin.buffer.raw
     out = Channel(sys.stdout.buffer)
     sys.stdout = sys.stderr  # print из кода ядра/модуля не попадёт в канал
     inbox: queue.Queue[dict[str, Any] | None] = queue.Queue()

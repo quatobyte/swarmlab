@@ -147,6 +147,25 @@ def test_stop_of_queued_match_removes_it_from_queue(make):
     assert p.app.state.manager.active() == 1
 
 
+def test_admin_sees_queue_and_stops_other_users_matches(make):
+    p = make(matches={"total": 1})
+    admin, a, b = p.user("admin@b.ru"), p.user("a@b.ru"), p.user("b@b.ru")
+    p.portal.accounts.set_role(_uid(p, admin), "admin")
+    assert admin.login("admin@b.ru")[0] == 200
+    ma = _start(a)[1]["id"]
+    _wait(a, ma, "running")
+    mb = _start(b)[1]["id"]
+    _wait(b, mb, "queued")
+    code, status = admin.json("GET", "/api/admin/status")
+    assert code == 200
+    assert {"cpu_percent", "disk_free", "matches"} <= status.keys()
+    assert {(m["id"], m["queue"]) for m in status["matches"]} == {(ma, None), (mb, 1)}
+    assert admin.json("POST", f"/api/admin/matches/{mb}/stop")[0] == 200
+    _wait(b, mb, "stopped")
+    assert admin.json("POST", f"/api/admin/matches/{ma}/stop")[0] == 200
+    _wait(a, ma, "stopped")
+
+
 @pytest.mark.parametrize("override, part", [
     ("profile=large", "Профиль large"),
     ("world.map_size=1000", "задаёт профиль"),

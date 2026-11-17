@@ -42,3 +42,4 @@ logs/
 
 # данные портала (`serve --public`, M9a): база и папки пользователей
 data/
+backups/

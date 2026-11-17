@@ -10,8 +10,25 @@ if ($HostName -notmatch '^[a-zA-Z0-9_.-]+@[a-zA-Z0-9_.-]+$') {
     throw 'Неверный SSH-адрес'
 }
 function Remote([string]$Script) {
-    $Script | ssh -o BatchMode=yes -o ConnectTimeout=10 $HostName 'bash -se'
-    if ($LASTEXITCODE -ne 0) { throw "Команда на сервере завершилась с кодом $LASTEXITCODE" }
+    $start = [System.Diagnostics.ProcessStartInfo]::new('ssh')
+    foreach ($arg in @('-o', 'BatchMode=yes', '-o', 'ConnectTimeout=10', $HostName, 'bash -se')) {
+        [void]$start.ArgumentList.Add($arg)
+    }
+    $start.UseShellExecute = $false
+    $start.RedirectStandardInput = $true
+    $start.RedirectStandardOutput = $true
+    $start.RedirectStandardError = $true
+    $process = [System.Diagnostics.Process]::Start($start)
+    $stdout = $process.StandardOutput.ReadToEndAsync()
+    $stderr = $process.StandardError.ReadToEndAsync()
+    $process.StandardInput.Write($Script.Replace("`r`n", "`n").TrimEnd("`r", "`n") + "`n")
+    $process.StandardInput.Close()
+    $process.WaitForExit()
+    if ($stderr.Result) { [Console]::Error.Write($stderr.Result) }
+    if ($process.ExitCode -ne 0) {
+        throw "Команда на сервере завершилась с кодом $($process.ExitCode)"
+    }
+    $stdout.Result.TrimEnd("`r", "`n")
 }
 if ($Backup) {
     $name = (Remote 'cd /opt/swarmlab/deploy; docker compose exec -T swarmlab python /app/tools/backup.py create /data /backups' | Select-Object -Last 1).Trim()
