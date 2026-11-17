@@ -602,7 +602,13 @@ def _print_bench(report: Any) -> None:
 def _cmd_create_admin(args: argparse.Namespace) -> int:
     import getpass
 
-    from swarmlab.server.accounts import AccountError, Accounts, Database, load_settings
+    from swarmlab.server.accounts import (
+        AccountError,
+        Accounts,
+        Database,
+        load_settings,
+        normalize_email,
+    )
 
     db = Database(args.data / "swarmlab.db")
     try:
@@ -611,19 +617,26 @@ def _cmd_create_admin(args: argparse.Namespace) -> int:
                   file=sys.stderr)
             return 1
         accounts = Accounts(db, load_settings())
-        password = getpass.getpass("Пароль нового администратора: ")
-        repeat = getpass.getpass("Повторите пароль: ")
-        if password != repeat:
-            print("Пароли не совпадают", file=sys.stderr)
-            return 1
         try:
-            accounts.check_password_rules(password)
-            user, _ = accounts.register(args.email, password, "admin-cli")
-            accounts.set_role(user.id, "admin")
+            email = normalize_email(args.email)
+            existing = db.one("SELECT id FROM users WHERE email = ?", (email,))
+            password = getpass.getpass("Пароль администратора: ")
+            if existing:
+                accounts.verify_user_password(existing["id"], password)
+                user_id = existing["id"]
+            else:
+                repeat = getpass.getpass("Повторите пароль: ")
+                if password != repeat:
+                    print("Пароли не совпадают", file=sys.stderr)
+                    return 1
+                accounts.check_password_rules(password)
+                user, _ = accounts.register(email, password, "admin-cli")
+                user_id = user.id
+            accounts.set_role(user_id, "admin")
         except AccountError as e:
             print(e.message, file=sys.stderr)
             return 1
-        print(f"Администратор {user.email} создан. Войдите с заданным паролем.")
+        print(f"Администратор {email} готов. Войдите с заданным паролем.")
         return 0
     finally:
         db.close()

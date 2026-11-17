@@ -228,8 +228,12 @@ class Database:
                 """)
         if version < 2:
             with self._lock:
-                self.conn.execute("ALTER TABLE users ADD COLUMN blocked INTEGER NOT NULL DEFAULT 0")
-                self.conn.execute("PRAGMA user_version = 2")
+                self.conn.executescript("""
+                    BEGIN;
+                    ALTER TABLE users ADD COLUMN blocked INTEGER NOT NULL DEFAULT 0;
+                    PRAGMA user_version = 2;
+                    COMMIT;
+                """)
 
     @contextmanager
     def tx(self) -> Iterator[sqlite3.Connection]:

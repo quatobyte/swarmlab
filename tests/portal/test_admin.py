@@ -7,6 +7,9 @@ from pathlib import Path
 
 from tools.backup import create, restore
 
+from swarmlab.cli import main
+from swarmlab.server.accounts import Database
+
 
 def test_admin_access_and_account_actions(portal) -> None:
     admin = portal.user("admin@example.com")
@@ -61,3 +64,29 @@ def test_backup_restores_database_and_user_files(tmp_path: Path) -> None:
         assert db.execute("SELECT email FROM users").fetchone()[0] == "bee@example.com"
     assert (clean / "users" / "1" / "projects" / "hive.swarm").read_bytes() == b"project"
     assert (clean / "users" / "1" / "replays" / "match.swr").read_bytes() == b"replay"
+
+
+def test_existing_database_migrates_blocked_column(tmp_path: Path) -> None:
+    path = tmp_path / "old.db"
+    with sqlite3.connect(path) as old:
+        old.execute("CREATE TABLE users (id INTEGER PRIMARY KEY, email TEXT)")
+        old.execute("INSERT INTO users VALUES (1, 'bee@example.com')")
+        old.execute("PRAGMA user_version = 1")
+    db = Database(path)
+    try:
+        row = db.one("SELECT blocked FROM users WHERE id = 1")
+        assert row["blocked"] == 0
+        assert db.one("PRAGMA user_version")[0] == 2
+    finally:
+        db.close()
+
+
+def test_create_first_admin_cli(tmp_path: Path, monkeypatch) -> None:
+    answers = iter(["strong password 123", "strong password 123"])
+    monkeypatch.setattr("getpass.getpass", lambda _: next(answers))
+    assert main(["admin", "create-admin", "leo@example.com", "--data", str(tmp_path)]) == 0
+    db = Database(tmp_path / "swarmlab.db")
+    try:
+        assert db.one("SELECT role FROM users WHERE email = ?", ("leo@example.com",))[0] == "admin"
+    finally:
+        db.close()
