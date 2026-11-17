@@ -592,6 +592,26 @@ export class BlocksEditor {
     }
   }
 
+  /**
+   * Отладчик (DECISIONS №105): отметить блок, который сейчас выполняет программа (`null` — снять).
+   * Блок вне видимой части рабочей области — прокрутить к нему. Возвращает, найден ли блок.
+   */
+  highlight(id) {
+    if (id === this.runningId) return !!id;
+    if (this.runningId) this.ws.getBlockById(this.runningId)?.removeClass?.("sl-running");
+    this.runningId = null;
+    const b = id ? this.ws.getBlockById(id) : null;
+    if (!b) return false;
+    b.addClass?.("sl-running");
+    this.runningId = id;
+    const view = this.ws.getMetricsManager().getViewMetrics(true);
+    const box = b.getBoundingRectangle();
+    const inside = box.right > view.left && box.left < view.left + view.width
+      && box.bottom > view.top && box.top < view.top + view.height;
+    if (!inside) this.ws.centerOnBlock(id);
+    return true;
+  }
+
   /** Прокрутить к блоку и выделить его. */
   focus(id) {
     const b = this.ws.getBlockById(id);

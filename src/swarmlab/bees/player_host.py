@@ -31,7 +31,7 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
-from swarmlab.bees import api
+from swarmlab.bees import api, debug
 from swarmlab.core.program import Order, Program
 from swarmlab.core.protocol import CommandBatch, SensorBatch
 
@@ -56,7 +56,8 @@ class PlayerLoadError(RuntimeError):
 class _Agent:
     """Пчела или улей в хосте: объект игрока, его поток и услышанное."""
 
-    __slots__ = ("epoch", "inbox", "kind", "label", "obj", "passes", "program", "view")
+    __slots__ = ("epoch", "error", "inbox", "kind", "label", "obj", "passes", "program", "sent",
+                 "view")
 
     def __init__(self, kind: str, label: str, team: int) -> None:
         self.kind = kind
@@ -70,6 +71,9 @@ class _Agent:
         self.passes = 0
         #: Услышанное: (отправитель, слово) → (сообщение, проход, в который пришло).
         self.inbox: dict[tuple[int, str], tuple[api.Message, int]] = {}
+        #: Отладчик (DECISIONS №105): последняя ошибка `loop()` и последний отправленный снимок.
+        self.error: dict[str, Any] | None = None
+        self.sent: dict[str, Any] | None = None
 
 
 class HiveHost:
@@ -85,6 +89,9 @@ class HiveHost:
         self._seq = 0
         self._cpu = 0.0
         self._error_counts: dict[tuple[str, str, int], int] = {}
+        #: Собирать сведения для отладчика (`hello.debug`, DECISIONS №105).
+        self.debug = False
+        self._script_file = ""
 
     # --------------------------------------------------------------- загрузка
 
@@ -94,8 +101,10 @@ class HiveHost:
             if key in options:
                 api._RULES[key] = int(options[key])
         self.team = int(hello.get("team", 0))
+        self.debug = bool(hello.get("debug"))
         script = Path(str(hello["script"])).resolve()
         self.script_dir = script.parent
+        self._script_file = str(script)
         try:
             module = self._import(script)
         except Exception as e:
@@ -136,12 +145,15 @@ class HiveHost:
         self._cpu = 0.0
         commands: dict[int, dict[str, Any]] = {}
         errors: list[int] = []
+        changes: dict[str, Any] = {}
         rows = {int(raw["me"]["id"]): raw for raw in batch.agents}
 
         # Погибшие пчёлы — закрыть потоки (finally выполнится) и забыть (id не повторяются).
         for uid in [u for u in self.agents if u not in rows]:
             agent = self.agents.pop(uid)
             self._close(agent, f"finally пчелы id={uid}")
+            if agent.sent is not None:
+                changes[str(uid)] = None  # отладчику: пчелы больше нет
 
         for uid in sorted(rows):  # фиксированный порядок — детерминизм
             raw = rows[uid]
@@ -154,6 +166,8 @@ class HiveHost:
                 errors.append(uid)
             if cmd:
                 commands[uid] = cmd
+            if self.debug:
+                self._snapshot(agent, str(uid), changes)
 
         team_command = None
         view = batch.team_view
@@ -165,6 +179,8 @@ class HiveHost:
             team_command, failed = self._tick(self.hive, view, None, batch.tick)
             if failed:
                 errors.append(-1)  # ошибка в loop() улья
+            if self.debug:
+                self._snapshot(self.hive, "hive", changes)
 
         return CommandBatch(
             tick=batch.tick,
@@ -172,7 +188,15 @@ class HiveHost:
             team_command=team_command or None,
             cpu_ms=self._cpu * 1000.0,
             errors=errors,
+            debug=changes if self.debug and changes else None,
         )
+
+    def _snapshot(self, agent: _Agent, key: str, changes: dict[str, Any]) -> None:
+        """Снимок программы агента для отладчика — в `changes`, если изменился с прошлого раза."""
+        snap = debug.snapshot(agent.program, agent.obj, agent.view.heard, self._script_file,
+                              agent.error)
+        if snap != agent.sent:
+            agent.sent = changes[key] = snap
 
     def _tick(
         self, agent: _Agent, raw: dict[str, Any], me: dict[str, Any] | None, tick: int
@@ -212,6 +236,11 @@ class HiveHost:
         except Exception as e:
             agent.program = None
             self._report(e, f"{agent.label}, тик {tick}", restart=True)
+            if self.debug:
+                lines = [f.lineno for f in traceback.extract_tb(e.__traceback__)
+                         if f.filename == self._script_file]
+                text = "".join(traceback.format_exception_only(type(e), e)).strip()
+                agent.error = {"text": text[:300], "line": lines[-1] if lines else None}
             return ({"move": ["stop"]} if me is not None else {}), True
         finally:
             self._cpu += perf() - t0

@@ -10,10 +10,10 @@
 
 | Направление   | `t`        | Поля |
 |---------------|------------|------|
-| ядро → раннер | `hello`    | `v, module, team, script, seed, budget_ms, options` |
+| ядро → раннер | `hello`    | `v, module, team, script, seed, budget_ms, options, debug` |
 | раннер → ядро | `ready`    | `v, ok, classes, error, log` |
 | ядро → раннер | `sensors`  | SensorBatch: `tick, team, budget_ms, team_view, agents` |
-| раннер → ядро | `commands` | CommandBatch: `tick, commands, team_command, cpu_ms, errors, log` |
+| раннер → ядро | `commands` | `tick, commands, team_command, cpu_ms, errors, log, debug` |
 | ядро → раннер | `stop`     | — |
 """
 
@@ -83,7 +83,10 @@ class CommandBatch:
     `commands` — команда для каждого агента, который что-то решил (остальные
     продолжают прошлую команду); `team_command` — решение уровня команды (для
     пчёлок — улей); `cpu_ms` — время кода игрока на этот тик, мс; `errors` —
-    агенты, у которых код упал с исключением; `log` — вывод `print` и трассировки.
+    агенты, у которых код упал с исключением; `log` — вывод `print` и трассировки;
+    `debug` — сведения для отладчика (DECISIONS №105): есть, только если ядро попросило
+    их в `hello` (`debug: true`); форму определяет модуль, ядро её не читает, на команды
+    и реплей она не влияет.
     """
 
     tick: int
@@ -92,9 +95,10 @@ class CommandBatch:
     cpu_ms: float = 0.0
     errors: list[AgentId] = field(default_factory=list)
     log: list[str] = field(default_factory=list)
+    debug: Any = None
 
     def to_message(self) -> dict[str, Any]:
-        return {
+        msg = {
             "t": "commands",
             "tick": self.tick,
             "commands": self.commands,
@@ -103,6 +107,9 @@ class CommandBatch:
             "errors": self.errors,
             "log": self.log,
         }
+        if self.debug is not None:
+            msg["debug"] = self.debug
+        return msg
 
     @classmethod
     def from_message(cls, msg: dict[str, Any]) -> CommandBatch:
@@ -116,6 +123,7 @@ class CommandBatch:
             cpu_ms=float(msg.get("cpu_ms", 0.0)),
             errors=[int(e) for e in msg.get("errors") or []],
             log=[str(s) for s in msg.get("log") or []],
+            debug=msg.get("debug"),
         )
 
 

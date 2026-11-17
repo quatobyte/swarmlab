@@ -21,6 +21,7 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from dataclasses import dataclass
+from types import FrameType
 from typing import Any
 
 from greenlet import GreenletExit, getcurrent, greenlet
@@ -138,6 +139,21 @@ class Program:
     def at_pass_end(self) -> bool:
         """Поток дошёл до конца прохода `loop()` и ждёт следующего тика."""
         return self.waiting is _TICK
+
+    def stack(self) -> list[FrameType]:
+        """Кадры стека ждущего потока, от самого вложенного наружу (отладчик, DECISIONS №105).
+
+        Пусто, если поток не запущен, мёртв или выполняется прямо сейчас. Только чтение:
+        на ход программы не влияет.
+        """
+        if self._g.dead or not self.started:
+            return []
+        out: list[FrameType] = []
+        frame = self._g.gr_frame
+        while frame is not None:
+            out.append(frame)
+            frame = frame.f_back
+        return out
 
     def close(self) -> None:
         """Закрыть поток: внутри выполнится `finally` (исключение из него выходит наружу)."""

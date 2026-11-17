@@ -73,6 +73,7 @@ swarmlab/
       sensors.py  comms.py  pheromones.py
       control.py      # команды игрока: разбор CommandBatch, режимы движения (SoA)
       player_host.py  # AgentHost: код игрока в раннере (импорт скрипта, Sensors, исключения)
+      debug.py        # снимок программы для отладчика: строка, команда, переменные (M12, DECISIONS №105)
       demo.py         # доверенные демо-пилоты без раннера (M0, M1)
       economy.py  enemies.py  weather.py   # счёт и выбывание — в module.py
       api.py          # то, что видит игрок: Scout, Collector, Worker, Hive, Point… (DECISIONS №85)
@@ -148,13 +149,14 @@ class PhysicsBackend(Protocol):
 
 | Направление | `t` | Поля |
 |---|---|---|
-| ядро → раннер | `hello` | `v, module, team, script, seed, budget_ms, options` (правила матча для API игрока) |
+| ядро → раннер | `hello` | `v, module, team, script, seed, budget_ms, options` (правила матча для API игрока), `debug` (просьба слать сведения для отладчика, DECISIONS №105) |
 | раннер → ядро | `ready` | `v, ok, classes {kind: имя класса}, error` (трассировка, если скрипт не загрузился), `log` |
 | ядро → раннер | `sensors` | `SensorBatch {tick, team, budget_ms, team_view, agents: [AgentSensors…]}` (у пчёлок `team_view` — улей) |
-| раннер → ядро | `commands` | `CommandBatch {tick, commands: {agent_id: Command}, team_command \| None, cpu_ms, errors: [agent_id], log: [строки]}` (у пчёлок `team_command` — решения улья) |
+| раннер → ядро | `commands` | `CommandBatch {tick, commands: {agent_id: Command}, team_command \| None, cpu_ms, errors: [agent_id], log: [строки], debug?}` (у пчёлок `team_command` — решения улья) |
 | ядро → раннер | `stop` | — |
 
 - В `commands` только агенты, которые что-то решили; остальные продолжают прошлую команду. `log` — вывод `print` игрока и трассировки.
+- **Отладчик** (M12, DECISIONS №105). Если в `hello` стоит `debug: true`, раннер добавляет в `commands` поле `debug` — сведения модуля о программах агентов. Ядро их не читает: `RunnerPool` отдаёт их приёмнику `on_debug(team, tick, сведения)` (`Simulation(on_debug=…, debug_filter=…)`), на команды, состояние мира и реплей они не влияют. У пчёлок это `{ключ агента: снимок | None}` (`"hive"` — улей, `None` — пчелы больше нет), снимок собирает `bees/debug.py` по стеку ждущего потока (`Program.stack()`): строка файла игрока, ожидаемая команда, круг, переменные, `self`, услышанное, последняя ошибка; шлётся, только когда изменился. Сбор — только чтение, вне бюджета кода игрока.
 - **Ожидание команды** (DECISIONS №61, №84). `loop()` каждого агента живёт только в раннере, в своём потоке `greenlet` (`core/program.py`, `Program`; без импорта модулей), ядро и модуль его не видят. Хост переключает потоки строго по порядку `uid` (улей — последним); конец прохода `loop()` — ожидание следующего тика. Команда, выполнения которой ждут, переключает поток обратно в хост и уходит модулю с полем `"wait": seq` (номер ожидания, > 0). Модуль хранит ожидание по слотам, сам проверяет условие и таймаут в игровом времени и кладёт статус в сенсоры агента: `"wait": [seq, состояние, результат]` (0 — идёт, 1 — выполнено, 2 — не вышло; результат — номер найденного цветка или −1). Хост продолжает поток, когда видит свой `seq` с состоянием 1 или 2; не видит своего `seq` (команда отброшена бюджетом или пропуском тика) — шлёт команду ещё раз, повтор не сбрасывает таймаут. `wait(секунды)` хост считает сам по времени из сенсоров. Агент пропал из пакета (погиб) или модуль увеличил `me["epoch"]` (конец автовозврата) — `greenlet.throw(GreenletExit)`, `finally` выполняется; `stop` — `AgentHost.close()`.
 - Сторона модуля в раннере — `AgentHost` (`load(hello)`, `step(SensorBatch) → CommandBatch`), находится по имени модуля в entry points `swarmlab.agent_hosts` (у пчёлок — `bees/player_host.py`). Формат `Command` пчёлок — BEES_SPEC §3.3.
 
@@ -237,6 +239,7 @@ class PhysicsBackend(Protocol):
 | `frame` | `tick, time, arrays, events` — байт в байт запись кадра `.swr` |
 | `status` | `state` (starting / running / paused / finished / stopped / error), `speed, time, duration_s, rtf, score, error` — при смене и раз в 1 с |
 | `log` | `team, name, time, lines` — новые строки лога кода игрока улья (`print`, трассировки, предупреждения ядра); опоздавшему зрителю — последние 1000 пакетов после header |
+| `debug` | `team, name, time, agents {ключ: снимок \| None}` — изменившиеся снимки программ для отладчика (M12, DECISIONS №105); только если матч запущен с `debug: true` (`POST /api/matches`) и только для ульев со скриптами из `scripts` запроса; в реплей не пишется; опоздавшему зрителю — последние снимки одним пакетом на улей |
 | `footer` | `frames, hash, score, replay` — реплей дописан |
 
   Клиент → JSON: `{t: "pause"}`, `{t: "resume"}`, `{t: "speed", value}`, `{t: "stop"}`. Неизвестный матч — закрытие с кодом 4404. Подключившийся позже получает header, последний status и кадр.

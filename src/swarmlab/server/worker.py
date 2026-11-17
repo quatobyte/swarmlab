@@ -114,6 +114,8 @@ class LiveMatch:
         self._rtf = 0.0
         self._log_lines: queue.Queue[tuple[int, str]] = queue.Queue()
         self._team_names: dict[int, str] = {}
+        #: Сведения для отладчика, ещё не отправленные зрителям: команда → {агент: снимок}.
+        self._debug: dict[int, dict[str, Any]] = {}
 
     # ------------------------------------------------------------ пакеты
 
@@ -151,6 +153,23 @@ class LiveMatch:
             self.out.send({"t": "log", "match_id": self.match_id, "team": team,
                            "name": self._team_names.get(team, f"hive{team}"),
                            "time": now, "lines": lines})
+        self.flush_debug()
+
+    def _on_debug(self, team: int, tick: int, data: Any) -> None:
+        """Сведения раннера для отладчика (DECISIONS №105): копятся до ближайшей отправки."""
+        if isinstance(data, dict):
+            self._debug.setdefault(team, {}).update(data)
+
+    def flush_debug(self) -> None:
+        """Изменившиеся снимки программ → пакеты `debug` (по одному на команду)."""
+        if not self._debug:
+            return
+        now = self.sim.time if self.sim else 0.0
+        pending, self._debug = self._debug, {}
+        for team, agents in pending.items():
+            self.out.send({"t": "debug", "match_id": self.match_id, "team": team,
+                           "name": self._team_names.get(team, f"hive{team}"),
+                           "time": now, "agents": agents})
 
     def _on_frame(self, frame: Any) -> None:
         assert self.writer is not None
@@ -165,9 +184,15 @@ class LiveMatch:
         self.status()
         log_dir = Path(s["log_dir"]) if s.get("log_dir") else None
         dirs = s.get("script_dirs")  # портал: код ульев — только из папок пользователя
-        self.sim = sim = Simulation(cfg, log_dir=log_dir,
-                                    script_dirs=[Path(d) for d in dirs] if dirs else None,
-                                    launch=RunnerLaunch.from_message(s.get("runner_launch")))
+        # Отладчик редактора: сведения просим только у команд со скриптами из этого списка.
+        debug = {str(name) for name in s.get("debug") or []}
+        self.sim = sim = Simulation(
+            cfg, log_dir=log_dir,
+            script_dirs=[Path(d) for d in dirs] if dirs else None,
+            launch=RunnerLaunch.from_message(s.get("runner_launch")),
+            on_debug=self._on_debug if debug else None,
+            debug_filter=lambda spec: spec.script is not None and spec.script.name in debug,
+        )
         if not isinstance(sim.module, Replayable):
             raise TypeError(f"Модуль {cfg.module} не отдаёт сцену (Replayable) — показать нечего")
         header = make_header(cfg, sim.teams, sim.module.scene())

@@ -287,3 +287,50 @@ def test_profiles_and_help(server):
     code, doc = server.json("GET", "/api/help")
     assert code == 200 and "fly_to" in doc["text"]
     json.dumps(profiles)
+
+
+# ===================================================================== отладчик (M12)
+
+
+def _debug_state(packets):
+    """Снимки программ из пакетов `debug`, собранные как у зрителя: команда → {агент: снимок}."""
+    state: dict[int, dict] = {}
+    for p in packets:
+        if p["t"] != "debug":
+            continue
+        agents = state.setdefault(p["team"], {})
+        for key, snap in p["agents"].items():
+            if snap is None:
+                agents.pop(key, None)
+            else:
+                agents[key] = snap
+    return state
+
+
+def test_debug_packets_only_on_request_and_late_viewer_gets_state(server):
+    """Отладчик (DECISIONS №105): снимки программ идут зрителю, только если редактор попросил."""
+    server.json("PUT", "/api/scripts/my_bees.py", {"text": SCRIPT_FLY})
+    path = (server.cfg.scripts / "my_bees.py").as_posix()
+    body = {"match": "m2_economy.yaml", "speed": 8.0, "scripts": ["my_bees.py"],
+            "overrides": ["duration_s=4", f'hives=[{{script: "{path}"}}]']}
+    code, plain = server.json("POST", "/api/matches", body)
+    assert code == 200, plain
+    assert not _debug_state(_run_and_collect(server, plain["id"]))
+
+    code, info = server.json("POST", "/api/matches", {**body, "debug": True})
+    assert code == 200, info
+    state = _debug_state(_run_and_collect(server, info["id"]))
+    assert list(state) == [0]
+    snaps = state[0]
+    assert "hive" in snaps and len(snaps) > 5
+    # Номера строк — по файлу игрока; у летящих пчёл программа ждёт команду.
+    text = SCRIPT_FLY.splitlines()
+    for key, snap in snaps.items():
+        assert snap["error"] is None, (key, snap)
+        if snap["line"] is not None:
+            assert "self." in text[snap["line"] - 1], (key, snap)
+    assert any(s["wait"] and s["wait"][0] != "wait" for s in snaps.values())
+
+    # Опоздавший зритель (страницу обновили) получает последние снимки одним пакетом.
+    late = _debug_state(_run_and_collect(server, info["id"]))
+    assert late == state

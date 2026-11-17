@@ -707,7 +707,8 @@ export class Editor {
     if (!this.file) return;
     this._showStartError(null);
     if (!(await this._readyToRun())) return;
-    const body = this.mission ? this.mission.request(this.file.name, this.scripts) : this.panel.build();
+    // `debug` — просим у сервера снимки программ для инспектора (DECISIONS №105).
+    const body = { ...(this.mission ? this.mission.request(this.file.name, this.scripts) : this.panel.build()), debug: true };
     const btn = $(this.mission ? "mission-start" : "match-start");
     btn.disabled = true;
     try {
@@ -727,6 +728,9 @@ export class Editor {
     this.runErrors = [];
     this.pendingFrame = new Map();
     this.logFilter = "all";
+    // Код, с которым запущен матч: по его строкам отладчик находит выполняемый блок.
+    this.runText = this._payload(this.file.name).text;
+    this.showRunning(null);
     this._renderLogTabs();
     this._renderLogs();
     this.cm?.performLint();
@@ -739,6 +743,27 @@ export class Editor {
     source.on("close", () => this.setRunning(false));
     // Судья миссии получает код, с которым матч запущен (сохранён перед стартом).
     if (this.mission) this.mission.attach(source, this._payload(this.file.name).text);
+  }
+
+  /**
+   * Отладчик (DECISIONS №105): подсветить место программы, которое сейчас выполняет выбранный
+   * на поле агент. `target` — {team, line} или null (снять подсветку). Возвращает, подсвечен ли блок.
+   */
+  showRunning(target) {
+    const t = target ? this.teams.get(target.team) : null;
+    const mine = !!t && !!this.file && baseName(t.script) === this.file.name
+      && target.line != null && this.runText != null;
+    const id = mine && this.mode === "blocks" ? this.mod.blockAtLine?.(this.runText, target.line) : null;
+    const shown = this.blocks?.highlight?.(id || null) || false;
+    if (this._runLine) {
+      this.cm.removeLineClass(this._runLine, "background", "cm-running");
+      this._runLine = null;
+    }
+    // Текст на вкладке Python — тот же, что запущен: строки совпадают, подсветка честная.
+    if (mine && this.cm && this.cm.getValue() === this.runText && target.line <= this.cm.lineCount()) {
+      this._runLine = this.cm.addLineClass(target.line - 1, "background", "cm-running");
+    }
+    return shown;
   }
 
   setRunning(running) {

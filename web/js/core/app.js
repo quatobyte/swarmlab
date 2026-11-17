@@ -33,7 +33,12 @@ class Session {
     this.title = title;
     this.viewer = null;
     this.seeking = false;
+    this.debug = []; // пакеты отладчика, пришедшие раньше, чем собрался вьюер модуля
     source.on("header", (h) => this._onHeader(h));
+    source.on("debug", (m) => {
+      if (this.viewer) this.viewer.setDebug?.(m.team, m.agents);
+      else this.debug.push(m);
+    });
     source.on("events", (ev) => this.viewer?.onEvents(ev));
     source.on("status", (st) => this._onStatus(st));
     source.on("footer", (f) => this._onFooter(f));
@@ -53,7 +58,12 @@ class Session {
     }
     const mod = await load();
     if (this.closed) return;
-    this.viewer = mod.createViewer({ stage, header });
+    // Отладчик (DECISIONS №105): вьюер сообщает, чью программу смотрит игрок и на какой она
+    // строке, — редактор подсвечивает это место.
+    this.viewer = mod.createViewer({
+      stage, header, onInspect: (target) => (editor.active ? editor.showRunning(target) : false),
+    });
+    for (const m of this.debug.splice(0)) this.viewer.setDebug?.(m.team, m.agents);
     $("info-title").textContent = this.title;
     $("clock-total").textContent = `/ ${fmtTime(header.duration_s)}`;
     setupBar(this);

@@ -105,6 +105,15 @@ html, body { margin: 0; height: 100%; overflow: hidden; background: #cfe3f2; }
 .follow h3 { margin: 0 0 6px; font-size: 14px; display: flex; align-items: center; gap: 6px; }
 .follow .kv { display: grid; grid-template-columns: auto 1fr; gap: 3px 10px; font-size: 13px; }
 .follow .kv span:nth-child(odd) { color: var(--muted); }
+.team.inspectable { cursor: pointer; }
+.team.inspectable:hover { outline: 1px solid var(--accent); }
+.follow .dbg { margin-top: 8px; padding-top: 8px; border-top: 1px solid var(--line); font-size: 13px; line-height: 1.35;
+  max-height: 46vh; overflow: auto; }
+.follow .dbg-doing { font-weight: 600; color: #ffd54a; }
+.follow .dbg-title { margin-top: 7px; color: var(--muted); font-size: 11px; text-transform: uppercase; letter-spacing: 0.04em; }
+.follow .dbg-var { overflow-wrap: anywhere; }
+.follow .dbg-var b { font-weight: 600; }
+.follow .dbg-error { margin-top: 4px; color: #ff8a8a; overflow-wrap: anywhere; }
 .meter { height: 6px; background: rgba(255,255,255,0.12); border-radius: 3px; overflow: hidden; align-self: center; }
 .meter i { display: block; height: 100%; background: var(--ok); }
 .meter.cargo i { background: var(--accent); }
@@ -211,6 +220,8 @@ body.editing .clock { font-size: 20px; }
 .blocklyPath { transition: stroke 0.2s; }
 .sl-error > .blocklyPath { stroke: #ff4d4d !important; stroke-width: 3px; }
 .sl-warning > .blocklyPath { stroke: #ffb347 !important; stroke-width: 2px; }
+.sl-running > .blocklyPath { stroke: #fff !important; stroke-width: 4px; filter: drop-shadow(0 0 7px #ffd54a); }
+.cm-running { background: rgba(255, 213, 74, 0.22) !important; }
 .sl-dup > .blocklyPath { stroke: #ff4d4d !important; stroke-width: 3px; stroke-dasharray: 8 5; }
 .ed-code .CodeMirror { height: 100%; font: 14px/1.45 Consolas, "Cascadia Mono", monospace; }
 .ed-foot { padding: 4px 10px; background: #1a1f26; border-top: 1px solid #000; }

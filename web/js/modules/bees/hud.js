@@ -1,6 +1,8 @@
 // HUD пчёлок: карточки ульев (место, мёд, нектар, численность по типам), погода и ветер,
 // лента событий по-русски, панель пчелы, за которой следит камера.
 
+import { DEBUG_RU, debugRows } from "./debug_ru.js";
+
 const $ = (id) => document.getElementById(id);
 
 export const KIND_RU = { scout: "разведчик", forager: "сборщик", house: "домашняя" };
@@ -24,7 +26,9 @@ function fmtT(t) {
 }
 
 export class BeesHud {
-  constructor(header) {
+  /** `onHive(h)` — клик по карточке улья (инспектор программы улья, M12). */
+  constructor(header, onHive = null) {
+    this.onHive = onHive;
     const scene = header.scene;
     this.scene = scene;
     this.colors = scene.hive_colors;
@@ -69,6 +73,7 @@ export class BeesHud {
         <div class="team-kinds">${KIND_SHORT.map(([k, s, title]) =>
           `<span title="${title}">${s} <b class="k-${k}">0</b></span>`).join("")}</div>
         <div class="honey-bar"><i></i></div>`;
+      el.onclick = () => this.onHive?.(h);
       box.appendChild(el);
       this.cards.push({
         el,
@@ -195,9 +200,22 @@ export class BeesHud {
     this.eliminated.clear();
   }
 
+  /** У улья есть снимок программы от отладчика: карточку можно нажать. */
+  markInspectable(h) {
+    const el = this.cards[h]?.el;
+    if (el && !el.classList.contains("inspectable")) {
+      el.classList.add("inspectable");
+      el.title = DEBUG_RU.hiveHint;
+    }
+  }
+
   // ------------------------------------------------------------ «следить»
 
-  showFollow(info, uid) {
+  /**
+   * Панель пчелы или улья. `info` — сведения из кадра (нет — пчела в улье), `debug` —
+   * {snap, blockShown}: снимок программы от отладчика (M12, DECISIONS №105), если он есть.
+   */
+  showFollow(info, uid, debug = null) {
     const el = $("follow");
     if (!info) {
       el.hidden = true;
@@ -205,12 +223,38 @@ export class BeesHud {
     }
     el.hidden = false;
     const meter = (cls, f) => `<span class="meter ${cls}"><i style="width:${(100 * f).toFixed(0)}%"></i></span>`;
-    el.innerHTML = `<h3>${this.teamTag(info.hive)} · ${KIND_RU[info.kind]} <span class="muted small">#${uid}</span></h3>
-      <div class="kv">
+    const hive = info.type === "hive";
+    const head = hive
+      ? `<h3>${this.teamTag(info.hive)} · ${DEBUG_RU.hiveTitle}</h3>`
+      : `<h3>${this.teamTag(info.hive)} · ${KIND_RU[info.kind]} <span class="muted small">#${uid}</span></h3>`;
+    const state = info.inHive ? DEBUG_RU.inHive : info.falling ? "падает!" : "летит";
+    const body = hive ? "" : `<div class="kv">
         <span>Энергия</span>${meter("", info.energy)}
         ${info.kind === "forager" ? `<span>Груз</span>${meter("cargo", info.cargo)}` : ""}
-        <span>Скорость</span><span>${info.speed.toFixed(1)} м/с</span>
-        <span>Состояние</span><span>${info.falling ? "падает!" : "летит"}</span>
+        <span>Скорость</span><span>${info.inHive ? "—" : `${info.speed.toFixed(1)} м/с`}</span>
+        <span>Состояние</span><span>${state}</span>
       </div>`;
+    const html = head + body + this._debugHtml(debug, hive);
+    if (html !== this._followHtml) {
+      this._followHtml = html; // не перерисовывать без изменений: текст можно выделить и прочитать
+      el.innerHTML = html;
+    }
+  }
+
+  /** Что делает программа, переменные, услышанное, ошибка — блок карточки. */
+  _debugHtml(debug, hive) {
+    const rows = debug && debugRows(debug.snap, { hive, blockShown: debug.blockShown });
+    if (!rows) return "";
+    const list = (title, items) => `<div class="dbg-title">${title}</div>${items.length
+      ? items.map(([name, value]) => `<div class="dbg-var"><b>${esc(name)}</b> = ${esc(value)}</div>`).join("")
+      : `<div class="dbg-var muted">${DEBUG_RU.noVars}</div>`}`;
+    return `<div class="dbg">
+      <div class="dbg-doing">▶ ${esc(rows.doing)}</div>
+      ${rows.where ? `<div class="muted small">${esc(rows.where)}</div>` : ""}
+      ${rows.error ? `<div class="dbg-error">${DEBUG_RU.error}: ${esc(rows.error.text)}</div>` : ""}
+      ${list(DEBUG_RU.title.vars, rows.vars)}
+      ${rows.self.length ? list(DEBUG_RU.title.self, rows.self) : ""}
+      ${rows.heard.length ? `<div class="dbg-title">${DEBUG_RU.title.heard}</div>${rows.heard.map((t) => `<div class="dbg-var">${esc(t)}</div>`).join("")}` : ""}
+    </div>`;
   }
 }

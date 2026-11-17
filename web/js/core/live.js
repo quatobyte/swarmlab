@@ -61,6 +61,9 @@ export class LiveSource extends Emitter {
       case "log":
         this.emit("log", msg);
         break;
+      case "debug": // снимки программ для отладчика (DECISIONS №105): {team, agents}
+        this.emit("debug", msg);
+        break;
       case "footer":
         this.footer = msg;
         this.emit("footer", msg);

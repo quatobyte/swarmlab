@@ -1,6 +1,8 @@
 // Вьюер модуля «пчёлки»: собирает мир, агентов, погоду и HUD; интерфейс для core/app.js:
 //   update(sample, dt), onEvents(events), reset(), notify(text), pickAt(x, y), unfollow(),
-//   focusHive(i), overview(), describeResult(score, stopped), dispose().
+//   focusHive(i), overview(), describeResult(score, stopped), dispose(),
+//   setDebug(team, agents) — снимки программ от отладчика (M12, DECISIONS №105).
+// `onInspect({team, line} | null)` — за чьей программой следит игрок и на какой она строке.
 
 import * as THREE from "three";
 import { Agents } from "./agents.js";
@@ -8,20 +10,31 @@ import { BeesHud, KIND_RU } from "./hud.js";
 import { WeatherFx } from "./weather.js";
 import { BeesWorld } from "./world.js";
 
-export function createViewer({ stage, header }) {
-  return new BeesViewer(stage, header);
+export function createViewer({ stage, header, onInspect = null }) {
+  return new BeesViewer(stage, header, onInspect);
 }
 
+/** На каком расстоянии от улья на экране клик считается кликом по улью, пикс: точный клик
+ * (важнее пчёл рядом) и клик мимо пчёл. */
+const HIVE_EXACT_PX = 16;
+const HIVE_PICK_PX = 44;
+
 class BeesViewer {
-  constructor(stage, header) {
+  constructor(stage, header, onInspect) {
     this.stage = stage;
     this.header = header;
+    this.onInspect = onInspect;
+    this.debug = new Map(); // команда → Map(ключ агента → снимок программы)
+    this.followTeam = null; // улей пчелы, за которой следим (нужен, пока она внутри улья)
+    this.followHive = null; // улей, чью программу показываем
+    this._lastInfo = null;
+    this._inspected = "";
     const scene = header.scene;
     this.scene = scene;
     this.world = new BeesWorld(scene);
     this.agents = new Agents(scene, this.world.hiveColors);
     this.weather = new WeatherFx(stage, this.world.size);
-    this.hud = new BeesHud(header);
+    this.hud = new BeesHud(header, (h) => this.inspectHive(h));
     stage.scene.add(this.world.group, this.agents.group);
     this.followUid = null;
     this.lost = new Map(); // uid → причина гибели (из событий)
@@ -59,13 +72,65 @@ class BeesViewer {
     this._camDir.normalize();
     this.hud.update(sample.b && sample.alpha > 0.5 ? sample.b : sample.a, performance.now(), this._camDir);
     this.agents.setMarker(this.followUid);
-    if (this.followUid != null) {
+    if (this.followUid != null || this.followHive != null) {
       const now = performance.now();
       if (now - (this._followShown || 0) > 200) {
         this._followShown = now;
-        this.hud.showFollow(this.agents.info.get(this.followUid), this.followUid);
+        this._showFollow();
       }
     }
+  }
+
+  // ------------------------------------------------------------ инспектор (M12)
+
+  /** Снимки программ команды от отладчика: `agents` — {ключ: снимок | null (агента нет)}. */
+  setDebug(team, agents) {
+    let map = this.debug.get(team);
+    if (!map) this.debug.set(team, (map = new Map()));
+    for (const [key, snap] of Object.entries(agents || {})) {
+      if (snap == null) map.delete(key);
+      else map.set(key, snap);
+    }
+    if (map.has("hive")) this.hud.markInspectable(team);
+  }
+
+  /** Показать программу улья `h` (клик по улью на поле или по его карточке). */
+  inspectHive(h) {
+    if (!this._snap(h, "hive")) return false;
+    this.unfollow();
+    this.followHive = h;
+    this._showFollow();
+    return true;
+  }
+
+  _snap(team, key) {
+    return this.debug.get(team)?.get(String(key)) || null;
+  }
+
+  /** Карточка того, за кем следим, и сообщение редактору, какая строка программы выполняется. */
+  _showFollow() {
+    let team, key, info;
+    if (this.followHive != null) {
+      [team, key, info] = [this.followHive, "hive", { type: "hive", hive: this.followHive }];
+    } else {
+      [team, key] = [this.followTeam, this.followUid];
+      info = this.agents.info.get(this.followUid);
+      if (info) this._lastInfo = info;
+      else if (this._lastInfo && this._snap(team, key)) info = { ...this._lastInfo, inHive: true, cargo: 0 };
+    }
+    const snap = this._snap(team, key);
+    const shown = snap ? !!this._inspect({ team, line: snap.line ?? snap.error?.line ?? null }) : this._inspect(null);
+    this.hud.showFollow(info, this.followUid, snap ? { snap, blockShown: shown } : null);
+  }
+
+  /** Сообщить редактору, что подсветить; вернуть, подсветил ли он блок. */
+  _inspect(target) {
+    const id = target ? `${target.team}:${target.line}` : "";
+    if (id !== this._inspected) {
+      this._inspected = id;
+      this._inspectShown = this.onInspect ? this.onInspect(target) : false;
+    }
+    return target ? this._inspectShown : false;
   }
 
   onEvents(events) {
@@ -88,24 +153,50 @@ class BeesViewer {
   }
 
   pickAt(x, y) {
+    // Точный клик по улью важнее пчёл, которые вьются вокруг него.
+    if (this._pickHive(x, y, HIVE_EXACT_PX)) return true;
     const uid = this.agents.pick(this.stage, x, y);
-    if (uid == null) return false;
+    if (uid == null) return this._pickHive(x, y, HIVE_PICK_PX);
+    this.followHive = null;
     this.followUid = uid;
+    const team = this.followTeam = this.agents.info.get(uid)?.hive ?? null;
+    this._lastInfo = null;
     this._missing = 0;
     this.stage.follow((out) => {
       if (this.agents.positionOf(uid, out)) {
         this._missing = 0;
         return true;
       }
+      // Пчела с программой под отладчиком жива, но внутри улья: камера ждёт её у улья.
+      if (this._snap(team, uid) && this.world.hivePos[team]) {
+        out.copy(this.world.hivePos[team]);
+        return true;
+      }
       return ++this._missing < 20; // пара кадров без цели — не повод отпускать
     });
+    this._showFollow();
     return true;
+  }
+
+  /** Клик по улью: карточка программы улья (только если отладчик прислал её снимок). */
+  _pickHive(x, y, radiusPx) {
+    const scr = { x: 0, y: 0 };
+    let best = null;
+    let bestD = radiusPx;
+    this.world.hivePos.forEach((p, i) => {
+      if (!this._snap(i, "hive") || !this.stage.project(p, scr)) return;
+      const d = Math.hypot(scr.x - x, scr.y - y);
+      if (d < bestD) [best, bestD] = [i, d];
+    });
+    return best != null && this.inspectHive(best);
   }
 
   unfollow() {
     this.followUid = null;
+    this.followHive = null;
     this.stage.unfollow();
     this.hud.showFollow(null);
+    this._inspect(null);
   }
 
   _followLost() {
@@ -114,6 +205,7 @@ class BeesViewer {
     this.hud.feed(this._lastTime || 0, `👁 Пчела #${uid}: ${why}`);
     this.followUid = null;
     this.hud.showFollow(null);
+    this._inspect(null);
   }
 
   describeResult(score, stopped = false) {

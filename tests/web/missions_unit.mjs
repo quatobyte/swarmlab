@@ -153,7 +153,7 @@ const fixOf = (hints, key) => hints.find(([, h]) => h.id === key)?.[1].fix;
     "вывести сборщик", "вывести разведчик", "сколько пчёл: сборщик", "сколько пчёл: разведчик"]) words.add(w);
   const texts = [
     ...Object.values(HINTS_RU), ...Object.values(RESULT_RU.need), ...Object.values(ERRORS_RU),
-    ...MISSIONS.flatMap((m) => [m.fresh, m.goal, ...m.brief, ...(m.examples || []).flatMap((e) => [e.title, e.text])]),
+    ...MISSIONS.flatMap((m) => [m.fresh, m.goal, m.watch || "", ...m.brief, ...(m.examples || []).flatMap((e) => [e.title, e.text])]),
   ];
   const bad = [];
   for (const text of texts) {

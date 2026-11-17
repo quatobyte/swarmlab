@@ -131,6 +131,10 @@ class RunnerStats:
         return self.cpu_ms_total / self.replies if self.replies else 0.0
 
 
+#: Приёмник сведений для отладчика: `(команда, тик, сведения модуля)`.
+DebugSink = Callable[[TeamId, int, Any], None]
+
+
 class TeamLog:
     """Лог команды: последние строки в памяти и (если задан) файл."""
 
@@ -190,6 +194,7 @@ class ProcessLink:
         clock: Clock = time.monotonic,
         python: str = sys.executable,
         launch: RunnerLaunch | None = None,
+        debug: bool = False,
     ) -> None:
         if spec.script is None:
             raise ValueError(f"У команды {spec.name} нет скрипта")
@@ -202,6 +207,8 @@ class ProcessLink:
         self.clock = clock
         self.python = python
         self.launch = launch
+        #: Просить у раннера сведения для отладчика (`CommandBatch.debug`, DECISIONS №105).
+        self.debug = debug
         self.state = DEAD
         self.busy = False  # ждём ответа на отправленный пакет
         self.started_at = 0.0
@@ -264,6 +271,7 @@ class ProcessLink:
                     "seed": self.seed,
                     "budget_ms": self.cfg.budget_ms,
                     "options": self.options,
+                    "debug": self.debug,
                 }
             )
         )
@@ -430,9 +438,15 @@ class RunnerPool:
         log_dir: Path | None = None,
         clock: Clock = time.monotonic,
         launch: RunnerLaunch | None = None,
+        on_debug: DebugSink | None = None,
+        debug_filter: Callable[[TeamSpec], bool] | None = None,
     ) -> None:
+        """`on_debug(team, tick, сведения)` — куда отдавать сведения для отладчика (DECISIONS
+        №105); без него раннеры их не собирают. `debug_filter` — у каких команд их просить
+        (нет — у всех)."""
         self.cfg = cfg
         self.clock = clock
+        self.on_debug = on_debug
         self.links: dict[TeamId, ProcessLink] = {}
         self.stats: dict[TeamId, RunnerStats] = {}
         self.logs: dict[TeamId, TeamLog] = {}
@@ -449,6 +463,7 @@ class RunnerPool:
                 log=log,
                 clock=clock,
                 launch=launch,
+                debug=on_debug is not None and (debug_filter is None or debug_filter(spec)),
             )
 
     @property
@@ -503,6 +518,9 @@ class RunnerPool:
             stats.agent_errors += len(reply.errors)
             for line in reply.log:
                 link.log.write(line)
+            if reply.debug is not None and self.on_debug is not None:
+                # Отладчику — и с тика, команды которого отброшены по бюджету.
+                self.on_debug(team, tick, reply.debug)
             if reply.cpu_ms > self.cfg.budget_ms:
                 stats.over_budget += 1
                 n = stats.over_budget

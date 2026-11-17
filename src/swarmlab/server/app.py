@@ -223,6 +223,9 @@ class MatchProcess:
     footer: bytes | None = None
     log_packets: collections.deque[bytes] = field(
         default_factory=lambda: collections.deque(maxlen=_KEEP_LOG_PACKETS))
+    #: Отладчик (DECISIONS №105): последний снимок каждой программы — для опоздавших зрителей.
+    #: Команда → {"name", "time", "agents": {агент: снимок}}.
+    debug_state: dict[int, dict[str, Any]] = field(default_factory=dict)
     subscribers: set[Subscriber] = field(default_factory=set)
     proc: subprocess.Popen[bytes] | None = None
     stderr_tail: collections.deque[str] = field(
@@ -349,6 +352,15 @@ class MatchProcess:
                 self.duration_s = float(msg["duration_s"])
         elif kind == "log":
             self.log_packets.append(body)
+        elif kind == "debug":
+            team = int(msg.get("team", 0))
+            state = self.debug_state.setdefault(team, {"agents": {}})
+            state["name"], state["time"] = msg.get("name"), msg.get("time")
+            for key, snap in (msg.get("agents") or {}).items():
+                if snap is None:
+                    state["agents"].pop(key, None)
+                else:
+                    state["agents"][key] = snap
         elif kind == "footer":
             self.footer = body
             self.score = msg.get("score") or self.score
@@ -375,6 +387,9 @@ class MatchProcess:
             sub.push("header", self.header)
         for pkt in self.log_packets:
             sub.push("log", pkt)
+        for team, state in self.debug_state.items():
+            sub.push("debug", msgpack.packb({"t": "debug", "match_id": self.id, "team": team,
+                                             **state}, use_bin_type=True))
         for kind, pkt in (("status", self.status_pkt), ("frame", self.last_frame),
                           ("footer", self.footer)):
             if pkt is not None:
@@ -617,6 +632,8 @@ class MatchManager:
             "speed": req.speed}
         if space is not None:
             start["script_dirs"] = [str(d) for d in space.script_dirs]
+        if req.debug and req.scripts:
+            start["debug"] = sorted(set(req.scripts))
         if self.runner_prefix:
             start["runner_launch"] = {"prefix": list(self.runner_prefix)}
         self.matches[mid] = m
@@ -882,6 +899,9 @@ class StartRequest(BaseModel):
     projects: list[str] = Field(
         default_factory=list,
         description="загруженные проекты (имя в projects/), синтаксис которых проверить")
+    debug: bool = Field(
+        default=False,
+        description="отладчик редактора: слать снимки программ ульев со скриптами из `scripts`")
 
 
 class SeriesRequest(BaseModel):

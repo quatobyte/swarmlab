@@ -3,7 +3,7 @@
 // Ядро не знает, чему учит кампания: миссии, их цели, подсказки и тексты даёт модуль
 // (`missions` в registry.js). Модуль кампании отдаёт:
 //   CAMPAIGN {title, intro, script}           — название, вступление, файл программы игрока;
-//   MISSIONS [{id, title, brief[], examples[{pic, title, text}], fresh, goal}] — по порядку;
+//   MISSIONS [{id, title, brief[], examples[{pic, title, text}], fresh, watch, goal}] — по порядку;
 //   illustrate(el, pic)                        — нарисовать картинку примера в `el` → «убрать»;
 //   explainError(message)                      — совет, как исправить ошибку программы;
 //   starterWorkspace()                         — блоки новой программы игрока;
@@ -239,6 +239,8 @@ export class MissionRun {
       pages.push({ kicker: this.name, title: ex.title, body: [ex.text, { picture: ex.pic }], draw });
     }
     if (m.fresh) pages.push({ kicker: this.name, title: "Что нового", body: [{ text: m.fresh, cls: "mission-fresh" }] });
+    // Как следить за работой программы во время матча (инспектор, DECISIONS №105).
+    if (m.watch) pages.push({ kicker: this.name, title: "Как следить за программой", body: [m.watch] });
     pages.push({
       kicker: this.name, title: "Цель миссии", body: [{ text: m.goal.replace(/^./, (c) => c.toUpperCase()), cls: "mw-goal" }],
       note: "Собери программу справа и нажми «▶ Начать миссию» вверху. Это окно можно открыть снова кнопкой «📖 Задание».",
