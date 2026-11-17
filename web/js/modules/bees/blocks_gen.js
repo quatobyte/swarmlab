@@ -110,9 +110,10 @@ function where(kinds) {
 // ------------------------------------------------------------------ генератор
 
 class Gen {
-  constructor(ws, file) {
+  constructor(ws, file, emptyKinds = []) {
     this.ws = ws || {};
     this.file = file;
+    this.emptyKinds = emptyKinds;
     this.errors = [];
     this.warnings = [];
     this.orphans = [];
@@ -199,6 +200,7 @@ class Gen {
     for (const kind of ALL_SUBJECTS) {
       const p = programs.get(kind);
       if (p) emitTop(() => this.genProgram(p, kind));
+      else if (this.emptyKinds.includes(kind)) emitTop(() => this.genEmpty(kind));
     }
 
     const head = [
@@ -329,6 +331,17 @@ class Gen {
     for (const { block, name, raw } of ctx.reads) {
       if (!ctx.assigned.has(name)) this.warn(block, fmt(M.unsetVariable, { name: raw }));
     }
+  }
+
+  /**
+   * Пустая программа типа, для которого нет блока программы (обучение, DECISIONS №103): без неё
+   * тип жил бы умным поведением по умолчанию, а в ранних миссиях он должен ждать своей очереди.
+   */
+  genEmpty(kind) {
+    this.imports.add(BASE_CLASS[kind]);
+    this.emit(0, `class ${USER_CLASS[kind]}(${BASE_CLASS[kind]}):`);
+    this.emit(1, "def loop(self):");
+    this.emit(2, "pass");
   }
 
   genProgram(p, kind) {
@@ -761,12 +774,13 @@ class Gen {
 /**
  * Сгенерировать Python из рабочей области.
  * @param {object} workspace JSON `Blockly.serialization.workspaces.save`
- * @param {{file?: string}} opts имя файла блоков — для шапки
+ * @param {{file?: string, emptyKinds?: string[]}} opts имя файла блоков — для шапки; emptyKinds — типы
+ *   (`scout`, `collector`, `hive`), которым без блока программы пишется пустая программа
  * @returns {{code: string, lines: (string|null)[], orphans: string[], duplicates: string[],
  *   errors: {block: string, message: string}[], warnings: {block: string, message: string}[], ok: boolean}}
  */
 export function generate(workspace, opts = {}) {
-  return new Gen(workspace, opts.file || "blocks.json").run();
+  return new Gen(workspace, opts.file || "blocks.json", opts.emptyKinds || []).run();
 }
 
 /** Id блока по строке сгенерированного кода (с 1) — из комментария `# block:<id>`. */

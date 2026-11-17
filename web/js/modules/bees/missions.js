@@ -25,17 +25,55 @@ export const fmtTime = (s) => {
 const fill = (tpl, v) => tpl.replace(/\{(\w+)\}/g, (all, k) => (k in v ? String(v[k]) : all));
 
 /**
- * Программа игрока для первой миссии: пустые программы разведчика, сборщика и улья. Пустые —
- * нарочно: тип без своего класса жил бы умным поведением по умолчанию (DECISIONS №100).
+ * Программа игрока для первой миссии: одна пустая программа сборщика. Программы разведчика и
+ * улья редактор добавит, когда их откроет миссия (`editorSetup`, DECISIONS №103).
  */
 export function starterWorkspace() {
-  const prog = (id, y, kind) => (kind
-    ? { type: "bees_program_bee", id, x: 30, y, fields: { KIND: kind } }
-    : { type: "bees_program_hive", id, x: 30, y });
   return {
     blocks: {
       languageVersion: 0,
-      blocks: [prog("tut_collector", 30, "collector"), prog("tut_scout", 230, "scout"), prog("tut_hive", 430, null)],
+      blocks: [{ type: "bees_program_bee", id: "tut_collector", x: 30, y: 30, fields: { KIND: "collector" } }],
+    },
+  };
+}
+
+// ------------------------------------------------------------------ что открыто в редакторе
+
+/** Блоки, которые открывает миссия (типы Blockly; `variables` — категория «Переменные»). */
+const NEW_BLOCKS = {
+  1: ["bees_ask_Bee_explore", "bees_Collector_collect", "bees_Bee_go_home", "controls_if", "logic_compare",
+    "logic_null", "variables"],
+  2: ["bees_Agent_say", "bees_Agent_heard", "bees_Message_word", "bees_Message_where", "text", "controls_forEach"],
+  3: ["bees_Hive_hatch", "bees_Hive_honey", "bees_Agent_wait", "math_number"],
+  4: ["bees_Hive_count", "logic_operation"],
+  5: ["bees_Bee_fly_to", "bees_Bee_flowers", "bees_Flower_spider", "bees_Flower_nectar", "bees_Flower_pos",
+    "bees_Point_distance", "logic_boolean", "logic_negate", "controls_whileUntil"],
+};
+/** Программы (блоки-шапки), которые открывает миссия. */
+const NEW_PROGRAMS = { 1: ["collector"], 2: ["scout"], 3: ["hive"] };
+/** Возможности редактора (их знает ядро: core/ui/editor.js), которые открывает миссия. */
+const NEW_FEATURES = { 3: ["logs"], 6: ["python", "help", "project", "free"] };
+/** С этой миссии открыт весь редактор: все блоки, «Продвинутые», поиск. */
+const FULL_FROM = 6;
+
+const upTo = (table, id) => ALL.filter((i) => i <= id).flatMap((i) => table[i] || []);
+
+/**
+ * Что открыто в редакторе в миссии (DECISIONS №103): функции появляются по мере прохождения.
+ *   features — возможности редактора ядра;
+ *   blocks   — настройка редактора блоков (`BlocksEditor.setup`): открытые блоки (`null` — все),
+ *              поиск, программы, которые должны быть в рабочей области, и типы, которым без
+ *              блока программы пишется пустая программа (иначе тип жил бы поведением по умолчанию).
+ */
+export function editorSetup(mission) {
+  const full = mission.id >= FULL_FROM;
+  return {
+    features: upTo(NEW_FEATURES, mission.id),
+    blocks: {
+      blocks: full ? null : upTo(NEW_BLOCKS, mission.id),
+      search: full,
+      programs: upTo(NEW_PROGRAMS, mission.id),
+      emptyKinds: Object.values(KINDS),
     },
   };
 }
@@ -157,37 +195,39 @@ export function judge(rule, snap, duration, end = null) {
 
 // ------------------------------------------------------------------ подсказки
 
+// fix — подсказка о том, что в программе чего-то не хватает: её показывают окном, матч ждёт
+// (DECISIONS №103); остальные — короткие сообщения по ходу матча.
 const HINTS = [
-  { id: "empty", m: ALL, when: (c) => c.t > 4 && c.empty.collector },
-  { id: "nocollect", m: ALL, when: (c) => c.t > 20 && !c.empty.collector && !c.has.collect },
-  { id: "nohome", m: ALL, when: (c) => c.t > 25 && c.has.collect && !c.has.home && c.deliveries === 0 },
+  { id: "empty", fix: true, m: ALL, when: (c) => c.t > 4 && c.empty.collector },
+  { id: "nocollect", fix: true, m: ALL, when: (c) => c.t > 20 && !c.empty.collector && !c.has.collect },
+  { id: "nohome", fix: true, m: ALL, when: (c) => c.t > 25 && c.has.collect && !c.has.home && c.deliveries === 0 },
   { id: "first", m: [1], when: (c) => c.deliveries >= 1 },
-  { id: "scoutidle", m: FROM(2), when: (c) => c.t > 12 && c.empty.scout },
-  { id: "far", m: [2, 4], when: (c) => c.t > 45 && c.deliveries === 0 && !c.empty.scout && !c.has.scoutSay },
-  { id: "nolisten", m: FROM(2), when: (c) => c.t > 40 && c.has.scoutSay && !c.has.listen && c.deliveries === 0 },
+  { id: "scoutidle", fix: true, m: FROM(2), when: (c) => c.t > 12 && c.empty.scout },
+  { id: "far", fix: true, m: [2, 4], when: (c) => c.t > 45 && c.deliveries === 0 && !c.empty.scout && !c.has.scoutSay },
+  { id: "nolisten", fix: true, m: FROM(2), when: (c) => c.t > 40 && c.has.scoutSay && !c.has.listen && c.deliveries === 0 },
   { id: "heard", m: [2], when: (c) => c.deliveries >= 1 && c.has.listen && c.has.scoutSay },
-  { id: "nohive", m: FROM(3), when: (c) => c.t > 20 && !c.has.hatch },
+  { id: "nohive", fix: true, m: FROM(3), when: (c) => c.t > 20 && !c.has.hatch },
   { id: "born", m: [3], when: (c) => c.births >= 1 },
-  { id: "lowhoney", m: FROM(3), when: (c) => c.t > 60 && c.has.hatch && c.me.honey < 2 },
+  { id: "lowhoney", fix: true, m: FROM(3), when: (c) => c.t > 60 && c.has.hatch && c.me.honey < 2 },
   {
     id: "grow", m: [3], when: (c) => flying(c.me) >= Math.ceil((c.rule.bees * 2) / 3),
     vars: (c) => ({ bees: flying(c.me), honey: fmt(c.me.honey), need: c.rule.bees, needHoney: c.rule.honey }),
   },
-  { id: "onescout", m: [4], when: (c) => c.t > 60 && !c.has.hatchScout },
+  { id: "onescout", fix: true, m: [4], when: (c) => c.t > 60 && !c.has.hatchScout },
   {
-    id: "fewscouts", m: [4], when: (c) => c.t >= c.duration / 2 && c.me.delivered < c.rule.value * 0.45 && c.me.scout < 3,
+    id: "fewscouts", fix: true, m: [4], when: (c) => c.t >= c.duration / 2 && c.me.delivered < c.rule.value * 0.45 && c.me.scout < 3,
     vars: (c) => ({ delivered: fmt(c.me.delivered), need: c.rule.value, scouts: c.me.scout }),
   },
-  { id: "spider5", m: [5], when: (c) => c.spiderDeaths >= 1 },
-  { id: "spider", m: FROM(6), when: (c) => c.spiderDeaths >= 1 },
-  { id: "nocheck", m: FROM(5), when: (c) => c.t > 30 && !c.has.spider },
+  { id: "spider5", fix: true, m: [5], when: (c) => c.spiderDeaths >= 1 },
+  { id: "spider", fix: true, m: FROM(6), when: (c) => c.spiderDeaths >= 1 },
+  { id: "nocheck", fix: true, m: FROM(5), when: (c) => c.t > 30 && !c.has.spider },
   {
-    id: "bigrival", m: [6], when: (c) => c.t > 90 && c.me.delivered < c.teams[1].delivered && (c.threshold ?? 0) >= 10,
+    id: "bigrival", fix: true, m: [6], when: (c) => c.t > 90 && c.me.delivered < c.teams[1].delivered && (c.threshold ?? 0) >= 10,
     vars: (c) => ({ me: fmt(c.me.delivered), rival: fmt(c.teams[1].delivered) }),
   },
   { id: "rain", m: FROM(6), when: (c) => c.weather === "rain" },
   {
-    id: "nocap", m: [7, 8], when: (c) => c.t > 150 && !c.has.cap && flying(c.me) >= 10,
+    id: "nocap", fix: true, m: [7, 8], when: (c) => c.t > 150 && !c.has.cap && flying(c.me) >= 10,
     vars: (c) => ({ bees: flying(c.me), honey: fmt(c.me.honey) }),
   },
   { id: "half", m: FROM(6), when: (c) => c.t >= c.duration / 2, vars: (c) => c.standing() },
@@ -339,7 +379,7 @@ export class Tracker {
       if (this.fired.has(h.id) || !h.m.includes(this.m.id)) continue;
       if (!h.when(ctx)) continue;
       this.fired.add(h.id);
-      out.push(fill(HINTS_RU[h.id], h.vars ? h.vars(ctx) : {}));
+      out.push({ id: h.id, fix: !!h.fix, text: fill(HINTS_RU[h.id], h.vars ? h.vars(ctx) : {}) });
     }
     return out;
   }

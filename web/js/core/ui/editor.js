@@ -26,6 +26,9 @@ const TEMPLATE_FILE = "template.py";
 const NAME_RE = /^[A-Za-z_][A-Za-z0-9_]{0,63}\.py$/;
 const MAX_LOG_LINES = 5000;
 const TEAM_COLORS = ["#f5b700", "#3a86ff", "#e63946"];
+// Возможности редактора, которые миссия обучения может держать закрытыми (DECISIONS №103):
+// вкладка Python, лог, памятка, экспорт проекта, выход в свободную игру.
+const FEATURES = ["python", "logs", "help", "project", "free"];
 
 function fmtTime(s) {
   s = Math.max(0, Math.floor(s || 0));
@@ -160,6 +163,7 @@ export class Editor {
     $("mission-list").onclick = () => this.h.missions?.();
     $("mission-free").onclick = () => this.setMission(null).then(() => history.replaceState(null, "", "#editor"));
     $("match-error").onclick = () => this._jumpToError();
+    $("mission-error").onclick = () => this._jumpToError();
     $("ed-status").onclick = () => this._jumpToError();
     window.addEventListener("beforeunload", (e) => {
       if (this.active && this.dirty) e.preventDefault();
@@ -273,7 +277,7 @@ export class Editor {
   _payload(name) {
     if (this.mode !== "blocks") return { text: this.cm.getValue(), blocks: null };
     const workspace = this.blocks.save();
-    const gen = this.mod.generateBlocks(workspace, { file: blocksName(name) });
+    const gen = this.blocks.generate(blocksName(name)); // с настройкой миссии, если она есть (M11)
     return { text: gen.code, blocks: { format: 1, mode: "blocks", workspace } };
   }
 
@@ -504,8 +508,7 @@ export class Editor {
     this.cm.performLint();
   }
 
-  async _createBlocksScript(name) {
-    const workspace = this.mod.starterWorkspace();
+  async _createBlocksScript(name, workspace = this.mod.starterWorkspace()) {
     const gen = this.mod.generateBlocks(workspace, { file: blocksName(name) });
     await api.saveScript(name, gen.code, { format: 1, mode: "blocks", workspace });
   }
@@ -513,8 +516,9 @@ export class Editor {
   // ------------------------------------------------------------ обучение (M11)
 
   /**
-   * Режим миссии (DECISIONS №100): программа — файл кампании (создаётся из стартовых блоков
-   * модуля), вместо формы матча — панель миссии. `null` — обычный редактор.
+   * Режим миссии (DECISIONS №100, №103): программа — файл кампании (создаётся из стартовых блоков
+   * модуля), над полем — полоса миссии, в редакторе открыто только то, что разрешает миссия
+   * (`run.setup` от кампании). `null` — обычный редактор.
    * `false` — не вышло (пользователь не бросил несохранённые правки другого файла).
    */
   async setMission(run) {
@@ -523,13 +527,16 @@ export class Editor {
     this.mission = null;
     document.body.classList.remove("mission");
     $("mission").hidden = true;
-    if (!run) return true;
+    this._lock(null);
+    if (!run) {
+      await this.blocks?.setup?.(null);
+      this._regenerate();
+      return true;
+    }
     const name = run.script;
     await this._loadScripts();
     if (!this.scripts.some((s) => s.name === name)) {
-      const workspace = run.campaign.starterWorkspace();
-      const gen = this.mod.generateBlocks(workspace, { file: blocksName(name) });
-      await api.saveScript(name, gen.code, { format: 1, mode: "blocks", workspace });
+      await this._createBlocksScript(name, run.campaign.starterWorkspace());
       await this._loadScripts();
     }
     if (this.file?.name !== name) await this._switchFile(name);
@@ -537,8 +544,30 @@ export class Editor {
     this.mission = run;
     document.body.classList.add("mission");
     $("mission").hidden = false;
+    this._lock(run.setup.features);
+    if (this.mode === "blocks") {
+      // Открытые блоки и программы миссии; новые блоки программ сразу сохраняются.
+      const added = await this.blocks.setup?.(run.setup.blocks);
+      this._regenerate();
+      if (added || this.dirty || this.gen?.code !== this.savedText) await this.save();
+      this.setView("blocks");
+    }
+    this.blocks?.resize();
     this._showStartError(null);
     return true;
+  }
+
+  /**
+   * Возможности редактора, закрытые в миссии: всё из FEATURES, чего нет в `open`
+   * (`null` — открыто всё). Скрывает их стиль `body.lock-<имя>` (style.css).
+   */
+  _lock(open) {
+    for (const f of FEATURES) document.body.classList.toggle(`lock-${f}`, !!open && !open.includes(f));
+  }
+
+  /** Открыть закрытую возможность до конца миссии (лог — когда в программе ошибка). */
+  unlock(feature) {
+    document.body.classList.remove(`lock-${feature}`);
   }
 
   /** Новый скрипт из блоков (режим по умолчанию для новых скриптов, DECISIONS №51). */
@@ -758,6 +787,15 @@ export class Editor {
       if (fr && !this.runErrors.some((r) => r.file === fr.file && r.line === fr.line)) {
         this.runErrors.push({ ...fr, team: t.name, message: text });
         if (fr.file === this.file?.name) this.cm.performLint();
+        if (this.mission && fr.file === this.file?.name) {
+          // Обучение (DECISIONS №103): об ошибке программы — окном; лог открывается, даже если был закрыт.
+          this.unlock("logs");
+          this.mission.runError(text, () => {
+            const id = this.mode === "blocks" && this.gen ? this.mod.blockAtLine?.(this.gen.code, fr.line) : null;
+            if (id && this.blocks.focus(id)) this.setView("blocks");
+            else this.goto(fr.line);
+          });
+        }
       }
       return "err";
     }

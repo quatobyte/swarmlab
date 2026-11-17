@@ -61,7 +61,7 @@
   </div>
 
   <div id="view-empty" class="view-empty" hidden>
-    <div><b>Здесь появится матч.</b><br>Настройте его в панели «Матч» внизу и нажмите «Запустить».</div>
+    <div><b>Здесь появится матч.</b><br><span class="free-only">Настройте его в панели «Матч» внизу и нажмите «Запустить».</span><span class="mission-only">Собери программу справа и нажми «▶ Начать миссию» вверху.</span></div>
   </div>
   <div id="banner" class="banner" hidden></div>
   <div id="loading" class="loading" hidden><div class="spinner"></div><span id="loading-text">Загрузка…</span></div>
@@ -101,6 +101,23 @@
   </div>
   <div id="ed-split" class="ed-split" hidden title="Потяните, чтобы изменить ширину"></div>
 
+  <!-- Обучение (M11, DECISIONS №103): полоса миссии над полем и редактором. -->
+  <div id="mission" class="mission-bar" hidden>
+    <div class="mb-text">
+      <div class="mb-title" id="mission-title"></div>
+      <div class="mb-goal"><span id="mission-goal"></span><span class="mission-progress" id="mission-progress"></span></div>
+      <div class="error small" id="mission-error" hidden></div>
+    </div>
+    <div class="mb-actions">
+      <button class="btn primary" id="mission-start" title="Сохранить программу и начать миссию (Ctrl+Enter)">▶ Начать миссию</button>
+      <button class="btn" id="mission-stop" disabled>■ Стоп</button>
+      <button class="btn" id="mission-brief-open" title="Показать задание миссии ещё раз">📖 Задание</button>
+      <button class="btn" id="mission-hints-open" hidden title="Подсказки этого матча"></button>
+      <button class="btn" id="mission-list" title="Список миссий">Все миссии</button>
+      <button class="btn" id="mission-free" title="Выйти из обучения в обычный редактор">Свободная игра</button>
+    </div>
+  </div>
+
   <div id="dock" class="dock" hidden>
     <div class="dock-split" id="dock-split" title="Потяните, чтобы изменить высоту"></div>
     <section class="dock-match">
@@ -115,22 +132,6 @@
         <button class="btn" id="match-series-table" hidden title="Открыть таблицу последней серии">📊 Таблица</button>
       </div>
       <p class="error small" id="match-error" hidden></p>
-    </section>
-    <section class="dock-mission" id="mission" hidden>
-      <h3 id="mission-title"></h3>
-      <div class="mission-goal" id="mission-goal"></div>
-      <div class="mission-progress" id="mission-progress"></div>
-      <div class="match-actions">
-        <button class="btn primary" id="mission-start" title="Сохранить программу и начать миссию (Ctrl+Enter)">▶ Начать миссию</button>
-        <button class="btn" id="mission-stop" disabled>■ Стоп</button>
-      </div>
-      <div class="match-actions">
-        <button class="btn" id="mission-list" title="Список миссий">Все миссии</button>
-        <button class="btn" id="mission-free" title="Выйти из обучения в обычный редактор">Свободная игра</button>
-      </div>
-      <p class="error small" id="mission-error" hidden></p>
-      <ul class="mission-hints" id="mission-hints"></ul>
-      <div class="mission-brief" id="mission-brief"></div>
     </section>
     <section class="dock-logs">
       <div class="log-tabs" id="log-tabs"></div>

@@ -324,6 +324,7 @@ li.CodeMirror-hint-active { background: #34515e; color: #fff; }
 
 /* ---------------------------------------------------------------- M7c: блоки в духе MakeCode */
 .ed-blocks .blocklyToolbox, .ed-blocks .blocklyToolboxDiv { padding-top: 44px; }
+.ed-blocks.no-search .blocklyToolbox, .ed-blocks.no-search .blocklyToolboxDiv { padding-top: 6px; }
 .ed-blocks .blocklyTreeRow, .ed-blocks .blocklyToolboxCategory { height: auto; line-height: 1.2; margin: 2px 4px; padding: 7px 10px 7px 6px;
   border-radius: 8px; border-left-width: 6px !important; }
 .ed-blocks .blocklyTreeLabel, .ed-blocks .blocklyToolboxCategoryLabel { font: 600 14px "Segoe UI", sans-serif; color: #f2f4f7; }
@@ -365,17 +366,41 @@ body:not(.portal) .portal-only { display: none !important; }
 .mission-row.done .mission-num { background: var(--ok); color: #10241a; }
 .mission-text { flex: 1 1 auto; min-width: 0; }
 .mission-text .name { font-weight: 600; }
+/* Полоса миссии над полем и редактором (DECISIONS №103): цель и кнопки всегда на виду. */
+body.mission { --mh: 58px; }
+body.mission #view { top: var(--mh); }
+body.mission .editor, body.mission .ed-split { top: var(--mh); }
+.mission-bar { position: fixed; left: 0; right: 0; top: 0; height: var(--mh, 58px); z-index: 20; display: flex; align-items: center;
+  gap: 12px; padding: 6px 12px; background: #1a1f26; border-bottom: 2px solid var(--accent); }
+.mb-text { flex: 1 1 auto; min-width: 0; }
+.mb-title { color: var(--accent); font-weight: 700; font-size: 14px; }
+.mb-goal { font-size: 14px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.mb-goal #mission-goal { font-weight: 600; }
+.mission-progress { color: var(--ok); font-variant-numeric: tabular-nums; margin-left: 12px; }
+.mb-actions { display: flex; gap: 6px; flex: none; }
+#mission-error { cursor: pointer; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.mission-only, body.mission .free-only { display: none; }
+body.mission .mission-only { display: inline; }
+/* В миссии нет формы матча и работы с файлами; остальное открывается по мере прохождения. */
 body.mission .dock-match, body.mission #ed-file, body.mission #ed-new, body.mission #ed-save-as,
-body.mission .ed-toolbar label.file { display: none; }
-.dock-mission { padding: 8px 10px; overflow: auto; border-right: 1px solid #000; font-size: 13px; }
-.dock .dock-mission h3 { color: var(--accent); font-size: 14px; }
-.mission-brief { margin-top: 10px; padding-top: 8px; border-top: 1px solid var(--line); }
-.mission-brief p { margin: 0 0 6px; line-height: 1.4; }
+body.mission .ed-toolbar label.file, body.mission .ed-foot { display: none; }
+body.mission .dock { grid-template-columns: 1fr; }
+body.lock-logs #view { bottom: 0; }
+body.lock-logs .dock { display: none; }
+body.lock-python #ed-tabs, body.lock-python #ed-to-python, body.lock-python #ed-mode-note { display: none; }
+body.lock-help #ed-help { display: none; }
+body.lock-project #ed-export { display: none; }
+body.lock-free #mission-free { display: none; }
+/* Окна обучения посреди экрана: брифинг, подсказки, итог. */
+.mission-window .modal { width: min(560px, calc(100vw - 32px)); padding: 20px 22px; border-color: var(--accent);
+  box-shadow: 0 18px 60px rgba(0, 0, 0, 0.6); }
+.mission-window h3 { font-size: 21px; margin: 0 0 10px; }
+.mw-kicker { color: var(--accent); font-size: 12px; font-weight: 700; letter-spacing: 0.04em; text-transform: uppercase; margin-bottom: 4px; }
+.mw-body { max-height: 56vh; overflow: auto; }
+.mw-body p { margin: 0 0 10px; font-size: 16px; line-height: 1.5; white-space: pre-wrap; }
+.mw-body .mw-goal { font-size: 18px; font-weight: 600; }
+.mw-body .mw-stats { color: var(--muted); font-size: 14px; }
+.mw-note { margin: 4px 0 0; color: var(--muted); font-size: 13px; line-height: 1.4; }
+.mission-window .modal-actions { align-items: center; margin-top: 16px; }
+.mw-foot { margin-right: auto; }
 .mission-fresh { color: #cfe8ff; }
-.mission-goal { font-weight: 600; margin-top: 4px; }
-.mission-progress { color: var(--ok); font-variant-numeric: tabular-nums; min-height: 1.2em; margin-top: 2px; }
-#mission-error { margin: 8px 0 0; }
-.mission-hints { list-style: none; margin: 10px 0 0; padding: 0; display: flex; flex-direction: column; gap: 4px; }
-.mission-hints li { background: rgba(245,183,0,0.12); border-left: 3px solid var(--accent); border-radius: 6px;
-  padding: 4px 8px; line-height: 1.35; }
-.mission-hints .t { color: var(--muted); margin-right: 6px; font-size: 11px; }

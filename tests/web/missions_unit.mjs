@@ -2,10 +2,12 @@
 // Запуск: node tests/web/missions_unit.mjs — падает на первой ошибке (tests/web/test_missions.py).
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
+import { BLOCKS_API } from "../../web/js/modules/bees/blocks_api.js";
+import { toolbox, toolboxBlocks } from "../../web/js/modules/bees/blocks_editor.js";
 import { API_RU, CATEGORIES, CUSTOM_RU } from "../../web/js/modules/bees/blocks_ru.js";
 import { generate } from "../../web/js/modules/bees/blocks_gen.js";
 import {
-  MISSIONS, createTracker, matchRequest, programParts, starterWorkspace,
+  MISSIONS, createTracker, editorSetup, matchRequest, programParts, starterWorkspace,
 } from "../../web/js/modules/bees/missions.js";
 import { HINTS_RU, RESULT_RU } from "../../web/js/modules/bees/missions_ru.js";
 
@@ -29,16 +31,23 @@ function play(id, code, T, { events = {}, honey, counts, duration = 1000 } = {})
   }
   return { hints, result, tracker: t };
 }
-const has = (hints, key) => hints.some(([, h]) => h === HINTS_RU[key]);
+const has = (hints, key) => hints.some(([, h]) => h.id === key && h.text === HINTS_RU[key]);
+const fixOf = (hints, key) => hints.find(([, h]) => h.id === key)?.[1].fix;
 
-// Стартовая программа кампании: пустые программы трёх типов, без ошибок генерации.
+// Стартовая программа кампании: в блоках — только программа сборщика, но в коде пустые программы
+// всех трёх типов (иначе разведчик и улей жили бы поведением по умолчанию, DECISIONS №103).
 {
-  const g = generate(starterWorkspace(), { file: "tutorial.blocks.json" });
+  const ws = starterWorkspace();
+  assert.deepEqual(ws.blocks.blocks.map((b) => b.fields?.KIND), ["collector"]);
+  const plain = generate(ws, { file: "tutorial.blocks.json" });
+  assert.doesNotMatch(plain.code, /MyScout|MyHive/, "без настройки миссии пустых программ нет");
+  const g = generate(ws, { file: "tutorial.blocks.json", emptyKinds: editorSetup(mission(1)).blocks.emptyKinds });
   assert.deepEqual(g.errors, []);
   const parts = programParts(g.code);
   for (const k of ["scout", "collector", "hive"]) assert.match(parts[k], /pass/, k);
   const { hints, result } = play(1, g.code, 180, { duration: 180 });
   assert.ok(has(hints, "empty"), "пустой сборщик — подсказка");
+  assert.equal(fixOf(hints, "empty"), true, "нет программы — важная подсказка (окно с паузой)");
   assert.equal(result.win, false);
   assert.match(result.text, /собирать нектар с/);
 }
@@ -49,6 +58,7 @@ const has = (hints, key) => hints.some(([, h]) => h === HINTS_RU[key]);
   const { hints, result } = play(1, ref("ref_1.py"), 60, { events: { 30: [delivery] } });
   assert.ok(!has(hints, "empty") && !has(hints, "nohome") && !has(hints, "nocollect"), JSON.stringify(hints));
   assert.ok(has(hints, "first"));
+  assert.equal(fixOf(hints, "first"), false, "радостная подсказка матч не останавливает");
   assert.equal(result, null, "1,5 нектара — цель (5) ещё не достигнута");
   const four = Array.from({ length: 4 }, (_, i) => ({ ...delivery, bee: i, time: 40 }));
   const win = play(1, ref("ref_1.py"), 60, { events: { 30: [delivery], 40: four } });
@@ -134,7 +144,7 @@ const has = (hints, key) => hints.some(([, h]) => h === HINTS_RU[key]);
   for (const v of Object.values(CUSTOM_RU)) words.add(label(v.label));
   for (const [name] of Object.values(CATEGORIES)) words.add(name);
   // Не блоки: кнопки, Blockly и значения.
-  for (const w of ["↻ Начать заново", "если … то …", "ничего", "Программе пчелы сборщик", "Программа пчелы разведчик",
+  for (const w of ["↻ Начать заново", "▶ Начать миссию", "если … то …", "ничего", "ничто", "присвоить", "повторять, пока", "и", "или", "Памятка", "Свободная игра", "Программе пчелы сборщик", "Программа пчелы разведчик",
     "Программу пчелы сборщик", "Программе улья",
     "Программа пчелы сборщик", "Программа улья", "Программе улья", "перебрать все цветы", "Копилка", "Орда",
     "вывести сборщик", "вывести разведчик", "сколько пчёл: сборщик", "сколько пчёл: разведчик"]) words.add(w);
@@ -152,6 +162,63 @@ const has = (hints, key) => hints.some(([, h]) => h === HINTS_RU[key]);
     }
   }
   assert.deepEqual([...new Set(bad)], [], "в текстах обучения блоки названы не так, как в blocks_ru.js");
+}
+
+// Что открыто в редакторе (DECISIONS №103): функции появляются по мере прохождения.
+{
+  const all = new Set(toolboxBlocks().map((x) => x.entry.type));
+  const byMember = new Map(); // член API → типы блоков
+  for (const b of BLOCKS_API.blocks) {
+    const member = b.api.split(".")[1];
+    const types = [b.type, `${b.type}__full`, b.type.replace(/^bees_/, "bees_ask_")].filter((x) => all.has(x));
+    byMember.set(member, [...(byMember.get(member) || []), ...types]);
+  }
+  // Конструкции Python в эталоне → блок, без которого их не собрать.
+  const SYNTAX = [
+    [/^\s*if\b/m, "controls_if"], [/^\s*for\b/m, "controls_forEach"], [/^\s*while\b/m, "controls_whileUntil"],
+    [/\bNone\b/, "logic_null"], [/\b(?:True|False)\b/, "logic_boolean"], [/\b(?:and|or)\b/, "logic_operation"],
+    [/(?:==|!=|>=|<=|<|>|\bis\b)/, "logic_compare"], [/"[^"]*"/, "text"], [/\b\d+(?:\.\d+)?\b/, "math_number"],
+    [/^\s*\w+ = /m, "variables"],
+  ];
+  let prev = { features: [], blocks: { blocks: [], programs: [] } };
+  for (const m of MISSIONS) {
+    const s = editorSetup(m);
+    assert.deepEqual(s.blocks.emptyKinds, ["scout", "collector", "hive"], `миссия ${m.id}`);
+    for (const f of prev.features) assert.ok(s.features.includes(f), `миссия ${m.id}: «${f}» не закрывается обратно`);
+    for (const k of prev.blocks.programs) assert.ok(s.blocks.programs.includes(k), `миссия ${m.id}: программа ${k}`);
+    if (s.blocks.blocks === null) {
+      assert.equal(s.blocks.search, true, `миссия ${m.id}: весь редактор — с поиском`);
+    } else {
+      assert.ok(prev.blocks.blocks !== null, `миссия ${m.id}: блоки не закрываются обратно`);
+      const open = new Set(s.blocks.blocks);
+      for (const t of prev.blocks.blocks) assert.ok(open.has(t), `миссия ${m.id}: блок ${t} не закрывается обратно`);
+      for (const t of open) {
+        assert.ok(all.has(t) || t === "variables" || t === "procedures", `миссия ${m.id}: нет блока ${t}`);
+      }
+      // Панель миссии: только открытые блоки, без «Продвинутых».
+      const tb = toolbox(s.blocks.blocks);
+      assert.deepEqual(new Set(toolboxBlocks(tb).map((x) => x.entry.type)), new Set([...open].filter((t) => all.has(t))));
+      assert.ok(!tb.contents.some((c) => c.toolboxitemid === "advanced"));
+      assert.equal(tb.contents.some((c) => c.custom === "VARIABLE"), open.has("variables"));
+      // Эталон миссии собирается из открытых блоков: каждый вызов API и каждая конструкция.
+      // (программы, которые миссия ещё не открыла, в эталоне — заглушки, их не смотрим).
+      const parts = programParts(ref(`ref_${m.id}.py`));
+      const code = s.blocks.programs.map((k) => parts[k]).join("\n").replace(/^\s*def loop\(self\):$/gm, "");
+      for (const [, member] of code.matchAll(/\.([A-Za-z_]\w*)\b/g)) {
+        const types = byMember.get(member);
+        assert.ok(types, `миссия ${m.id}: в эталоне .${member} — не из API`);
+        assert.ok(types.some((t) => open.has(t)), `миссия ${m.id}: для .${member} не открыт ни один блок (${types.join(", ")})`);
+      }
+      for (const [re, type] of SYNTAX) {
+        if (re.test(code)) assert.ok(open.has(type), `миссия ${m.id}: эталону нужен блок ${type}`);
+      }
+    }
+    prev = s;
+  }
+  assert.deepEqual(editorSetup(mission(1)).features, [], "в первой миссии нет ни лога, ни Python, ни памятки");
+  assert.deepEqual(editorSetup(mission(1)).blocks.programs, ["collector"]);
+  assert.ok(editorSetup(mission(3)).features.includes("logs"));
+  assert.equal(editorSetup(mission(6)).blocks.blocks, null, "с миссии 6 открыт весь редактор");
 }
 
 console.log("ok");

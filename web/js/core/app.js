@@ -11,7 +11,7 @@ import { Editor } from "./ui/editor.js";
 import { FpsMeter, isTyping } from "./ui/fps.js";
 import { Lobby, STATE_RU, fmtTime } from "./ui/lobby.js";
 import { SeriesView } from "./ui/series.js";
-import { CampaignScreen, MissionRun, Progress, loadCampaign } from "./ui/tutorial.js";
+import { CampaignScreen, MissionRun, Progress, closeWindow, loadCampaign, showWindow } from "./ui/tutorial.js";
 import { MODULES } from "../modules/registry.js";
 
 const LIVE_SPEEDS = [0.5, 1, 2, 4, 8];
@@ -362,6 +362,7 @@ function closeAll() {
   session?.close();
   session = null;
   hideBanner();
+  closeWindow();
   hideLoading();
   $("hud").hidden = true;
   return true;
@@ -469,40 +470,42 @@ async function openCampaign() {
   campaignScreen.show(campaign, progress);
 }
 
-/** Миссия `i` в редакторе: панель миссии, программа кампании. */
+/** Миссия `i` в редакторе: полоса миссии, программа кампании, окно брифинга. */
 async function playMission(i) {
   campaign ||= await loadCampaign();
   if (!campaign || !campaign.MISSIONS[i]) return toLobby();
   if (!progress.open(campaign.MISSIONS, i)) return openCampaign();
   if (session?.source.kind === "live") session.source.stop(); // матч прошлой миссии больше не нужен
   hideBanner();
+  closeWindow();
   campaignScreen.hide();
   await openEditor();
   if (!editor.active) return;
+  const live = () => (session?.source.kind === "live" ? session.source : null);
   const run = new MissionRun(campaign, i, {
     notify: (text) => session?.viewer?.notify(`💡 ${escapeHtml(text)}`),
-    stop: () => {
-      if (session?.source.kind === "live") session.source.stop();
-    },
+    stop: () => live()?.stop(),
+    pause: () => live()?.pause(),
+    resume: () => live()?.resume(),
     result: (r, done) => showMissionResult(r, done),
   });
   if (!(await editor.setMission(run))) return;
   history.replaceState(null, "", `#mission=${run.mission.id}`);
+  run.brief();
 }
 
+/** Итог миссии — окном посреди экрана (DECISIONS №103). */
 function showMissionResult(r, run) {
   if (r.win) progress.pass(run.mission.id, r.stats);
   const next = run.index + 1 < campaign.MISSIONS.length ? run.index + 1 : null;
-  const actions = [];
-  if (r.win && next !== null) actions.push([`Дальше: миссия ${next + 1}`, () => playMission(next)]);
-  actions.push([r.win ? "Переиграть" : "Попробовать снова", () => {
-    hideBanner();
-    editor.start();
-  }]);
-  if (!r.win) actions.push(["Поправить программу", hideBanner]);
-  actions.push(["Все миссии", openCampaign]);
-  const head = r.win ? "🏆 МИССИЯ ПРОЙДЕНА" : "✖ ЦЕЛЬ НЕ ВЫПОЛНЕНА";
-  showBanner(`${head}\nМиссия ${run.index + 1}. ${r.title}\n\n${r.text}\n\n${r.stats}`, actions);
+  const again = [r.win ? "Переиграть" : "Попробовать снова", () => editor.start()];
+  const actions = [["Все миссии", openCampaign], again];
+  if (r.win && next !== null) actions.push([`Дальше: миссия ${next + 1} →`, () => playMission(next), true]);
+  if (!r.win) actions.push(["Поправить программу", null, true]);
+  showWindow({
+    kicker: run.name, title: r.win ? "🏆 Миссия пройдена" : "✖ Цель не выполнена",
+    body: [r.text, { text: r.stats, cls: "mw-stats" }], actions,
+  });
 }
 
 $("lobby-tutorial").onclick = openCampaign;

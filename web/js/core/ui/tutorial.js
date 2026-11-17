@@ -1,15 +1,17 @@
-// Обучение (M11, DECISIONS №100): экран кампании и миссия в редакторе.
+// Обучение (M11, DECISIONS №100, №103): экран кампании и миссия в редакторе.
 //
 // Ядро не знает, чему учит кампания: миссии, их цели, подсказки и тексты даёт модуль
 // (`missions` в registry.js). Модуль кампании отдаёт:
 //   CAMPAIGN {title, intro, script}           — название, вступление, файл программы игрока;
 //   MISSIONS [{id, title, brief[], fresh, goal}] — по порядку прохождения;
 //   starterWorkspace()                         — блоки новой программы игрока;
+//   editorSetup(mission)                       — что открыто в редакторе: {features[], blocks};
 //   matchRequest(mission, {script, scripts})   — тело POST /api/matches;
 //   createTracker(mission, header, code)       — судья матча:
-//       update(frame) → {progress, hints[], result?};  finish(score, stopped) → result.
+//       update(frame) → {progress, hints[{id, text, fix}], result?};  finish(score, stopped) → result.
 //   result = {win, title, text, stats}.
-// Ядро хранит прогресс в браузере, показывает список, панель миссии, подсказки и итог.
+// Ядро хранит прогресс в браузере и показывает: список миссий, полосу миссии над полем (цель,
+// прогресс, кнопки) и окна посреди экрана — брифинг по страницам, подсказки и итог (№103).
 
 import { DEFAULT_MODULE, MODULES } from "../../modules/registry.js";
 
@@ -98,19 +100,91 @@ export class CampaignScreen {
   }
 }
 
+// ------------------------------------------------------------------ окно посреди экрана
+
+let windowClose = null; // закрыть открытое окно обучения (оно одно)
+
+/** Закрыть окно обучения, если оно открыто (без действий его кнопок). */
+export function closeWindow() {
+  windowClose?.();
+}
+
 /**
- * Миссия в редакторе: панель с брифингом и целью, судья матча, подсказки и итог.
+ * Окно посреди экрана (DECISIONS №103): `{kicker, title, body[], note, foot, actions, esc}`.
+ * body — абзацы: строка или `{text, cls}`; actions — `[[подпись, действие, главная?]]`, действие
+ * выполняется после закрытия окна; esc — действие по Esc (без него Esc окно не закрывает).
+ * Новое окно заменяет прежнее.
+ */
+export function showWindow({ kicker = "", title = "", body = [], note = "", foot = "", actions = [], esc = null }) {
+  closeWindow();
+  const back = el("div", "modal-back mission-window");
+  const box = el("div", "modal");
+  box.setAttribute("role", "dialog");
+  if (kicker) box.append(el("div", "mw-kicker", kicker));
+  if (title) box.append(el("h3", "", title));
+  const text = el("div", "mw-body");
+  for (const p of body) text.append(typeof p === "string" ? el("p", "", p) : el("p", p.cls || "", p.text));
+  box.append(text);
+  if (note) box.append(el("p", "mw-note", note));
+  const row = el("div", "modal-actions");
+  if (foot) row.append(el("span", "mw-foot muted small", foot));
+  const close = () => {
+    back.remove();
+    window.removeEventListener("keydown", onKey, true);
+    if (windowClose === close) windowClose = null;
+  };
+  const run = (fn) => {
+    close();
+    fn?.();
+  };
+  const onKey = (e) => {
+    if (e.key !== "Escape") return;
+    e.stopPropagation();
+    if (esc) run(esc);
+  };
+  for (const [label, fn, primary] of actions) {
+    const b = el("button", `btn${primary ? " primary" : ""}`, label);
+    b.onclick = () => run(fn);
+    row.append(b);
+  }
+  box.append(row);
+  back.append(box);
+  window.addEventListener("keydown", onKey, true);
+  document.body.append(back);
+  windowClose = close;
+  box.querySelector(".btn.primary")?.focus();
+}
+
+/** Окна по страницам: «Назад» / «Далее», на последней — кнопка `last`; после неё — `done()`. */
+export function showPages(pages, { last = "Понятно", done = null } = {}, i = 0) {
+  const page = pages[i];
+  const end = i === pages.length - 1;
+  const actions = [];
+  if (i > 0) actions.push(["← Назад", () => showPages(pages, { last, done }, i - 1)]);
+  actions.push(end ? [last, done, true] : ["Далее →", () => showPages(pages, { last, done }, i + 1), true]);
+  showWindow({ ...page, foot: pages.length > 1 ? `${i + 1} из ${pages.length}` : "", actions, esc: done || (() => {}) });
+}
+
+const clock = (time) => `${Math.floor(time / 60)}:${String(Math.floor(time % 60)).padStart(2, "0")}`;
+
+/**
+ * Миссия в редакторе: полоса миссии над полем, окна брифинга, подсказок и итога, судья матча.
  * Редактор зовёт `request(script, scripts)` при запуске и `attach(source, code)` после него.
  */
 export class MissionRun {
-  /** handlers: {notify(text), result(result), stop()} */
+  /** handlers: {notify(text), result(result, run), stop(), pause(), resume()} */
   constructor(campaign, index, handlers) {
     this.campaign = campaign;
     this.index = index;
     this.mission = campaign.MISSIONS[index];
+    this.setup = campaign.editorSetup?.(this.mission) || { features: null, blocks: null };
     this.h = handlers;
     this.tracker = null;
     this.decided = false;
+    this.hints = []; // подсказки этого матча: {time, text}
+    this.queue = []; // важные подсказки, которые ждут своего окна
+    this.asking = false;
+    this.erred = false; // об ошибке программы в этом матче уже сказано
     this.render();
   }
 
@@ -118,28 +192,60 @@ export class MissionRun {
     return this.campaign.CAMPAIGN.script;
   }
 
+  get name() {
+    return `Миссия ${this.index + 1}. ${this.mission.title}`;
+  }
+
   request(script, scripts) {
     return this.campaign.matchRequest(this.mission, { script, scripts });
   }
 
   render() {
-    const m = this.mission;
-    $("mission-title").textContent = `Миссия ${this.index + 1}. ${m.title}`;
-    const brief = $("mission-brief");
-    brief.innerHTML = "";
-    for (const p of m.brief) brief.append(el("p", "", p));
-    if (m.fresh) brief.append(el("p", "mission-fresh", m.fresh));
-    $("mission-goal").textContent = `Цель: ${m.goal}`;
+    $("mission-title").textContent = this.name;
+    $("mission-goal").textContent = `Цель: ${this.mission.goal}`;
     $("mission-progress").textContent = "";
-    $("mission-hints").innerHTML = "";
+    $("mission-brief-open").onclick = () => this.brief();
+    $("mission-hints-open").onclick = () => this.showHints();
+    this._renderHints();
+  }
+
+  /** Брифинг по страницам: сюжет, что нового, цель (DECISIONS №103). */
+  brief() {
+    const m = this.mission;
+    const pages = m.brief.map((text) => ({ kicker: this.name, title: "Задание", body: [text] }));
+    if (m.fresh) pages.push({ kicker: this.name, title: "Что нового", body: [{ text: m.fresh, cls: "mission-fresh" }] });
+    pages.push({
+      kicker: this.name, title: "Цель миссии", body: [{ text: m.goal.replace(/^./, (c) => c.toUpperCase()), cls: "mw-goal" }],
+      note: "Собери программу справа и нажми «▶ Начать миссию» вверху. Это окно можно открыть снова кнопкой «📖 Задание».",
+    });
+    showPages(pages, { last: "К программе" });
+  }
+
+  /** Подсказки этого матча — окном. */
+  showHints() {
+    const body = this.hints.length
+      ? this.hints.map((h) => `${clock(h.time)} · ${h.text}`)
+      : ["Подсказок пока нет: они появляются по ходу матча."];
+    showWindow({ kicker: this.name, title: "💡 Подсказки этого матча", body, actions: [["Закрыть", null, true]], esc: () => {} });
+  }
+
+  _renderHints() {
+    const b = $("mission-hints-open");
+    b.hidden = this.hints.length === 0;
+    b.textContent = `💡 Подсказки (${this.hints.length})`;
   }
 
   /** Новый матч миссии: судья с нуля. */
   attach(source, code) {
+    closeWindow();
     this.decided = false;
     this.tracker = null;
+    this.hints = [];
+    this.queue = [];
+    this.asking = false;
+    this.erred = false;
     $("mission-progress").textContent = "";
-    $("mission-hints").innerHTML = "";
+    this._renderHints();
     const onHeader = (header) => {
       this.tracker = this.campaign.createTracker(this.mission, header, code);
     };
@@ -153,7 +259,7 @@ export class MissionRun {
     if (!this.tracker || this.decided) return;
     const r = this.tracker.update(frame);
     if (r.progress) $("mission-progress").textContent = r.progress;
-    for (const text of r.hints || []) this._hint(frame.time, text);
+    for (const hint of r.hints || []) this._hint(frame.time, hint);
     if (r.result) this._decide(r.result, true);
   }
 
@@ -163,16 +269,54 @@ export class MissionRun {
     this._decide(this.tracker.finish(footer.score, stopped), false);
   }
 
-  _hint(time, text) {
-    const item = el("li", "", text);
-    const t = el("span", "t", `${Math.floor(time / 60)}:${String(Math.floor(time % 60)).padStart(2, "0")}`);
-    item.prepend(t);
-    $("mission-hints").prepend(item);
-    this.h.notify(text);
+  /** Важная подсказка (`fix`) — окно, матч ждёт; остальные — строка в ленте событий на поле. */
+  _hint(time, hint) {
+    this.hints.push({ time, text: hint.text });
+    this._renderHints();
+    if (!hint.fix) {
+      this.h.notify(hint.text);
+      return;
+    }
+    this.queue.push(hint.text);
+    this._ask();
+  }
+
+  /** Ошибка во время матча в программе игрока (редактор) — то же окно, что у важной подсказки. */
+  runError(message, show) {
+    if (this.decided || this.erred) return;
+    this.erred = true;
+    this.queue.push({ text: `В программе ошибка: ${message}`, show });
+    this._ask();
+  }
+
+  _ask() {
+    if (this.asking || this.decided || !this.queue.length) return;
+    this.asking = true;
+    this.h.pause();
+    const item = this.queue.shift();
+    const text = typeof item === "string" ? item : item.text;
+    const fix = () => {
+      // Игрок идёт править программу: матч больше не нужен, окна итога не будет.
+      this.asking = false;
+      this.queue = [];
+      this.decided = true;
+      this.h.stop();
+      item.show?.();
+    };
+    const go = () => {
+      this.asking = false;
+      if (this.queue.length) this._ask();
+      else this.h.resume();
+    };
+    showWindow({
+      kicker: this.name, title: "💡 Подсказка", body: [text], note: "Матч на паузе.",
+      actions: [["Продолжить матч", go], ["Поправить программу", fix, true]], esc: go,
+    });
   }
 
   _decide(result, early) {
     this.decided = true;
+    this.queue = [];
     if (early) this.h.stop(); // цель решена до конца времени — матч больше не нужен
     this.h.result(result, this);
   }
