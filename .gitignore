@@ -26,12 +26,16 @@ runs/
 
 # MuJoCo
 MUJOCO_LOG.TXT
+AGENTS.md
+CLAUDE.md
 
 # IDE / ОС
 .vscode/
 .idea/
 Thumbs.db
 .DS_Store
+.claude
+
 
 # логи кода игрока
 logs/

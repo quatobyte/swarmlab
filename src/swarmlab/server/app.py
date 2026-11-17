@@ -800,7 +800,12 @@ class SeriesManager:
         sp = self.running.get(data.get("id", path.name))
         if sp is not None and sp.dir.resolve() != path.resolve():
             sp = None  # серия с тем же именем у другого пользователя портала
-        if data.get("state") == "running" and (sp is None or not sp.alive):
+        alive = sp is not None and sp.alive
+        if data.get("state") == "finished" and alive:
+            # series.json записывается до завершения процесса. Пока он жив,
+            # новая серия получит 409, поэтому не показываем её как завершённую.
+            data["state"] = "running"
+        if data.get("state") == "running" and not alive:
             data["state"] = "interrupted"  # процесс серии умер (или сервер перезапускали)
             if sp is not None and sp.stderr_tail:
                 data["error"] = "\n".join(sp.stderr_tail)

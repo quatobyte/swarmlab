@@ -154,6 +154,13 @@ def _build_parser() -> argparse.ArgumentParser:
                        help="папка данных портала: база и папки пользователей "
                             "(по умолчанию <root>/data)")
     serve.set_defaults(handler=_cmd_serve)
+    admin = sub.add_parser("admin", help="управление администратором портала")
+    admin_sub = admin.add_subparsers(dest="admin_command", required=True)
+    create_admin = admin_sub.add_parser("create-admin", help="создать первого администратора")
+    create_admin.add_argument("email", help="почта администратора")
+    create_admin.add_argument("--data", type=Path, default=Path("/data"),
+                              help="папка данных портала (в контейнере /data)")
+    create_admin.set_defaults(handler=_cmd_create_admin)
     return parser
 
 
@@ -590,6 +597,36 @@ def _print_bench(report: Any) -> None:
 
 
 # ====================================================================== serve
+
+
+def _cmd_create_admin(args: argparse.Namespace) -> int:
+    import getpass
+
+    from swarmlab.server.accounts import AccountError, Accounts, Database, load_settings
+
+    db = Database(args.data / "swarmlab.db")
+    try:
+        if db.one("SELECT 1 FROM users WHERE role = 'admin'"):
+            print("Администратор уже существует; назначайте других через веб-админку.",
+                  file=sys.stderr)
+            return 1
+        accounts = Accounts(db, load_settings())
+        password = getpass.getpass("Пароль нового администратора: ")
+        repeat = getpass.getpass("Повторите пароль: ")
+        if password != repeat:
+            print("Пароли не совпадают", file=sys.stderr)
+            return 1
+        try:
+            accounts.check_password_rules(password)
+            user, _ = accounts.register(args.email, password, "admin-cli")
+            accounts.set_role(user.id, "admin")
+        except AccountError as e:
+            print(e.message, file=sys.stderr)
+            return 1
+        print(f"Администратор {user.email} создан. Войдите с заданным паролем.")
+        return 0
+    finally:
+        db.close()
 
 
 def _cmd_serve(args: argparse.Namespace) -> int:

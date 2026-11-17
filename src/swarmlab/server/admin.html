@@ -1,0 +1,53 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>SwarmLab — админка</title>
+  <style>
+    body{font:16px system-ui,sans-serif;background:#111827;color:#eef2ff;margin:0;padding:1.5rem}
+    main{max-width:1200px;margin:auto}a{color:#a5c9ff}section{background:#1f2937;padding:1rem;margin:1rem 0;border-radius:10px;overflow:auto}
+    table{border-collapse:collapse;width:100%}td,th{text-align:left;padding:.6rem;border-bottom:1px solid #4b5563;vertical-align:top}
+    button{background:#374151;color:white;border:1px solid #6b7280;border-radius:5px;padding:.35rem .55rem;margin:.15rem;cursor:pointer}
+    button:hover{background:#4b5563}.danger{border-color:#fb7185}#message{white-space:pre-wrap}
+  </style>
+</head>
+<body><main>
+  <h1>Админка SwarmLab</h1><p><a href="/">← На сайт</a></p>
+  <p id="message" role="status"></p>
+  <section><h2>Сервер</h2><p id="server"></p><h3>Матчи и очередь</h3><div id="matches"></div></section>
+  <section><h2>Пользователи</h2><div id="users"></div></section>
+</main>
+<script type="module">
+let csrf;
+const message=document.getElementById("message");
+const fmtTime=v=>v?new Date(v*1000).toLocaleString("ru-RU"):"—";
+const fmtBytes=v=>`${(v/1048576).toFixed(1)} МБ`;
+async function call(method,path,body){
+  const r=await fetch(path,{method,credentials:"same-origin",headers:{"Content-Type":"application/json",...(csrf?{"X-CSRF-Token":csrf}:{})},body:body===undefined?undefined:JSON.stringify(body)});
+  const data=await r.json();
+  if(!r.ok)throw Error(data.detail||`${r.status}`);
+  return data;
+}
+function cell(row,value){const td=row.insertCell();td.textContent=String(value);return td;}
+function action(parent,label,fn,danger=false){const b=document.createElement("button");b.textContent=label;if(danger)b.className="danger";b.onclick=async()=>{try{message.textContent="";await fn();await refresh();}catch(e){message.textContent=e.message;}};parent.append(b);}
+async function refresh(){
+  const [status,users]=await Promise.all([call("GET","/api/admin/status"),call("GET","/api/admin/users")]);
+  document.getElementById("server").textContent=`CPU: ${status.cpu_percent??"замер…"}% · свободно: ${fmtBytes(status.disk_free)}`;
+  const matches=document.getElementById("matches");matches.replaceChildren();
+  if(!status.matches.length)matches.textContent="Матчей нет";
+  for(const m of status.matches){const p=document.createElement("p");p.textContent=`${m.id} · пользователь ${m.owner} · ${m.state}${m.queue?` · очередь №${m.queue}`:""}`;
+    action(p,"Стоп",()=>call("POST",`/api/admin/matches/${encodeURIComponent(m.id)}/stop`),true);matches.append(p);}
+  const host=document.getElementById("users");host.replaceChildren();const table=document.createElement("table");
+  const head=table.createTHead().insertRow();for(const h of ["Почта","Регистрация","Последний вход","Место","Роль / статус","Действия"]){const th=document.createElement("th");th.textContent=h;head.append(th);}
+  const body=table.createTBody();for(const u of users){const row=body.insertRow();cell(row,u.email);cell(row,fmtTime(u.created));cell(row,fmtTime(u.last_login));cell(row,fmtBytes(u.bytes));cell(row,`${u.role}${u.blocked?" · заблокирован":""}`);
+    const buttons=row.insertCell();const base=`/api/admin/users/${u.id}`;
+    action(buttons,"Сбросить пароль",async()=>{if(!confirm(`Сбросить пароль ${u.email}?`))return;const result=await call("POST",`${base}/password`);message.textContent=`Новый пароль для ${u.email}: ${result.password}\nСкопируйте сейчас: после обновления страницы он исчезнет.`;});
+    action(buttons,u.blocked?"Разблокировать":"Заблокировать",()=>call("POST",`${base}/block`,{blocked:!u.blocked}),!u.blocked);
+    action(buttons,u.role==="admin"?"Снять админа":"Назначить админом",()=>call("POST",`${base}/role`,{role:u.role==="admin"?"user":"admin"}));
+    action(buttons,"Удалить",()=>{if(confirm(`Безвозвратно удалить ${u.email} и все данные?`))return call("DELETE",base);},true);
+  }host.append(table);
+}
+try{const me=await call("GET","/api/me");csrf=me.csrf;if(me.role!=="admin")throw Error("Доступно только администратору");await refresh();}catch(e){message.textContent=e.message;}
+setInterval(()=>{if(csrf)refresh().catch(e=>message.textContent=e.message);},10000);
+</script></body></html>

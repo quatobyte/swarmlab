@@ -277,7 +277,16 @@ class ProcessLink:
             return
         self._outbox.put(None)
         if proc.poll() is None:
-            proc.kill()
+            if self.launch is not None and sys.platform != "win32":
+                # Песочница отслеживает своих потомков (в т. ч. fork-бомбу) и по
+                # SIGTERM завершает их до выхода. SIGKILL убил бы только обёртку.
+                proc.terminate()
+                try:
+                    proc.wait(timeout=_STOP_WAIT_S)
+                except subprocess.TimeoutExpired:
+                    proc.kill()
+            else:
+                proc.kill()
         try:
             proc.wait(timeout=5.0)
         except subprocess.TimeoutExpired:  # pragma: no cover - ОС не убила процесс

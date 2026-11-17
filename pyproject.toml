@@ -43,7 +43,7 @@ bees = "swarmlab.bees.player_host:HiveHost"
 where = ["src"]
 
 [tool.setuptools.package-data]
-"swarmlab.server" = ["public.yaml"]
+"swarmlab.server" = ["public.yaml", "admin.html"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

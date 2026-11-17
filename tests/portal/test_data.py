@@ -14,9 +14,8 @@ import pytest
 from websockets.exceptions import ConnectionClosed
 from websockets.sync.client import connect
 
-from swarmlab.core.replay import unpack
-
 from swarmlab.core.module import ScriptAccessError, TeamSpec, check_team_scripts
+from swarmlab.core.replay import unpack
 from swarmlab.server.accounts import Database, ReplaySettings
 from swarmlab.server.app import MatchProcess
 from swarmlab.server.storage import ReplayStore, user_dir

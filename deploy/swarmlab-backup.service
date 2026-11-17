@@ -1,0 +1,9 @@
+[Unit]
+Description=Backup SwarmLab portal
+Requires=docker.service
+After=docker.service
+
+[Service]
+Type=oneshot
+WorkingDirectory=/opt/swarmlab/deploy
+ExecStart=/usr/bin/docker compose exec -T swarmlab python /app/tools/backup.py create /data /backups

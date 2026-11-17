@@ -159,7 +159,17 @@ swarmlab serve --public --host 127.0.0.1 --port 8001 --data .\data --public-conf
 
 База, папки пользователей и локальный конфиг из примера — в `--data` (по умолчанию `.\data`, в git не попадает). Настройки портала (квоты, лимиты, cookie, доверенный прокси, песочница) — `src/swarmlab/server/public.yaml`; свой файл поверх умолчаний — `--public-config мой.yaml`.
 
-M9b начата, но приёмка не завершена: Dockerfile и профили в `docker/` — рабочие заготовки, изоляция в Linux и производительность на четырёх матчах ещё требуют проверки. Текущий вариант не готов к публичной эксплуатации. Статус и оставшиеся проверки — `docs/ROADMAP.md`.
+Linux-проверка песочницы M9b из корня репозитория (PowerShell; на хосте требуется профиль AppArmor `docker/apparmor-swarmlab-sandbox`, см. ARCHITECTURE §7.1):
+
+```powershell
+docker build --target test -t swarmlab-m9b-test .
+docker run --rm --network none --pids-limit 128 --security-opt seccomp=docker/seccomp.json --security-opt apparmor=swarmlab-sandbox swarmlab-m9b-test python -m pytest -q -m sandbox -rs
+docker run --rm --network none --pids-limit 128 --security-opt seccomp=docker/seccomp.json --security-opt apparmor=swarmlab-sandbox swarmlab-m9b-test
+docker run --rm --network none --pids-limit 128 --security-opt seccomp=docker/seccomp.json --security-opt apparmor=swarmlab-sandbox swarmlab-m9b-test swarmlab bench
+docker run --rm --network none --pids-limit 128 --security-opt seccomp=docker/seccomp.json --security-opt apparmor=swarmlab-sandbox swarmlab-m9b-test python tools/bench_m9b.py
+```
+
+Вторая команда запускает полный `pytest` и `ruff check`; две последние снимают обычный бенчмарк и RTF четырёх одновременных `medium` с nsjail. Контейнеры не открывают порты и не подключают `docker.sock`. Проверки `sandbox` на Windows пропускаются с причиной. Результаты приёмки M9b — в `docs/ROADMAP.md`.
 
 ## Документы
 

@@ -40,7 +40,7 @@ from swarmlab.core.config import ConfigError, deep_merge
 DEFAULT_SETTINGS = Path(__file__).with_name("public.yaml")
 _EMAIL = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
 _EMAIL_MAX = 254
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
 
 # ====================================================================== настройки
 
@@ -196,7 +196,7 @@ class Database:
                                f"(схема {version}, знаю до {SCHEMA_VERSION})")
         if version < 1:
             with self._lock:  # executescript сам закрывает транзакции — BEGIN/COMMIT в скрипте
-                self.conn.executescript(f"""
+                self.conn.executescript("""
                     BEGIN;
                     CREATE TABLE IF NOT EXISTS users (
                         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -223,9 +223,13 @@ class Database:
                         finished INTEGER NOT NULL DEFAULT 0,
                         PRIMARY KEY (user_id, name)
                     );
-                    PRAGMA user_version = {SCHEMA_VERSION};
+                    PRAGMA user_version = 1;
                     COMMIT;
                 """)
+        if version < 2:
+            with self._lock:
+                self.conn.execute("ALTER TABLE users ADD COLUMN blocked INTEGER NOT NULL DEFAULT 0")
+                self.conn.execute("PRAGMA user_version = 2")
 
     @contextmanager
     def tx(self) -> Iterator[sqlite3.Connection]:
@@ -389,13 +393,15 @@ class Accounts:
         if left > 0:
             raise AccountError(429, "Слишком много неверных попыток входа — попробуйте "
                                     f"через {_minutes(left)}")
-        row = self.db.one("SELECT id, password_hash FROM users WHERE email = ?", (email,))
+        row = self.db.one("SELECT id, password_hash, blocked FROM users WHERE email = ?", (email,))
         ok = isinstance(password, str) and self._verify(
             row["password_hash"] if row else self._dummy_hash, password)
         if row is None or not ok:
             if self.limits.add(key, lim.login_window_s) >= lim.login_failures:
                 self.limits.lock(key, lim.login_lockout_s)
             raise AccountError(401, "Неверная почта или пароль")
+        if row["blocked"]:
+            raise AccountError(403, "Аккаунт заблокирован администратором")
         self.limits.reset(key)
         if self.hasher.check_needs_rehash(row["password_hash"]):
             self.db.run("UPDATE users SET password_hash = ? WHERE id = ?",
@@ -422,9 +428,11 @@ class Accounts:
         if not token or len(token) > 200:
             return None
         row = self.db.one(
-            "SELECT u.id, u.email, u.role, s.csrf, s.expires FROM sessions s "
+            "SELECT u.id, u.email, u.role, u.blocked, s.csrf, s.expires FROM sessions s "
             "JOIN users u ON u.id = s.user_id WHERE s.token_hash = ?", (_token_hash(token),))
         if row is None:
+            return None
+        if row["blocked"]:
             return None
         if row["expires"] <= self.clock():
             self.db.run("DELETE FROM sessions WHERE token_hash = ?", (_token_hash(token),))
@@ -459,3 +467,28 @@ class Accounts:
 
     def exists(self, user_id: int) -> bool:
         return self.db.one("SELECT 1 FROM users WHERE id = ?", (user_id,)) is not None
+
+    def set_blocked(self, user_id: int, blocked: bool) -> None:
+        with self.db.tx() as c:
+            if not c.execute("UPDATE users SET blocked = ? WHERE id = ?",
+                             (int(blocked), user_id)).rowcount:
+                raise AccountError(404, "Пользователь не найден")
+            if blocked:
+                c.execute("DELETE FROM sessions WHERE user_id = ?", (user_id,))
+
+    def set_role(self, user_id: int, role: str) -> None:
+        if role not in ("admin", "user"):
+            raise AccountError(400, "Неизвестная роль")
+        with self.db.tx() as c:
+            if not c.execute("UPDATE users SET role = ? WHERE id = ?", (role, user_id)).rowcount:
+                raise AccountError(404, "Пользователь не найден")
+            c.execute("DELETE FROM sessions WHERE user_id = ?", (user_id,))
+
+    def reset_password(self, user_id: int) -> str:
+        password = secrets.token_urlsafe(18)
+        with self.db.tx() as c:
+            if not c.execute("UPDATE users SET password_hash = ? WHERE id = ?",
+                             (self.hasher.hash(password), user_id)).rowcount:
+                raise AccountError(404, "Пользователь не найден")
+            c.execute("DELETE FROM sessions WHERE user_id = ?", (user_id,))
+        return password

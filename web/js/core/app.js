@@ -476,6 +476,7 @@ let portalUser = null;
 
 function signedIn(me) {
   portalUser = me;
+  $("lobby-admin").hidden = me.role !== "admin";
   setCsrf(me.csrf);
   lobby.setPortal(me);
 }
@@ -483,6 +484,7 @@ function signedIn(me) {
 /** Выйти на экран входа: закрыть матч, редактор и меню. */
 async function toAuth(message = "") {
   portalUser = null;
+  $("lobby-admin").hidden = true;
   setCsrf(null);
   lobby.setPortal(null);
   document.body.classList.add("portal");

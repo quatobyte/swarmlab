@@ -1,8 +1,8 @@
 """Портал M9b: лимиты матчей, очередь, простой без зрителей, лимиты серий (DECISIONS №94).
 
-В `master` нет модуля, поэтому процесс матча — подставной воркер (`fake_worker.py`) с тем же
-каналом; конфиги — модуль-заглушка `fake` (ядро модуль не загружает до воркера). Настоящие
-матчи под песочницей — в ветке модуля.
+Лимиты очереди проверяются с подставным воркером (`fake_worker.py`) с тем же каналом;
+конфиги — модуль-заглушка `fake` (ядро модуль не загружает до воркера).
+Настоящие матчи под песочницей проверяются в `test_sandbox.py`.
 """
 
 from __future__ import annotations
@@ -293,7 +293,7 @@ def test_local_mode_has_no_queue_no_limits_new_match_replaces_old(make):
 
 def test_public_yaml_wraps_runner_in_nsjail_config_from_repo():
     prefix = load_settings().sandbox.runner_prefix
-    assert prefix[0] == "nsjail" and prefix[-1] == "--" and "{script}" in prefix
+    assert prefix[0] == "/usr/local/bin/nsjail" and prefix[-1] == "--" and "{script}" in prefix
     cfg = prefix[prefix.index("--config") + 1]
     assert cfg == "/app/docker/runner.nsjail.cfg"  # путь в образе (Dockerfile: COPY . /app)
     assert (ROOT / "docker" / "runner.nsjail.cfg").is_file()

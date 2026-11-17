@@ -109,7 +109,7 @@ class Portal:
 
 def _settings(**over: Any) -> PublicSettings:
     """Настройки портала для тестов. Песочница по умолчанию выключена: тесты идут и на Windows;
-    проверки самой песочницы в Linux-контейнере ещё предстоит добавить в M9b."""
+    тесты `test_sandbox.py` явно включают её в Linux-контейнере."""
     base = load_settings().model_dump()
     base["sandbox"]["runner_prefix"] = []
     return PublicSettings(**deep_merge(base, over))

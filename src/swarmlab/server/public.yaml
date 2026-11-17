@@ -46,7 +46,7 @@ sandbox:
   # nsjail без сети, только чтение, лимиты процессора, памяти, процессов и файлов.
   # Пустой список [] — без песочницы: код игрока получает все права сервера. Только для
   # пробы портала на своём компьютере (`--public-config` с `sandbox: {runner_prefix: []}`).
-  runner_prefix: [nsjail, --quiet, --config, /app/docker/runner.nsjail.cfg,
+  runner_prefix: [/usr/local/bin/nsjail, --quiet, --config, /app/docker/runner.nsjail.cfg,
                   --bindmount_ro, "{script}", --]
 
 matches:

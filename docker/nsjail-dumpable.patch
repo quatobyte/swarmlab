@@ -1,0 +1,21 @@
+diff --git a/nsjail.cc b/nsjail.cc
+--- a/nsjail.cc
++++ b/nsjail.cc
+@@ -28,6 +28,7 @@
+ #include <stdlib.h>
+ #include <string.h>
+ #include <sys/ioctl.h>
++#include <sys/prctl.h>
+ #include <sys/time.h>
+ #include <termios.h>
+ #include <unistd.h>
+@@ -327,4 +328,9 @@
+ }  // namespace nsjail
+ 
+ int main(int argc, char* argv[]) {
++	// File capabilities can reset dumpability and make child uid/gid maps root-owned.
++	if (prctl(PR_SET_DUMPABLE, 1, 0, 0, 0) == -1) {
++		PLOG_F("prctl(PR_SET_DUMPABLE, 1) failed");
++	}
++
+ 	std::unique_ptr<nsjconf_t> nsjconf = cmdline::parseArgs(argc, argv);

@@ -1,0 +1,22 @@
+services:
+  swarmlab:
+    build:
+      context: ..
+      target: app
+    restart: unless-stopped
+    volumes:
+      - /opt/swarmlab/data:/data
+      - /opt/swarmlab/backups:/backups
+    security_opt:
+      - seccomp=../docker/seccomp.json
+      - apparmor=swarmlab-sandbox
+    networks:
+      - caddy
+    env_file:
+      - .env
+    command: ["swarmlab", "serve", "--public", "--host", "0.0.0.0", "--port", "8000", "--data", "/data", "--public-config", "/data/public.yaml"]
+
+networks:
+  caddy:
+    external: true
+    name: vaultwarden_default

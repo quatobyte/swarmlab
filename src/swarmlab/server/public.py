@@ -356,6 +356,10 @@ def add_routes(app: FastAPI, portal: Portal, manager: MatchManager) -> None:
         _call(portal.space(current_user(request)).projects.delete, name)
         return {"ok": True}
 
+    from swarmlab.server.admin import add_admin_routes
+
+    add_admin_routes(app, portal, manager)
+
 
 def _stem(rid: str) -> str:
     return rid[:-4] if rid.endswith(".swr") else rid
