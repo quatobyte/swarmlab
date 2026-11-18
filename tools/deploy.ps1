@@ -1,4 +1,4 @@
-param(
+﻿param(
     [switch]$Backup,
     [string]$HostName = 'root@5.231.230.25',
     [string]$BackupDir = "$PWD\backups",
@@ -10,10 +10,11 @@ if ($HostName -notmatch '^[a-zA-Z0-9_.-]+@[a-zA-Z0-9_.-]+$') {
     throw 'Неверный SSH-адрес'
 }
 function Remote([string]$Script) {
-    $start = [System.Diagnostics.ProcessStartInfo]::new('ssh')
-    foreach ($arg in @('-o', 'BatchMode=yes', '-o', 'ConnectTimeout=10', $HostName, 'bash -se')) {
-        [void]$start.ArgumentList.Add($arg)
-    }
+    # HostName допускает только буквы, цифры и знаки из проверки выше, поэтому
+    # строка аргументов безопасна и работает в Windows PowerShell 5.1 (.NET Framework).
+    $start = New-Object System.Diagnostics.ProcessStartInfo
+    $start.FileName = 'ssh'
+    $start.Arguments = "-o BatchMode=yes -o ConnectTimeout=10 $HostName bash -se"
     $start.UseShellExecute = $false
     $start.RedirectStandardInput = $true
     $start.RedirectStandardOutput = $true
