@@ -16,6 +16,7 @@ import { makeProject, parseProject, projectName, projectText, PROJECT_EXT } from
 import { confirmForeignCode } from "../trust.js";
 import { ask, askSeries } from "./dialog.js";
 import { renderMarkdown } from "./markdown.js";
+import { baseName, LogGrouper } from "../logparse.js";
 import { DEFAULT_MODULE, loadModuleEditor } from "../../modules/registry.js";
 
 const $ = (id) => document.getElementById(id);
@@ -33,10 +34,6 @@ const FEATURES = ["python", "logs", "help", "project", "free"];
 function fmtTime(s) {
   s = Math.max(0, Math.floor(s || 0));
   return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`;
-}
-
-function baseName(path) {
-  return String(path).split(/[\\/]/).pop();
 }
 
 /** `my_bees.py` → `my_bees.blocks.json` (файл блоков рядом со скриптом). */
@@ -58,7 +55,6 @@ export class Editor {
     this.logFilter = "all";
     this.teams = new Map(); // team → {name, warn, err}
     this.runErrors = []; // ошибки выполнения из логов: {file, line, message}
-    this.pendingFrame = new Map(); // team → {file, line} последней строки File "…" трассировки
     this.active = false;
     this.running = false;
     this._ready = null;
@@ -726,7 +722,6 @@ export class Editor {
     this.logs = [];
     this.teams = new Map();
     this.runErrors = [];
-    this.pendingFrame = new Map();
     this.logFilter = "all";
     // Код, с которым запущен матч: по его строкам отладчик находит выполняемый блок.
     this.runText = this._payload(this.file.name).text;
@@ -779,67 +774,93 @@ export class Editor {
   _team(team, name, script) {
     let t = this.teams.get(team);
     if (!t) {
-      t = { team, name: name || `hive${team}`, script: script || "", warn: 0, err: 0 };
+      t = { team, name: name || `hive${team}`, script: script || "", warn: 0, err: 0, grouper: new LogGrouper() };
       this.teams.set(team, t);
     }
     if (script) t.script = script;
     return t;
   }
 
+  /**
+   * Пакет строк лога команды (DECISIONS №106). Трассировка Python собирается в одну запись об
+   * ошибке (`core/logparse.js`), слова для игрока даёт модуль (`describeError` и др.); служебные
+   * строки ядра модуль может скрыть — полный лог остаётся в папке logs/.
+   */
   _onLog(msg) {
     const t = this._team(msg.team, msg.name);
     const added = [];
     for (const text of msg.lines) {
-      const cls = this._classify(text, t);
-      const entry = { team: msg.team, time: msg.time, text, cls };
-      this.logs.push(entry);
-      added.push(entry);
+      for (const rec of t.grouper.push(text)) {
+        const entry = rec.kind === "error" ? this._onError(rec, t) : this._onLine(rec.text, t);
+        if (!entry) continue;
+        entry.team = msg.team;
+        entry.time = msg.time;
+        this.logs.push(entry);
+        added.push(entry);
+      }
     }
     if (this.logs.length > MAX_LOG_LINES) this.logs.splice(0, this.logs.length - MAX_LOG_LINES);
     this._renderLogTabs();
     this._appendLogs(added);
   }
 
-  _classify(text, t) {
-    const frame = /^\s*File "(.+)", line (\d+)/.exec(text);
-    if (frame) {
-      this.pendingFrame.set(t.team, { file: baseName(frame[1]), line: Number(frame[2]) });
-      return "err";
+  /** Собранная ошибка программы → запись лога; первая на строке — пометка в коде и окно миссии. */
+  _onError(rec, t) {
+    t.err += 1;
+    const fr = rec.frames[rec.frames.length - 1] || null;
+    const mine = (fr ? fr.file : baseName(t.script)) === this.file?.name;
+    const fresh = !!fr && !!rec.message && !this.runErrors.some((r) => r.file === fr.file && r.line === fr.line);
+    if (fresh) {
+      this.runErrors.push({ ...fr, team: t.name, message: rec.message });
+      if (mine) this.cm.performLint();
     }
-    const exc = /^([A-Za-z_][\w.]*(?:Error|Exception|Exit|Interrupt))\b(:.*)?$/.exec(text);
-    if (exc) {
-      t.err += 1;
-      const fr = this.pendingFrame.get(t.team);
-      this.pendingFrame.delete(t.team);
-      if (fr && !this.runErrors.some((r) => r.file === fr.file && r.line === fr.line)) {
-        this.runErrors.push({ ...fr, team: t.name, message: text });
-        if (fr.file === this.file?.name) this.cm.performLint();
-        if (this.mission && fr.file === this.file?.name) {
-          // Обучение (DECISIONS №103): об ошибке программы — окном; лог открывается, даже если был закрыт.
-          this.unlock("logs");
-          this.mission.runError(text, () => {
-            const id = this.mode === "blocks" && this.gen ? this.mod.blockAtLine?.(this.gen.code, fr.line) : null;
-            if (id && this.blocks.focus(id)) this.setView("blocks");
-            else this.goto(fr.line);
-          });
-        }
-      }
-      return "err";
+    // Обучение (DECISIONS №103, №104): об ошибке программы — окном; лог открывается, даже если был
+    // закрыт. Ошибка загрузки бывает и без строки в файле игрока — тогда окно без «Показать».
+    if (this.mission && mine && rec.message && (fresh || !fr)) {
+      this.unlock("logs");
+      this.mission.runError(rec.message, fr ? () => this._showPlace(fr.file, fr.line) : null);
     }
-    if (/^(Ошибка|Скрипт .* не загрузился|Traceback)/.test(text) || /^\s{4}\S/.test(text) && this.pendingFrame.has(t.team)) {
-      return "err";
+    return { cls: "err", error: rec, text: [rec.title, rec.message].filter(Boolean).join(" ") };
+  }
+
+  /** Обычная строка лога: print игрока, повтор ошибки, сообщение ядра или сервера. */
+  _onLine(text, t) {
+    const repeat = this.mod?.describeRepeat?.(text);
+    if (repeat) return { cls: "err", repeat, text };
+    if (!/^\[(ядро|сервер|stderr)\]/.test(text)) return { cls: "", text };
+    if (/пропущен|бюджет|отключ|перезапуск/.test(text)) t.warn += 1;
+    // Обучение (DECISIONS №104): программа игрока зависла или третий раз не уложилась в бюджет
+    // тика — окном с советом. Ошибку загрузки окно получает из самой ошибки (_onError).
+    if (this.mission && baseName(t.script) === this.file?.name && /перезапуск|отключ|превышений: 3\)/.test(text)) {
+      this.unlock("logs");
+      this.mission.runError(text.replace(/^\[ядро\]\s*/, ""), null);
     }
-    if (text.startsWith("[ядро]") || text.startsWith("[сервер]")) {
-      if (/пропущен|бюджет|отключ|перезапуск/.test(text)) t.warn += 1;
-      // Обучение (DECISIONS №104): программа игрока зависла, не загрузилась или третий раз не уложилась
-      // в бюджет тика — окном с советом.
-      if (this.mission && baseName(t.script) === this.file?.name && /перезапуск|отключ|не загрузился|превышений: 3\)/.test(text)) {
-        this.unlock("logs");
-        this.mission.runError(text.replace(/^\[ядро\]\s*/, ""), null);
-      }
-      return "core";
+    const said = this.mod?.describeCore?.(text);
+    if (said === null) return null; // служебная строка: игроку не нужна
+    // Слова — при показе: совет зависит от того, блоки открыты или Python.
+    return { cls: said?.level === "err" ? "err" : "core", text, core: !!said };
+  }
+
+  /** Показать место ошибки: блок (программа из блоков) или строку на вкладке Python. */
+  async _showPlace(file, line) {
+    const id = this._blockAt(file, line);
+    if (id && this.blocks.focus(id)) {
+      this.setView("blocks");
+      return;
     }
-    return "";
+    if (file !== this.file?.name) {
+      if (!this.scripts.some((s) => s.name === file)) return;
+      if (this.dirty && !confirm(`В ${this.file.name} есть несохранённые правки. Открыть ${file}?`)) return;
+      await this.openFile(file);
+    }
+    this.goto(line);
+  }
+
+  /** Блок открытой программы, из которого получилась строка `line` запущенного кода, или null. */
+  _blockAt(file, line) {
+    if (this.mode !== "blocks" || file !== this.file?.name || !line) return null;
+    const code = this.runText ?? this.gen?.code;
+    return code ? this.mod.blockAtLine?.(code, line) || null : null;
   }
 
   _renderLogTabs() {
@@ -892,25 +913,69 @@ export class Editor {
       row.appendChild(who);
     }
     const body = document.createElement("span");
-    const frame = /^(\s*File ")(.+)(", line )(\d+)(.*)$/.exec(entry.text);
-    if (frame) {
-      const file = baseName(frame[2]);
-      body.append(frame[1]);
-      const a = document.createElement("a");
-      a.textContent = `${file}, строка ${frame[4]}`;
-      a.title = "Открыть в редакторе";
-      a.onclick = async () => {
-        if (file !== this.file?.name) {
-          if (!this.scripts.some((s) => s.name === file)) return;
-          if (this.dirty && !confirm(`В ${this.file.name} есть несохранённые правки. Открыть ${file}?`)) return;
-          await this.openFile(file);
-        }
-        this.goto(Number(frame[4]));
-      };
-      body.append(a, frame[5]);
-    } else body.textContent = entry.text;
+    if (entry.error || entry.repeat) this._errorBody(body, entry);
+    else if (entry.core) body.textContent = this.mod.describeCore(entry.text, { blocks: this.mode === "blocks" })?.text ?? entry.text;
+    else body.textContent = entry.text;
     row.appendChild(body);
     return row;
+  }
+
+  /**
+   * Ошибка программы одной записью: «✖ кто, где: что случилось» и (в Python) совет второй строкой.
+   * Место — ссылка на блок (программа из блоков) или на строку кода.
+   */
+  _errorBody(body, entry) {
+    const blocks = this.mode === "blocks";
+    let who = "";
+    let text = entry.text;
+    let detail = null;
+    let file = null;
+    let line = null;
+    if (entry.error) {
+      const fr = entry.error.frames[entry.error.frames.length - 1];
+      if (fr) ({ file, line } = fr);
+      const said = this.mod?.describeError?.(entry.error, { blocks });
+      if (said) ({ who, text, detail } = said);
+    } else {
+      ({ who, text, line } = entry.repeat);
+      file = baseName(this.teams.get(entry.team)?.script || "");
+    }
+    body.className = "log-error";
+    const head = document.createElement("div");
+    head.append("✖ ");
+    if (who) {
+      const b = document.createElement("b");
+      b.textContent = who;
+      head.append(b);
+    }
+    const place = this._placeLink(file, line);
+    if (place) head.append(who ? ", " : "", place);
+    head.append(who || place ? `: ${text}` : text);
+    body.appendChild(head);
+    if (detail) {
+      const d = document.createElement("div");
+      d.className = "log-advice";
+      d.textContent = detail;
+      body.appendChild(d);
+    }
+  }
+
+  /** Ссылка на место ошибки: «блок «…»» в программе из блоков, иначе «строка N» (или «файл, строка N»). */
+  _placeLink(file, line) {
+    if (!file || !line) return null;
+    const a = document.createElement("a");
+    a.onclick = () => this._showPlace(file, line);
+    if (this.mode === "blocks" && file === this.file?.name) {
+      const id = this._blockAt(file, line);
+      const label = id ? this.blocks?.label?.(id) : null;
+      if (!label) return null; // строка служебной обёртки, а не блока игрока
+      a.textContent = `блок «${label}»`;
+      a.title = "Показать блок";
+      return a;
+    }
+    a.textContent = file === this.file?.name ? `строка ${line}` : `${file}, строка ${line}`;
+    a.title = "Открыть в редакторе";
+    return a;
   }
 
   _renderLogs() {
@@ -918,8 +983,9 @@ export class Editor {
     box.innerHTML = "";
     const shown = this.logs.filter((e) => this._visible(e));
     if (!shown.length) {
-      box.innerHTML = '<div class="log-empty">Здесь появится всё, что печатают ваши пчёлы (<code>print</code>), '
-        + "ошибки с номером строки и предупреждения ядра — например, о превышении бюджета времени.</div>";
+      box.innerHTML = '<div class="log-empty">Здесь появится всё, что печатает программа (<code>print</code>), '
+        + "ошибки — где случились и как исправить — и предупреждения игры, например о том, что программа "
+        + "не уложилась во время хода.</div>";
       return;
     }
     const frag = document.createDocumentFragment();

@@ -422,3 +422,6 @@ body.lock-free #mission-free { display: none; }
 .mission-window .modal-actions { align-items: center; margin-top: 16px; }
 .mw-foot { margin-right: auto; }
 .mission-fresh { color: #cfe8ff; }
+.log-line .log-error { display: flex; flex-direction: column; gap: 2px; }
+.log-line .log-error b { font-weight: 600; }
+.log-line .log-advice { color: #c9d4de; }

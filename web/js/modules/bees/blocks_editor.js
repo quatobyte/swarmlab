@@ -11,6 +11,22 @@ import {
 
 const B = () => window.Blockly;
 
+/**
+ * Как блок называется для игрока (лог ошибок, DECISIONS №106): подпись из blocks_ru.js, гнёзда — «…».
+ * `null` — блок не из API пчёл и не свой (его называет сам Blockly).
+ */
+export function blockLabel(type) {
+  const dots = (label) => label.replace(/\{\w+\}/g, "…").replace(/\s+/g, " ").trim();
+  const a = apiBlock(type);
+  if (a) {
+    const ru = API_RU[a.desc.api];
+    if (!ru) return null;
+    if (a.ask) return dots(ru.ask || `${MESSAGES.askPrefix} ${ru.label}`);
+    return dots(a.full ? ru.full || ru.label : ru.label);
+  }
+  return CUSTOM_RU[type] ? dots(CUSTOM_RU[type].label) : null;
+}
+
 /** Подпись `«лететь к x {x} y {y}»` → message/args для Blockly; `{имя}` → `%n`. */
 function interpolate(label, argFor) {
   const args = [];
@@ -610,6 +626,13 @@ export class BlocksEditor {
       && box.bottom > view.top && box.top < view.top + view.height;
     if (!inside) this.ws.centerOnBlock(id);
     return true;
+  }
+
+  /** Имя блока для лога: подпись API или текст блока, как его рисует Blockly; нет блока — `null`. */
+  label(id) {
+    const b = id ? this.ws.getBlockById(id) : null;
+    if (!b) return null;
+    return blockLabel(b.type) || b.toString(40, "…");
   }
 
   /** Прокрутить к блоку и выделить его. */

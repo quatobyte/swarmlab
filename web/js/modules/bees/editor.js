@@ -482,3 +482,4 @@ export function lobbySources(scripts, projects) {
 
 export { BlocksEditor, starterWorkspace } from "./blocks_editor.js";
 export { blockAtLine, generate as generateBlocks } from "./blocks_gen.js";
+export { describeCore, describeError, describeRepeat } from "./log_ru.js";
