@@ -3,13 +3,14 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>SwarmLab — вьюер</title>
+  <title>SwarmLab</title>
   <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Cellipse cx='16' cy='17' rx='9' ry='11' fill='%23f5b700'/%3E%3Cpath d='M8 14h16M7.5 19h17M9 24h14' stroke='%23222' stroke-width='3'/%3E%3C/svg%3E">
   <link rel="stylesheet" href="vendor/codemirror/lib/codemirror.css">
   <link rel="stylesheet" href="vendor/codemirror/theme/material-darker.css">
   <link rel="stylesheet" href="vendor/codemirror/addon/hint/show-hint.css">
   <link rel="stylesheet" href="vendor/codemirror/addon/lint/lint.css">
   <link rel="stylesheet" href="style.css">
+  <link rel="stylesheet" href="home.css">
   <script type="importmap">
     {
       "imports": {
@@ -144,21 +145,37 @@
   </div>
 
   <div id="auth" class="overlay" hidden>
+    <nav class="language-switch auth-language" aria-label="Язык / Language">
+      <button type="button" data-language="ru" aria-pressed="true">RU</button><span>/</span><button type="button" data-language="en" aria-pressed="false">EN</button>
+    </nav>
+    <div class="auth-content">
+      <h1 class="auth-brand"><img src="assets/brand/title.svg" alt="Пчёлки" width="600" height="175"></h1>
+      <img class="auth-subtitle" src="assets/brand/subtitle.svg" alt="Обучающая игра про мультиагентные системы">
+      <p class="auth-subtitle-en" hidden>An educational game about multi-agent systems</p>
     <div class="lobby auth">
-      <h1>SwarmLab <small>портал</small></h1>
       <div class="auth-tabs">
-        <button class="ed-tab active" id="auth-tab-login" type="button">Вход</button>
-        <button class="ed-tab" id="auth-tab-register" type="button">Регистрация</button>
+        <button class="ed-tab active" id="auth-tab-login" type="button" data-i18n="login">Вход</button>
+        <button class="ed-tab" id="auth-tab-register" type="button" data-i18n="register">Регистрация</button>
       </div>
       <form class="form auth-form" id="auth-form">
-        <label>Почта <input type="email" id="auth-email" autocomplete="username" required></label>
-        <label>Пароль <input type="password" id="auth-password" autocomplete="current-password" required></label>
-        <label id="auth-repeat" hidden>Пароль ещё раз <input type="password" id="auth-password2" autocomplete="new-password"></label>
+        <label><span data-i18n="email">Электронная почта</span><input type="email" id="auth-email" autocomplete="username" placeholder="you@example.com" required></label>
+        <label><span data-i18n="password">Пароль</span><input type="password" id="auth-password" autocomplete="current-password" required></label>
+        <label id="auth-repeat" hidden><span data-i18n="repeat">Пароль ещё раз</span><input type="password" id="auth-password2" autocomplete="new-password"></label>
         <button class="btn primary" id="auth-submit" type="submit">Войти</button>
       </form>
       <p class="small error" id="auth-error" hidden></p>
       <p class="small muted" id="auth-note"></p>
+      <div class="auth-secondary">
+        <button class="text-button" id="auth-guest" type="button" data-i18n="guest">Продолжить без входа →</button>
+        <button class="text-button secondary" id="auth-contest" type="button" data-i18n="contest">У меня есть код соревнований</button>
+      </div>
     </div>
+    </div>
+    <footer class="auth-credits" aria-label="SwarmLab и kmashinist">
+      <div class="credit-swarm"><img class="credit-name" src="assets/brand/footer-name.svg" alt="SwarmLab"><img class="credit-tagline" src="assets/brand/footer-tagline.svg" alt="IDE for MAS"><img class="credit-symbol" src="assets/brand/footer-swarm.svg" alt=""></div>
+      <img class="credit-divider" src="assets/brand/footer-divider.svg" alt="">
+      <div class="credit-author"><img class="credit-mark" src="assets/brand/footer-mark.svg" alt=""><img class="credit-signature" src="assets/brand/footer-author.svg" alt="kmashinist"></div>
+    </footer>
   </div>
 
   <div id="tutorial" class="overlay" hidden>
@@ -170,20 +187,33 @@
     </div>
   </div>
 
-  <div id="lobby" class="overlay">
-    <div class="lobby">
-      <h1>SwarmLab <small>рой пчёл</small>
+  <div id="lobby" class="overlay" hidden>
+    <div class="lobby home">
+      <header class="home-header">
+        <a class="home-brand" href="#" aria-label="SwarmLab Bees"><img src="assets/brand/brand-name.svg" width="188" height="44" alt="SwarmLab"><img class="brand-divider" src="assets/brand/brand-divider.svg" alt=""><img src="assets/brand/brand-bees.svg" width="96" height="26" alt="Bees"></a>
+        <nav class="home-nav" aria-label="Навигация"><a href="#home-projects" data-home-scroll="home-projects" data-i18n="projects">Проекты</a><button type="button" id="home-learning" data-i18n="learning">Обучение</button><button type="button" id="home-reference" data-i18n="reference">Справочник</button></nav>
+        <nav class="language-switch" aria-label="Язык / Language"><button type="button" data-language="ru" aria-pressed="true">RU</button><span>/</span><button type="button" data-language="en" aria-pressed="false">EN</button></nav>
         <span class="user-bar" id="lobby-user" hidden>
           <span class="muted small" id="lobby-user-email"></span>
-          <button class="btn small" id="lobby-profile" title="Пароль, архив проектов, удаление аккаунта">Профиль</button>
-          <button class="btn small" id="lobby-logout">Выйти</button>
+          <button class="btn small" id="lobby-profile" title="Пароль, архив проектов, удаление аккаунта" data-i18n="profile">Мой профиль</button>
+          <button class="btn small" id="lobby-logout" data-i18n="logout">Выйти</button>
         </span>
-      </h1>
-      <section id="lobby-tutorial-section" hidden>
-        <p class="small"><button class="btn primary" id="lobby-tutorial">🎓 Обучение</button>
-          <span class="muted">— миссии по порядку: каждая учит новому приёму прямо в матче</span></p>
+      </header>
+      <main class="home-main">
+      <div class="home-welcome"><h1 data-i18n="welcome">Твоя следующая идея начинается здесь</h1><p data-i18n="intro">Создавай программы для пчёл и наблюдай, как действует рой.</p></div>
+      <section class="home-project-section" id="home-projects">
+        <div class="home-section-heading"><h2 id="lobby-projects-title" data-i18n="myProjects">Мои проекты</h2><label class="text-button file"><span data-i18n="import">Импортировать .swarm</span><input type="file" id="lobby-project-file" accept=".swarm" hidden></label></div>
+        <div class="home-project-grid"><button class="new-project-card" id="home-new-project" type="button"><span class="new-project-plus">＋</span><b data-i18n="newProject">Новый проект</b><span data-i18n="newIdea">Начни со своей идеи</span></button><div id="lobby-scripts" class="project-cards"></div><div id="lobby-projects" class="project-cards"><p class="muted small">Загрузка…</p></div></div>
+        <p class="small" id="lobby-project-msg" hidden></p>
       </section>
-      <section>
+      <section class="home-guides"><h2 data-i18n="learnTry">Учись и пробуй</h2><div class="guide-grid">
+      <section id="lobby-tutorial-section" hidden>
+        <span class="guide-kicker" data-i18n="learningKicker">01 / ОБУЧЕНИЕ</span><h3 data-i18n="learningTitle">От первой пчелы до роя</h3><p data-i18n="learningDescription">8 миссий с подсказками по ходу игры</p><button class="text-button" id="lobby-tutorial" data-i18n="startLearning">Начать обучение →</button>
+      </section>
+      <section><span class="guide-kicker" data-i18n="examplesKicker">02 / ПРИМЕРЫ</span><h3 data-i18n="examplesTitle">Посмотри, как это работает</h3><p data-i18n="examplesDescription">Открой программу и измени её</p><button class="text-button" id="home-examples" data-i18n="openExamples">Открыть примеры →</button></section>
+      <section><span class="guide-kicker" data-i18n="referenceKicker">03 / СПРАВОЧНИК</span><h3 data-i18n="referenceTitle">Найди нужный блок</h3><p data-i18n="referenceDescription">Команды, сенсоры и правила мира</p><button class="text-button" id="home-help" data-i18n="openReference">Открыть справочник →</button></section>
+      </div></section>
+      <details class="home-tools"><summary data-i18n="matchTools">Матчи и редактор</summary><section>
         <h2>Матч: рои в ульях</h2>
         <div class="match-form lobby-form" id="lobby-form"><p class="muted small">Загрузка…</p></div>
         <div class="match-actions lobby-actions">
@@ -192,15 +222,6 @@
         </div>
         <p class="small"><button class="btn" id="lobby-editor">✎ Редактор кода</button>
           <span class="muted">— написать свой рой и сразу посмотреть, как он летает</span></p>
-      </section>
-      <section>
-        <h2 id="lobby-projects-title">Проекты</h2>
-        <div class="list portal-only" id="lobby-scripts"></div>
-        <h3 class="small muted portal-only">Загруженные проекты .swarm</h3>
-        <div class="list" id="lobby-projects"><p class="muted small">Загрузка…</p></div>
-        <label class="btn file">📂 Загрузить проект .swarm…<input type="file" id="lobby-project-file" accept=".swarm" hidden></label>
-        <span class="muted small">или перетащите файл .swarm в окно</span>
-        <p class="small" id="lobby-project-msg" hidden></p>
       </section>
       <section>
         <h2>Серии матчей</h2>
@@ -225,14 +246,18 @@
         <h2>Идёт сейчас</h2>
         <div class="list" id="lobby-live"></div>
       </section>
-      <section>
+      </details>
+      <details class="home-tools"><summary data-i18n="replays">Мои реплеи</summary><section>
         <h2 id="lobby-replays-title">Реплеи</h2>
         <p class="small muted" id="lobby-replays-note" hidden></p>
         <div class="list" id="lobby-replays"><p class="muted small">Загрузка…</p></div>
         <label class="btn file">Открыть файл .swr…<input type="file" id="lobby-file" accept=".swr" hidden></label>
         <span class="muted small">или перетащите файл в окно</span>
       </section>
+      </details>
       <p class="error" id="lobby-error" hidden></p>
+      <footer class="home-footer"><span>SwarmLab</span><span data-i18n="footer">Создано для исследования роевых систем</span></footer>
+      </main>
     </div>
   </div>
 

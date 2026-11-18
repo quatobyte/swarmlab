@@ -12,6 +12,8 @@ import { FpsMeter, isTyping } from "./ui/fps.js";
 import { Lobby, STATE_RU, fmtTime } from "./ui/lobby.js";
 import { SeriesView } from "./ui/series.js";
 import { CampaignScreen, MissionRun, Progress, closeWindow, loadCampaign, showWindow } from "./ui/tutorial.js";
+import { initHome, text } from "./ui/home.js";
+import { askProjectName } from "./ui/dialog.js";
 import { MODULES } from "../modules/registry.js";
 
 const LIVE_SPEEDS = [0.5, 1, 2, 4, 8];
@@ -560,6 +562,23 @@ window.addEventListener("hashchange", () => {
 
 const auth = new AuthScreen();
 let portalUser = null;
+initHome({
+  newProject: async () => {
+    const name = await askProjectName({ title: text("newProjectTitle"), label: text("projectName"), ok: text("create"), cancel: text("cancel") });
+    if (!name) return;
+    await openEditor();
+    if (editor.active) await editor.newBlocksScript(name);
+  },
+  examples: async () => {
+    await openEditor();
+    if (editor.active) {
+      const example = editor.scripts.find(s => s.readonly && s.name !== "template.py");
+      if (example) await editor.openFile(example.name);
+    }
+  },
+  reference: () => editor.showHelp(),
+  learning: openCampaign,
+});
 
 function signedIn(me) {
   portalUser = me;
