@@ -506,10 +506,10 @@ export class Editor {
   }
 
   /** Новый скрипт из блоков (режим по умолчанию для новых скриптов, DECISIONS №51). */
-  async newBlocksScript() {
+  async newBlocksScript(projectName = null) {
     if (!this.mod.BlocksEditor) return;
     if (this.dirty && !confirm(`В ${this.file.name} есть несохранённые правки. Создать новый скрипт без сохранения?`)) return;
-    let name = prompt("Имя нового скрипта из блоков (латиница, цифры и _, в конце .py):", "my_blocks.py");
+    let name = projectName ?? prompt("Имя нового скрипта из блоков (латиница, цифры и _, в конце .py):", "my_blocks.py");
     if (name === null) return;
     name = name.trim();
     if (!name.endsWith(".py")) name += ".py";

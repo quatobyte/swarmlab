@@ -5,6 +5,7 @@
 import { api, setCsrf } from "../api.js";
 import { makeProject, projectText, PROJECT_EXT } from "../project.js";
 import { ask } from "./dialog.js";
+import { projectCard, text } from "./home.js";
 
 const $ = (id) => document.getElementById(id);
 
@@ -53,6 +54,8 @@ export class AuthScreen {
     this.resolve = null;
     $("auth-tab-login").onclick = () => this._setMode("login");
     $("auth-tab-register").onclick = () => this._setMode("register");
+    document.addEventListener("swarmlab:language", () => this._setMode(this.mode, false));
+    for (const id of ["auth-guest", "auth-contest"]) $(id).onclick = () => this._error(text("later"), false);
     $("auth-form").addEventListener("submit", (e) => {
       e.preventDefault();
       this._submit();
@@ -78,18 +81,21 @@ export class AuthScreen {
     return !this.el.hidden;
   }
 
-  _setMode(mode) {
+  _setMode(mode, focus = true) {
     this.mode = mode;
     const reg = mode === "register";
     $("auth-tab-login").classList.toggle("active", !reg);
     $("auth-tab-register").classList.toggle("active", reg);
     $("auth-repeat").hidden = !reg;
-    $("auth-submit").textContent = reg ? "Зарегистрироваться" : "Войти";
+    $("auth-submit").textContent = text(reg ? "createAccount" : "login");
     $("auth-password").autocomplete = reg ? "new-password" : "current-password";
-    $("auth-note").textContent = reg
-      ? "Почта — ваш логин, писем не будет. Пароль — не меньше 8 символов; забудете — поможет админ."
-      : "Нет аккаунта? Нажмите «Регистрация».";
-    (($("auth-email").value ? $("auth-password") : $("auth-email"))).focus();
+    $("auth-password").placeholder = text(reg ? "newPasswordPlaceholder" : "passwordPlaceholder");
+    $("auth-password").minLength = reg ? 8 : 1;
+    $("auth-password2").required = reg;
+    $("auth-note").textContent = text(reg ? "registerNote" : "signInNote");
+    $("auth-tab-login").setAttribute("aria-pressed", String(!reg));
+    $("auth-tab-register").setAttribute("aria-pressed", String(reg));
+    if (focus && this.visible) (($("auth-email").value ? $("auth-password") : $("auth-email"))).focus();
   }
 
   _error(text, bad = true) {
@@ -103,7 +109,7 @@ export class AuthScreen {
     const email = $("auth-email").value.trim();
     const password = $("auth-password").value;
     if (this.mode === "register" && password !== $("auth-password2").value) {
-      this._error("Пароли не совпадают");
+      this._error(text("mismatch"));
       return;
     }
     $("auth-submit").disabled = true;
@@ -268,8 +274,7 @@ async function downloadScript(name) {
 /** «Мои проекты»: свои скрипты редактора — открыть, скачать .swarm, удалить. */
 export function renderMyScripts(box, scripts, { openInEditor, refresh, error }) {
   const own = scripts.filter((s) => !s.readonly);
-  box.innerHTML = own.length ? ""
-    : '<p class="muted small">Своих скриптов пока нет — откройте редактор кода.</p>';
+  box.innerHTML = "";
   for (const s of own) {
     const el = row(`${s.mode === "blocks" ? "🧩" : "🐍"} ${s.name}`,
       `${s.mode === "blocks" ? "блоки" : "Python"} · ${fmtDate(s.modified)}`);
@@ -286,7 +291,7 @@ export function renderMyScripts(box, scripts, { openInEditor, refresh, error }) 
         }
       }),
     );
-    box.appendChild(el);
+    box.appendChild(projectCard(el, () => openInEditor(s.name)));
   }
 }
 

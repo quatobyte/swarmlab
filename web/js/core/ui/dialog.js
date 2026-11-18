@@ -52,6 +52,35 @@ export async function ask(text, { title = "", ok = "Да", cancel = "Отмен�
   return res === true;
 }
 
+/** Имя нового проекта: обычная форма вместо браузерного prompt. */
+export function askProjectName({ title, label, ok, cancel }) {
+  return modal((box, done) => {
+    box.classList.add("home-project-dialog");
+    const heading = document.createElement("h3");
+    heading.textContent = title;
+    const form = document.createElement("form");
+    form.className = "form";
+    const field = document.createElement("label");
+    field.textContent = label;
+    const input = document.createElement("input");
+    input.required = true;
+    input.pattern = "[A-Za-z_][A-Za-z0-9_]{0,63}(\\.py)?";
+    input.value = "my_project.py";
+    input.autofocus = true;
+    field.append(input);
+    const actions = document.createElement("div");
+    actions.className = "modal-actions";
+    const submit = button(ok, "primary", null);
+    submit.type = "submit";
+    const back = button(cancel, "", () => done(null));
+    back.type = "button";
+    actions.append(back, submit);
+    form.append(field, actions);
+    form.onsubmit = e => { e.preventDefault(); done(input.value.trim()); };
+    box.append(heading, form);
+  });
+}
+
 /** Параметры серии: `{n, start_seed, jobs}` или `null` (отмена). */
 export function askSeries({ n = 10, seed = null, note = "" } = {}) {
   // Портал (DECISIONS №94): не больше 10 матчей, по одному; реплеи — в аккаунте.

@@ -11,6 +11,9 @@ import { Editor } from "./ui/editor.js";
 import { FpsMeter, isTyping } from "./ui/fps.js";
 import { Lobby, STATE_RU, fmtTime } from "./ui/lobby.js";
 import { SeriesView } from "./ui/series.js";
+import { CampaignScreen, MissionRun, Progress, closeWindow, loadCampaign, showWindow } from "./ui/tutorial.js";
+import { initHome, text } from "./ui/home.js";
+import { askProjectName } from "./ui/dialog.js";
 import { MODULES } from "../modules/registry.js";
 
 const LIVE_SPEEDS = [0.5, 1, 2, 4, 8];
@@ -120,6 +123,7 @@ class Session {
     this.endShown = true;
     const stopped = this.source.status?.state === "stopped";
     const text = this.viewer?.describeResult(footer.score, stopped) || (stopped ? "Матч остановлен" : "Матч окончен");
+    if (editor.active && editor.mission) return; // итог миссии показывает её судья (M11)
     const toSeries = this.seriesId ? [["📊 Таблица серии", () => { hideBanner(); showSeries(this.seriesId); }]] : [];
     if (editor.active) {
       showBanner(text, [...toSeries, ["↻ Перезапустить", () => { hideBanner(); editor.start(); }], ["Закрыть", hideBanner]]);
@@ -312,7 +316,8 @@ function begin(source, title, hash) {
   hideBanner();
   lobby.hide();
   $("hud").hidden = true;
-  history.replaceState(null, "", editor.active ? "#editor" : hash ? `#${hash}` : location.pathname);
+  const inEditor = editor.mission ? `#mission=${editor.mission.mission.id}` : "#editor";
+  history.replaceState(null, "", editor.active ? inEditor : hash ? `#${hash}` : location.pathname);
   session = new Session(source, title);
   editor.setEmpty(false);
 }
@@ -349,15 +354,24 @@ async function startMatch(body) {
   await openLive(info.id);
 }
 
-function toLobby() {
-  if (editor.active && editor.dirty && !confirm("В редакторе есть несохранённые правки. Выйти в меню без сохранения?")) return;
+/** Закрыть редактор, матч и экраны поверх. `false` — пользователь не бросил несохранённые правки. */
+function closeAll() {
+  if (editor.active && editor.dirty && !confirm("В редакторе есть несохранённые правки. Выйти без сохранения?")) return false;
+  editor.setMission(null);
   editor.close();
   seriesView.hide();
+  campaignScreen.hide();
   session?.close();
   session = null;
   hideBanner();
+  closeWindow();
   hideLoading();
   $("hud").hidden = true;
+  return true;
+}
+
+function toLobby() {
+  if (!closeAll()) return;
   history.replaceState(null, "", location.pathname);
   lobby.show();
 }
@@ -412,7 +426,8 @@ const editor = new Editor({
   async start(body) {
     const info = await api.start(body);
     showLoading("Запуск матча…");
-    begin(new LiveSource(info.id), `Мой рой · ${info.id}`, "editor");
+    const run = editor.mission;
+    begin(new LiveSource(info.id), run ? `Миссия ${run.index + 1} · ${run.mission.title}` : `Мой рой · ${info.id}`, "editor");
     editor.attach(session.source);
   },
   stop() {
@@ -438,6 +453,72 @@ async function openEditor() {
 }
 $("lobby-editor").onclick = openEditor;
 
+// ------------------------------------------------------------------ обучение (M11)
+
+let campaign = null; // модуль кампании (registry.js → missions) или null
+const progress = new Progress();
+const campaignScreen = new CampaignScreen({
+  play: (i) => playMission(i),
+  back: toLobby,
+});
+
+const escapeHtml = (s) => String(s).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c]);
+
+async function openCampaign() {
+  campaign ||= await loadCampaign();
+  if (!campaign || !closeAll()) return;
+  lobby.hide();
+  history.replaceState(null, "", "#tutorial");
+  campaignScreen.show(campaign, progress);
+}
+
+/** Миссия `i` в редакторе: полоса миссии, программа кампании, окно брифинга. */
+async function playMission(i) {
+  campaign ||= await loadCampaign();
+  if (!campaign || !campaign.MISSIONS[i]) return toLobby();
+  if (!progress.open(campaign.MISSIONS, i)) return openCampaign();
+  if (session?.source.kind === "live") session.source.stop(); // матч прошлой миссии больше не нужен
+  hideBanner();
+  closeWindow();
+  campaignScreen.hide();
+  await openEditor();
+  if (!editor.active) return;
+  const live = () => (session?.source.kind === "live" ? session.source : null);
+  const run = new MissionRun(campaign, i, {
+    notify: (text) => session?.viewer?.notify(`💡 ${escapeHtml(text)}`),
+    stop: () => live()?.stop(),
+    pause: () => live()?.pause(),
+    resume: () => live()?.resume(),
+    result: (r, done) => showMissionResult(r, done),
+  });
+  if (!(await editor.setMission(run))) return;
+  history.replaceState(null, "", `#mission=${run.mission.id}`);
+  run.brief();
+}
+
+/** Итог миссии — окном посреди экрана (DECISIONS №103). */
+function showMissionResult(r, run) {
+  if (r.win) progress.pass(run.mission.id, r.stats);
+  const next = run.index + 1 < campaign.MISSIONS.length ? run.index + 1 : null;
+  const again = [r.win ? "Переиграть" : "Попробовать снова", () => editor.start()];
+  const actions = [["Все миссии", openCampaign], again];
+  if (r.win && next !== null) actions.push([`Дальше: миссия ${next + 1} →`, () => playMission(next), true]);
+  if (!r.win) actions.push(["Поправить программу", null, true]);
+  showWindow({
+    kicker: run.name, title: r.win ? "🏆 Миссия пройдена" : "✖ Цель не выполнена",
+    body: [r.text, { text: r.stats, cls: "mw-stats" }], actions,
+  });
+}
+
+$("lobby-tutorial").onclick = openCampaign;
+editor.h.missions = openCampaign;
+loadCampaign().then((c) => {
+  campaign = c;
+  $("lobby-tutorial-section").hidden = !c;
+}, () => {
+  $("lobby-tutorial-section").hidden = true;
+});
+
 window.addEventListener("dragover", (e) => e.preventDefault());
 window.addEventListener("drop", (e) => {
   e.preventDefault();
@@ -453,7 +534,15 @@ window.addEventListener("drop", (e) => {
 // Ссылка вида #live=<id> или #replay=<id> открывает сразу (перезагрузка вкладки).
 function route() {
   const m = /^#(live|replay)=(.+)$/.exec(location.hash);
-  if (location.hash === "#editor") {
+  const mission = /^#mission=(.+)$/.exec(location.hash);
+  if (location.hash === "#tutorial") openCampaign();
+  else if (mission) {
+    loadCampaign().then((c) => {
+      const i = c ? c.MISSIONS.findIndex((x) => String(x.id) === decodeURIComponent(mission[1])) : -1;
+      if (i < 0) toLobby();
+      else playMission(i);
+    });
+  } else if (location.hash === "#editor") {
     if (!editor.active) openEditor();
   } else if (m && m[1] === "replay") openReplay(decodeURIComponent(m[2]));
   else if (m && m[1] === "live") {
@@ -473,10 +562,26 @@ window.addEventListener("hashchange", () => {
 
 const auth = new AuthScreen();
 let portalUser = null;
+initHome({
+  newProject: async () => {
+    const name = await askProjectName({ title: text("newProjectTitle"), label: text("projectName"), ok: text("create"), cancel: text("cancel") });
+    if (!name) return;
+    await openEditor();
+    if (editor.active) await editor.newBlocksScript(name);
+  },
+  examples: async () => {
+    await openEditor();
+    if (editor.active) {
+      const example = editor.scripts.find(s => s.readonly && s.name !== "template.py");
+      if (example) await editor.openFile(example.name);
+    }
+  },
+  reference: () => editor.showHelp(),
+  learning: openCampaign,
+});
 
 function signedIn(me) {
   portalUser = me;
-  $("lobby-admin").hidden = me.role !== "admin";
   setCsrf(me.csrf);
   lobby.setPortal(me);
 }
@@ -484,7 +589,6 @@ function signedIn(me) {
 /** Выйти на экран входа: закрыть матч, редактор и меню. */
 async function toAuth(message = "") {
   portalUser = null;
-  $("lobby-admin").hidden = true;
   setCsrf(null);
   lobby.setPortal(null);
   document.body.classList.add("portal");
