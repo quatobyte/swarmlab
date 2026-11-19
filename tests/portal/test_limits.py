@@ -165,6 +165,17 @@ def test_disallowed_profile_or_locked_keys_are_400(make, override, part):
     assert not p.app.state.manager.matches  # процесс не запускался
 
 
+def test_profiles_list_only_allowed_on_portal(make):
+    """Форма матча не предлагает профиль, который портал не запустит; локально — все."""
+    p = make()
+    a = p.user("a@b.ru")
+    code, data = a.json("GET", "/api/profiles")
+    assert code == 200 and [x["name"] for x in data] == ["medium", "small"], data
+    local = make(public=False)
+    code, data = local.client().json("GET", "/api/profiles")
+    assert code == 200 and [x["name"] for x in data] == ["large", "medium", "small"], data
+
+
 def test_allowed_overrides_on_portal(make):
     p = make()
     a = p.user("a@b.ru")

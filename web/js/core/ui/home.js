@@ -55,6 +55,13 @@ export function initHome({ newProject, examples, reference, learning }) {
   document.getElementById('help').onclick = e => {
     if (e.target.id === 'help' || e.target.classList.contains('close')) document.getElementById('help').hidden = true;
   };
+  // Памятка закрывается и по Esc, как окна профиля и вопросов.
+  window.addEventListener('keydown', e => {
+    const help = document.getElementById('help');
+    if (e.key !== 'Escape' || help.hidden) return;
+    e.stopPropagation();
+    help.hidden = true;
+  }, true);
   document.querySelector('[data-home-scroll]').onclick = e => {
     e.preventDefault();
     document.getElementById('home-projects').scrollIntoView({ behavior: 'smooth', block: 'start' });

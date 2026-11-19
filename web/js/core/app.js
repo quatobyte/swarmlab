@@ -67,7 +67,10 @@ class Session {
     });
     for (const m of this.debug.splice(0)) this.viewer.setDebug?.(m.team, m.agents);
     $("info-title").textContent = this.title;
-    $("clock-total").textContent = `/ ${fmtTime(header.duration_s)}`;
+    // У реплея — его настоящая длина, как у полосы перемотки: матч мог кончиться раньше срока
+    // (остановлен, итог миссии обучения).
+    const total = this.source.kind === "replay" ? this.source.duration : header.duration_s;
+    $("clock-total").textContent = `/ ${fmtTime(total)}`;
     setupBar(this);
     hideLoading();
     $("hud").hidden = false;

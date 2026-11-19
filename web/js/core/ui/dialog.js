@@ -1,4 +1,5 @@
-// Модальные окна поверх всего: вопрос с двумя кнопками и параметры серии матчей (M7c).
+// Модальные окна поверх всего: вопрос с двумя кнопками, сообщение, ввод строки и параметры серии
+// матчей (M7c). Вместо браузерных confirm/alert/prompt — те же окна, что во всей игре.
 
 function modal(build) {
   return new Promise((resolve) => {
@@ -52,10 +53,29 @@ export async function ask(text, { title = "", ok = "Да", cancel = "Отмен�
   return res === true;
 }
 
-/** Имя нового проекта: обычная форма вместо браузерного prompt. */
-export function askProjectName({ title, label, ok, cancel }) {
+/** Сообщение с одной кнопкой — вместо браузерного alert. */
+export async function tell(text, { title = "", ok = "Понятно" } = {}) {
+  await modal((box, done) => {
+    if (title) {
+      const h = document.createElement("h3");
+      h.textContent = title;
+      box.appendChild(h);
+    }
+    const p = document.createElement("p");
+    p.className = "modal-text";
+    p.textContent = text;
+    const row = document.createElement("div");
+    row.className = "modal-actions";
+    row.append(button(ok, "primary", () => done(true)));
+    box.append(p, row);
+  });
+}
+
+/** Строка от игрока — вместо браузерного prompt: введённый текст (без пробелов по краям) или `null`. */
+export function askText({ title, label = "", value = "", ok = "OK", cancel = "Отмена", pattern = "",
+  cls = "text-dialog" }) {
   return modal((box, done) => {
-    box.classList.add("home-project-dialog");
+    box.classList.add(cls);
     const heading = document.createElement("h3");
     heading.textContent = title;
     const form = document.createElement("form");
@@ -64,9 +84,10 @@ export function askProjectName({ title, label, ok, cancel }) {
     field.textContent = label;
     const input = document.createElement("input");
     input.required = true;
-    input.pattern = "[A-Za-z_][A-Za-z0-9_]{0,63}(\\.py)?";
-    input.value = "my_project.py";
+    if (pattern) input.pattern = pattern;
+    input.value = value;
     input.autofocus = true;
+    input.addEventListener("focus", () => input.select(), { once: true }); // как в prompt: сразу заменить
     field.append(input);
     const actions = document.createElement("div");
     actions.className = "modal-actions";
@@ -79,6 +100,12 @@ export function askProjectName({ title, label, ok, cancel }) {
     form.onsubmit = e => { e.preventDefault(); done(input.value.trim()); };
     box.append(heading, form);
   });
+}
+
+/** Имя нового проекта: обычная форма вместо браузерного prompt. */
+export function askProjectName({ title, label, ok, cancel }) {
+  return askText({ title, label, ok, cancel, value: "my_project.py",
+    pattern: "[A-Za-z_][A-Za-z0-9_]{0,63}(\\.py)?", cls: "home-project-dialog" });
 }
 
 /** Параметры серии: `{n, start_seed, jobs}` или `null` (отмена). */

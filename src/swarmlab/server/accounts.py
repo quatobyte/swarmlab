@@ -38,7 +38,9 @@ from swarmlab.core.config import ConfigError, deep_merge
 
 #: Умолчания настроек портала (рядом с модулем).
 DEFAULT_SETTINGS = Path(__file__).with_name("public.yaml")
-_EMAIL = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
+#: Почта: «имя@домен.зона» без пробелов и без символов, которых нет в обычных адресах и которые
+#: не пропускает поле type="email" в браузере: < > ( ) [ ] , ; : \ ".
+_EMAIL = re.compile(r'^[^@\s<>()\[\],;:\\"]+@[^@\s<>()\[\],;:\\"]+\.[^@\s<>()\[\],;:\\"]+$')
 _EMAIL_MAX = 254
 SCHEMA_VERSION = 1
 

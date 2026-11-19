@@ -1069,7 +1069,11 @@ def create_app(cfg: ServerConfig | None = None) -> FastAPI:
     @app.get("/api/profiles")
     def profiles() -> list[dict[str, Any]]:
         out = []
+        # Портал: только профили, которые разрешены (`matches.profiles`), — остальные не запустятся.
+        allowed = manager.limits.profiles if manager.limits is not None else None
         for p in sorted((cfg.configs / "profiles").glob("*.yaml")):
+            if allowed is not None and p.stem not in allowed:
+                continue
             desc = _describe_yaml(p)["description"]
             try:
                 data = load_yaml(p)

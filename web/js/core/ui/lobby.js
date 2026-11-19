@@ -16,6 +16,7 @@ import { loadModuleEditor } from "../../modules/registry.js";
 const $ = (id) => document.getElementById(id);
 
 function fmtSize(bytes) {
+  if (!bytes) return "0 КБ"; // пустой файл — не «1 КБ»
   return bytes > 1e6 ? `${(bytes / 1e6).toFixed(1)} МБ` : `${Math.max(1, Math.round(bytes / 1e3))} КБ`;
 }
 
@@ -79,7 +80,7 @@ export class Lobby {
     this.el.hidden = false;
     this.error(null);
     await Promise.all([this._loadConfigs(), this._loadLive(), this._loadReplays(),
-      this.me ? null : this._loadSeries(), this._initForm().then(() => this._loadProjects())]);
+      this._loadSeries(), this._initForm().then(() => this._loadProjects())]);
   }
 
   hide() {

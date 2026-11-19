@@ -321,11 +321,16 @@ export function renderBlocks(el, workspace, { scale = 0.75, minScale = 0.5, pad 
   Bl.renderManagement.finishQueuedRenders().then(() => {
     if (!el.isConnected) return;
     const box = ws.getBlocksBoundingBox();
-    // Широкая картинка уменьшается до ширины рамки (но не мельче minScale: дальше рамка прокручивается).
+    // Широкая или высокая картинка уменьшается до ширины рамки и её max-height (но не мельче
+    // minScale: дальше рамка прокручивается).
     const frame = el.parentElement;
     const cs = frame ? getComputedStyle(frame) : null;
     const room = cs ? frame.clientWidth - parseFloat(cs.paddingLeft) - parseFloat(cs.paddingRight) : Infinity;
-    const k = Math.max(minScale, Math.min(scale, (room - 2 * pad) / (box.right - box.left)));
+    const maxH = cs ? parseFloat(cs.maxHeight) : NaN; // «none» → NaN: высота не ограничена
+    const roomH = Number.isFinite(maxH) ? maxH - parseFloat(cs.paddingTop) - parseFloat(cs.paddingBottom)
+      - parseFloat(cs.borderTopWidth) - parseFloat(cs.borderBottomWidth) : Infinity;
+    const k = Math.max(minScale, Math.min(scale, (room - 2 * pad) / (box.right - box.left),
+      (roomH - 2 * pad) / (box.bottom - box.top)));
     if (k !== scale) ws.setScale(k);
     el.style.width = `${Math.ceil((box.right - box.left) * k + 2 * pad)}px`;
     el.style.height = `${Math.ceil((box.bottom - box.top) * k + 2 * pad)}px`;

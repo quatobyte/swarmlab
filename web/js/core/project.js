@@ -47,8 +47,9 @@ export function parseProject(text) {
   let data;
   try {
     data = JSON.parse(String(text).replace(/^﻿/, ""));
-  } catch (e) {
-    throw new ProjectError(`Это не файл проекта .swarm: битый JSON (${e.message})`);
+  } catch {
+    // Без текста ошибки JSON.parse: он английский и игроку ничего не говорит.
+    throw new ProjectError("Это не файл проекта .swarm: битый JSON — файл повреждён или это другой файл");
   }
   if (!data || typeof data !== "object" || Array.isArray(data)) {
     throw new ProjectError("Это не файл проекта .swarm: нужен объект JSON");

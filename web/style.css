@@ -199,8 +199,11 @@ body.editing .clock { font-size: 20px; }
 .ed-switch { display: flex; background: #0f1318; border: 1px solid var(--line); border-radius: 20px; padding: 3px; }
 .ed-switch .ed-tab { border-radius: 16px; border-bottom: 0; padding: 5px 16px; font-size: 14px; font-weight: 600; }
 .ed-switch .ed-tab.active { background: var(--accent); color: #1d1a10; }
-.ed-filebar { display: flex; align-items: center; gap: 6px; padding: 4px 8px; background: #1a1f26; border-bottom: 1px solid #000; }
+/* Не помещается в ширину панели — переносится на вторую строку, а не обрезает статус и пометку режима. */
+.ed-filebar { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 6px; padding: 4px 8px; background: #1a1f26; border-bottom: 1px solid #000; }
 .ed-filebar .select { max-width: 220px; padding: 3px 6px; }
+/* Пометка режима и её кнопки переносятся вместе и прижаты вправо. */
+.ed-filebar-end { display: flex; align-items: center; gap: 6px; margin-left: auto; min-width: 0; max-width: 100%; }
 .ed-status { font-size: 12px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
 .ed-status.ok { color: var(--ok); }
 .ed-status.bad { color: #ff8a8a; cursor: pointer; }
@@ -304,6 +307,9 @@ li.CodeMirror-hint-active { background: #34515e; color: #fff; }
 .modal-text { white-space: pre-wrap; line-height: 1.45; margin: 0 0 12px; }
 .modal .match-form { margin-bottom: 8px; }
 .modal-actions { display: flex; gap: 8px; justify-content: flex-end; margin-top: 12px; }
+/* Ввод строки (имя файла) — вместо браузерного prompt. */
+.text-dialog .form { display: block; }
+.text-dialog input { width: 100%; margin-top: 8px; padding: 6px 8px; }
 
 .series-overlay { position: fixed; inset: 0; z-index: 40; display: flex; align-items: flex-start; justify-content: center;
   padding: 16px; background: rgba(8, 12, 18, 0.55); overflow: auto; }
@@ -407,7 +413,8 @@ body.lock-free #mission-free { display: none; }
   box-shadow: 0 18px 60px rgba(0, 0, 0, 0.6); }
 .mission-window h3 { font-size: 21px; margin: 0 0 10px; }
 .mw-kicker { color: var(--accent); font-size: 12px; font-weight: 700; letter-spacing: 0.04em; text-transform: uppercase; margin-bottom: 4px; }
-.mw-body { max-height: 56vh; overflow: auto; }
+/* Текст и картинка-пример помещаются целиком: окну остаются заголовок и кнопки. */
+.mw-body { max-height: max(56vh, calc(100vh - 240px)); overflow: auto; }
 .mw-body p { margin: 0 0 10px; font-size: 16px; line-height: 1.5; white-space: pre-wrap; }
 .mw-body .mw-goal { font-size: 18px; font-weight: 600; }
 .mw-body .mw-stats { color: var(--muted); font-size: 14px; }

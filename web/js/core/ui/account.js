@@ -10,6 +10,7 @@ import { projectCard, text } from "./home.js";
 const $ = (id) => document.getElementById(id);
 
 export function fmtSize(bytes) {
+  if (!bytes) return "0 КБ"; // ничего не сохранено — не «1 КБ»
   return bytes > 1e6 ? `${(bytes / 1e6).toFixed(1)} МБ` : `${Math.max(1, Math.round(bytes / 1e3))} КБ`;
 }
 

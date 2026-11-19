@@ -299,7 +299,8 @@ const HINTS = [
   { id: "heard", m: [2], when: (c) => c.deliveries >= 1 && c.has.listen && c.has.scoutSay },
   { id: "nohive", fix: true, m: FROM(3), when: (c) => c.t > 20 && !c.has.hatch },
   { id: "born", m: [3], when: (c) => c.births >= 1 },
-  { id: "lowhoney", fix: true, m: FROM(3), when: (c) => c.t > 60 && c.has.hatch && c.me.honey < 2 },
+  // С миссии 6 рой нарочно тратит мёд на рост сразу (итог миссии 6), «подними порог» там сбивает с толку.
+  { id: "lowhoney", fix: true, m: [3, 4, 5], when: (c) => c.t > 60 && c.has.hatch && c.me.honey < 2 },
   {
     id: "grow", m: [3], when: (c) => flying(c.me) >= Math.ceil((c.rule.bees * 2) / 3),
     vars: (c) => ({ bees: flying(c.me), honey: fmt(c.me.honey), need: c.rule.bees, needHoney: c.rule.honey }),

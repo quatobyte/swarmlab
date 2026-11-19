@@ -120,3 +120,19 @@ def test_reference_passes_and_previous_program_fails(n, tmp_path):
     bad = play(n, prev, tmp_path)
     assert bad["win"] is False, (
         f"миссию {n} прошла программа без нового приёма ({prev.name}): {bad}")
+
+
+PICS = ROOT / "tests" / "web" / "missions_pics_program.mjs"
+
+
+@pytest.mark.tutorial
+@pytest.mark.skipif(NODE is None, reason="нет Node.js — программу из картинок не собрать")
+@pytest.mark.parametrize("n", [1, 2, 3, 4])
+def test_program_from_mission_pictures_passes(n, tmp_path):
+    """Игрок, собравший программу только по картинкам заданий, проходит миссии 1–4."""
+    code = subprocess.run([NODE, str(PICS), str(n)], capture_output=True, text=True,
+                          encoding="utf-8", check=True).stdout
+    program = tmp_path / "tutorial.py"
+    program.write_text(code, encoding="utf-8")
+    out = play(n, program, tmp_path)
+    assert out["win"], f"программа из картинок не прошла миссию {n}: {out}"

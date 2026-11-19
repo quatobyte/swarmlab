@@ -29,6 +29,10 @@ const no = () => ({ type: "logic_boolean", fields: { BOOL: "FALSE" } });
 const cmp = (a, op, b) => ({ type: "logic_compare", fields: { OP: op }, inputs: inputs({ A: a, B: b }) });
 const and = (a, b) => ({ type: "logic_operation", fields: { OP: "AND" }, inputs: inputs({ A: a, B: b }) });
 const iff = (cond, ...body) => ({ type: "controls_if", inputs: inputs({ IF0: cond, DO0: chain(...body) }) });
+/** «если … иначе …»: `body` и `other` — списки команд. */
+const ifElse = (cond, body, other) => ({
+  type: "controls_if", extraState: { hasElse: true }, inputs: inputs({ IF0: cond, DO0: chain(...body), ELSE: chain(...other) }),
+});
 const each = (key, list, ...body) => ({
   type: "controls_forEach", fields: { VAR: { id: varId(key) } }, inputs: inputs({ LIST: list, DO: chain(...body) }),
 });
@@ -78,13 +82,19 @@ export const PICTURES = {
   m2_scout: picture("scout", bee("scout",
     set("flower", found()),
     iff(notNothing("flower"), api("Bee_go_home"), api("Agent_say", { word: txt("flowers"), place: get("flower") })))),
-  m2_listen: frag("collector", each("message", api("Agent_heard"),
-    iff(cmp(api("Message_word", { obj: get("message") }), "EQ", txt("flowers")),
-      api("Collector_collect", { target: api("Message_where", { obj: get("message") }) })))),
+  // Сборщик запоминает место из зова: есть место — собирать там, иначе искать самому, как в миссии 1.
+  m2_listen: frag("collector",
+    set("place", nul()),
+    each("message", api("Agent_heard"),
+      iff(cmp(api("Message_word", { obj: get("message") }), "EQ", txt("flowers")),
+        set("place", api("Message_where", { obj: get("message") })))),
+    ifElse(notNothing("place"),
+      [api("Collector_collect", { target: get("place") })],
+      [set("flower", found()), iff(notNothing("flower"), api("Collector_collect", { target: get("flower") }))])),
 
   // Миссия 3: улей выводит сборщика, когда мёда хватает.
   m3_hive: picture("hive", hive(
-    iff(honeyAtLeast(20), api("Hive_hatch", {}, { kind: "Collector" })),
+    iff(honeyAtLeast(12), api("Hive_hatch", {}, { kind: "Collector" })),
     api("Agent_wait", { seconds: num(5) }))),
 
   // Миссия 4: разведчиков — не больше нужного.

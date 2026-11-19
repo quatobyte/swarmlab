@@ -333,4 +333,9 @@ def main() -> int:
 
 
 if __name__ == "__main__":
-    raise SystemExit(main())
+    # Выход без остановки интерпретатора, как у раннера (DECISIONS №89): поток-читатель ещё ждёт
+    # stdin, и Python 3.13 при обычном выходе падает на его буфере (`_enter_buffered_busy`).
+    # Реплей и пакеты уже записаны (`close`, `Channel.send_raw` сбрасывает канал).
+    code = main()
+    sys.stderr.flush()
+    os._exit(code)

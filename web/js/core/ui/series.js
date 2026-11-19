@@ -23,6 +23,13 @@ function fmt(v) {
   return n.toLocaleString("ru-RU", { maximumFractionDigits: 2 });
 }
 
+/** «1 матч», «2 матча», «5 матчей». */
+function matches(n) {
+  const d = Math.abs(n) % 100, u = d % 10;
+  const word = d >= 11 && d <= 14 ? "матчей" : u === 1 ? "матч" : u >= 2 && u <= 4 ? "матча" : "матчей";
+  return `${n} ${word}`;
+}
+
 function el(tag, cls, text) {
   const e = document.createElement(tag);
   if (cls) e.className = cls;
@@ -100,7 +107,7 @@ export class SeriesView {
     const head = el("div", "series-head");
     const title = el("div", "series-title");
     title.append(el("b", "", `Серия · ${d.project}`),
-      el("span", "muted small", ` ${d.n} матчей, seed ${d.start_seed}…${d.start_seed + d.n - 1}, `
+      el("span", "muted small", ` ${matches(d.n)}, seed ${d.start_seed}…${d.start_seed + d.n - 1}, `
         + `${d.profile}, ${fmt(d.duration_s)} с`));
     head.appendChild(title);
     head.appendChild(el("span", "spacer"));
@@ -206,6 +213,8 @@ export class SeriesView {
       sum.appendChild(w);
     }
     box.appendChild(sum);
+    // На портале папки сервера игроку не видны — путь к файлам только в локальном режиме.
+    if (document.body.classList.contains("portal")) return;
     box.appendChild(el("p", "muted small", `Файлы: replays/series/${d.id}/ — реплеи s<seed>.swr, series.json, `
       + "results.csv (Excel; в pandas — sep=\";\", decimal=\",\")"));
   }
@@ -224,7 +233,7 @@ export function renderSeriesList(box, list, onOpen) {
     const when = String(s.created || "").replace("T", " ").slice(0, 16);
     const res = s.played ? `, побед ${s.wins ?? 0} / с ошибками ${s.with_code_errors ?? 0}` : "";
     row.append(el("span", "muted small",
-      `${when} · ${s.done}/${s.n} матчей, seed от ${s.start_seed}${res}`
+      `${when} · ${s.done}/${matches(s.n)}, seed от ${s.start_seed}${res}`
       + (s.state === "finished" ? "" : ` · ${STATE_RU[s.state] || s.state}`)));
     const b = el("button", "btn", "Таблица");
     b.onclick = () => onOpen(s.id);

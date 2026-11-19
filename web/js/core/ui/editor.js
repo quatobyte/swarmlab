@@ -14,7 +14,7 @@
 import { api } from "../api.js";
 import { makeProject, parseProject, projectName, projectText, PROJECT_EXT } from "../project.js";
 import { confirmForeignCode } from "../trust.js";
-import { ask, askSeries } from "./dialog.js";
+import { ask, askSeries, askText, tell } from "./dialog.js";
 import { renderMarkdown } from "./markdown.js";
 import { baseName, LogGrouper } from "../logparse.js";
 import { DEFAULT_MODULE, loadModuleEditor } from "../../modules/registry.js";
@@ -210,7 +210,8 @@ export class Editor {
 
   async _switchFile(name) {
     if (this.file && name !== this.file.name && this.dirty
-        && !confirm(`В ${this.file.name} есть несохранённые правки. Открыть ${name} без сохранения?`)) {
+        && !await ask(`В ${this.file.name} есть несохранённые правки. Открыть ${name} без сохранения?`,
+          { ok: "Открыть", cancel: "Остаться" })) {
       $("ed-file").value = this.file.name;
       return;
     }
@@ -279,25 +280,27 @@ export class Editor {
 
   async saveAs() {
     const suggestion = this.file?.readonly ? this.file.name.replace(/^example_|^template/, "my_") : this.file?.name;
-    let name = prompt("Имя файла (латиница, цифры и _, в конце .py):", suggestion || DEFAULT_FILE);
+    let name = await askText({ title: "Сохранить как", label: "Имя файла (латиница, цифры и _, в конце .py)",
+      value: suggestion || DEFAULT_FILE, ok: "Сохранить" });
     if (name === null) return false;
     name = name.trim();
     if (!name.endsWith(".py")) name += ".py";
     if (!NAME_RE.test(name)) {
-      alert("Имя: латинские буквы, цифры и _, начинается с буквы, в конце .py — например, my_bees2.py");
+      await tell("Имя: латинские буквы, цифры и _, начинается с буквы, в конце .py — например, my_bees2.py");
       return false;
     }
     const existing = this.scripts.find((s) => s.name === name);
     if (existing?.readonly) {
-      alert(`${name} — справочный файл, выберите другое имя`);
+      await tell(`${name} — справочный файл, выберите другое имя`);
       return false;
     }
-    if (existing && existing.name !== this.file?.name && !confirm(`${name} уже есть. Перезаписать?`)) return false;
+    if (existing && existing.name !== this.file?.name
+        && !await ask(`${name} уже есть. Перезаписать?`, { ok: "Перезаписать", danger: true })) return false;
     const { text, blocks } = this._payload(name); // в файл, переведённый в Python, сервер блоки не пишет (409)
     try {
       await api.saveScript(name, text, blocks);
     } catch (e) {
-      alert(`Не сохранено: ${e.message}`);
+      await tell(`Не сохранено: ${e.message}`);
       return false;
     }
     await this._loadScripts();
@@ -368,24 +371,26 @@ export class Editor {
     try {
       project = parseProject(await file.text());
     } catch (e) {
-      alert(`${file.name}: ${e.message}`);
+      await tell(e.message, { title: file.name });
       return;
     }
     const trusted = await confirmForeignCode([project.code],
       (text) => ask(text, { title: "Чужой код", ok: "Открыть", cancel: "Отмена" }));
     if (!trusted) return;
-    if (this.dirty && !confirm(`В ${this.file.name} есть несохранённые правки. Открыть проект без сохранения?`)) return;
+    if (this.dirty && !await ask(`В ${this.file.name} есть несохранённые правки. Открыть проект без сохранения?`,
+      { ok: "Открыть", cancel: "Остаться" })) return;
     await this._loadScripts();
     const taken = (n) => this.scripts.some((s) => s.name === n) || /^(example_|template\.py$)/.test(n);
     let name = `${project.name}.py`;
     if (taken(name)) {
       let k = 2;
       while (taken(`${project.name}_${k}.py`)) k += 1;
-      const answer = prompt(`Скрипт ${name} уже есть. Под каким именем открыть проект?`, `${project.name}_${k}.py`);
+      const answer = await askText({ title: "Открыть проект", label: `Скрипт ${name} уже есть. Под каким именем открыть проект?`,
+        value: `${project.name}_${k}.py`, ok: "Открыть" });
       if (answer === null) return;
       name = answer.trim().endsWith(".py") ? answer.trim() : `${answer.trim()}.py`;
       if (!NAME_RE.test(name) || taken(name)) {
-        alert(`Имя ${name} не подходит или занято: латинские буквы, цифры и _, в конце .py`);
+        await tell(`Имя ${name} не подходит или занято: латинские буквы, цифры и _, в конце .py`);
         return;
       }
     }
@@ -393,7 +398,7 @@ export class Editor {
     try {
       await api.saveScript(name, project.code, blocks);
     } catch (e) {
-      alert(`Проект не открыт: ${e.message}`);
+      await tell(`Проект не открыт: ${e.message}`);
       return;
     }
     await this._loadScripts();
@@ -429,6 +434,9 @@ export class Editor {
   _ensureBlocks() {
     if (this.blocks) return;
     this.blocks = new this.mod.BlocksEditor($("ed-blocks"), { onChange: () => this._scheduleRegen() });
+    // Строка файла над блоками переносится (длинный статус, узкая панель) — высота области блоков
+    // меняется без события окна, а Blockly сам следит только за окном.
+    new ResizeObserver(() => this.blocks?.resize()).observe($("ed-blocks"));
   }
 
   _scheduleRegen() {
@@ -478,10 +486,11 @@ export class Editor {
   async toPython() {
     if (this.mode !== "blocks" || !this.file || this.file.readonly) return;
     const name = this.file.name;
-    const ok = confirm(
-      `Перейти на Python?\n\nДальше ${name} пишется только на Python. Блоки больше не будут обновлять этот файл, `
+    const ok = await ask(
+      `Дальше ${name} пишется только на Python. Блоки больше не будут обновлять этот файл, `
       + "и вернуться к ним для этого скрипта нельзя (они останутся в "
-      + `${blocksName(name)}, но код из них больше не собирается).\n\nПродолжить?`);
+      + `${blocksName(name)}, но код из них больше не собирается).`,
+      { title: "Перейти на Python?", ok: "Перейти на Python", cancel: "Остаться в блоках" });
     if (!ok) return;
     this._regenerate();
     const workspace = this.blocks.save();
@@ -569,25 +578,28 @@ export class Editor {
   /** Новый скрипт из блоков (режим по умолчанию для новых скриптов, DECISIONS №51). */
   async newBlocksScript(projectName = null) {
     if (!this.mod.BlocksEditor) return;
-    if (this.dirty && !confirm(`В ${this.file.name} есть несохранённые правки. Создать новый скрипт без сохранения?`)) return;
-    let name = projectName ?? prompt("Имя нового скрипта из блоков (латиница, цифры и _, в конце .py):", "my_blocks.py");
+    if (this.dirty && !await ask(`В ${this.file.name} есть несохранённые правки. Создать новый скрипт без сохранения?`,
+      { ok: "Создать", cancel: "Остаться" })) return;
+    let name = projectName ?? await askText({ title: "Новый скрипт из блоков",
+      label: "Имя файла (латиница, цифры и _, в конце .py)", value: "my_blocks.py", ok: "Создать" });
     if (name === null) return;
     name = name.trim();
     if (!name.endsWith(".py")) name += ".py";
     if (!NAME_RE.test(name)) {
-      alert("Имя: латинские буквы, цифры и _, начинается с буквы, в конце .py — например, my_blocks.py");
+      await tell("Имя: латинские буквы, цифры и _, начинается с буквы, в конце .py — например, my_blocks.py");
       return;
     }
     const existing = this.scripts.find((s) => s.name === name);
     if (existing?.readonly) {
-      alert(`${name} — справочный файл, выберите другое имя`);
+      await tell(`${name} — справочный файл, выберите другое имя`);
       return;
     }
-    if (existing && !confirm(`${name} уже есть. Заменить его новым скриптом из блоков?`)) return;
+    if (existing && !await ask(`${name} уже есть. Заменить его новым скриптом из блоков?`,
+      { ok: "Заменить", danger: true })) return;
     try {
       await this._createBlocksScript(name);
     } catch (e) {
-      alert(`Не создано: ${e.message}`);
+      await tell(`Не создано: ${e.message}`);
       return;
     }
     await this._loadScripts();
@@ -850,7 +862,8 @@ export class Editor {
     }
     if (file !== this.file?.name) {
       if (!this.scripts.some((s) => s.name === file)) return;
-      if (this.dirty && !confirm(`В ${this.file.name} есть несохранённые правки. Открыть ${file}?`)) return;
+      if (this.dirty && !await ask(`В ${this.file.name} есть несохранённые правки. Открыть ${file} без сохранения?`,
+        { ok: "Открыть", cancel: "Остаться" })) return;
       await this.openFile(file);
     }
     this.goto(line);

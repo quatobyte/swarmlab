@@ -10,7 +10,7 @@ from websockets.exceptions import InvalidStatus
 from websockets.sync.client import connect
 
 from swarmlab.core.config import ConfigError
-from swarmlab.server.accounts import load_settings
+from swarmlab.server.accounts import AccountError, load_settings, normalize_email
 from swarmlab.server.public import OPEN_PATHS
 
 from .conftest import PASSWORD
@@ -55,6 +55,21 @@ def test_wrong_password_taken_email_short_password_are_clear_errors(portal):
     assert code == 401 and data["detail"] == "Неверная почта или пароль"
     code, data = portal.client().login("nobody@b.ru")
     assert code == 401 and data["detail"] == "Неверная почта или пароль"
+
+
+@pytest.mark.parametrize("bad", ["a<b@c.ru", "a@b>.ru", "a(b)@c.ru", "a@[127.0.0.1].ru", "a,b@c.ru",
+                                 "a;b@c.ru", "a:b@c.ru", "a\\b@c.ru", '"a"@c.ru'])
+def test_email_with_special_characters_is_rejected_like_in_browser(bad):
+    """Символы, которых нет в обычных адресах (их не пропускает и поле почты в браузере), — 400."""
+    with pytest.raises(AccountError) as e:
+        normalize_email(bad)
+    assert e.value.status == 400 and "Почта" in str(e.value)
+
+
+def test_ordinary_emails_still_accepted():
+    for ok in ["leo@example.ru", "a.b+tag@mail.example.ru", "x_y-z@sub.example.com",
+               "имя@пример.рф"]:
+        assert normalize_email(f" {ok.upper()} ") == ok
 
 
 def test_session_cookie_http_only_lax_secure_only_over_https(make_portal):
