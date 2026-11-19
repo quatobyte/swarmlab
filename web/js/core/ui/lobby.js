@@ -9,6 +9,7 @@ import { confirmForeignCode } from "../trust.js";
 import { projectButtons, renderMyReplays, renderMyScripts } from "./account.js";
 import { ask, askSeries } from "./dialog.js";
 import { renderSeriesList } from "./series.js";
+import { projectCard } from "./home.js";
 // Часть меню, которая знает модуль (форма матча), — js/modules/<модуль>/editor.js из реестра.
 import { loadModuleEditor } from "../../modules/registry.js";
 
@@ -70,7 +71,6 @@ export class Lobby {
     document.body.classList.toggle("portal", !!me);
     $("lobby-user").hidden = !me;
     $("lobby-user-email").textContent = me ? me.email : "";
-    $("lobby-projects-title").textContent = me ? "Мои проекты" : "Проекты";
     $("lobby-replays-title").textContent = me ? "Мои реплеи" : "Реплеи";
     $("lobby-replays-note").hidden = !me;
   }
@@ -130,9 +130,8 @@ export class Lobby {
     }
     this.panel?.setSources(this.mod.lobbySources(scripts, this.projects));
     const mine = { refresh: () => this._loadProjects(), error: (t) => this.error(t) };
-    if (this.me) renderMyScripts($("lobby-scripts"), scripts, { ...mine, openInEditor: (n) => this.h.openInEditor(n) });
-    box.innerHTML = this.projects.length ? ""
-      : '<p class="muted small">Загруженных проектов нет. Проект — файл .swarm: «⬇ Экспорт проекта» в редакторе.</p>';
+    renderMyScripts($("lobby-scripts"), scripts, { ...mine, openInEditor: (n) => this.h.openInEditor(n) });
+    box.innerHTML = "";
     for (const p of this.projects) {
       const row = document.createElement("div");
       row.className = "row";
@@ -148,7 +147,7 @@ export class Lobby {
       btn.onclick = () => this._toEditor(p.name);
       row.appendChild(btn);
       if (this.me) row.append(...projectButtons(p, mine));
-      box.appendChild(row);
+      box.appendChild(projectCard(row, () => this._toEditor(p.name)));
     }
   }
 
