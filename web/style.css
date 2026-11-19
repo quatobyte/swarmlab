@@ -324,6 +324,7 @@ li.CodeMirror-hint-active { background: #34515e; color: #fff; }
 
 /* ---------------------------------------------------------------- M7c: блоки в духе MakeCode */
 .ed-blocks .blocklyToolbox, .ed-blocks .blocklyToolboxDiv { padding-top: 44px; }
+.ed-blocks.no-search .blocklyToolbox, .ed-blocks.no-search .blocklyToolboxDiv { padding-top: 6px; }
 .ed-blocks .blocklyTreeRow, .ed-blocks .blocklyToolboxCategory { height: auto; line-height: 1.2; margin: 2px 4px; padding: 7px 10px 7px 6px;
   border-radius: 8px; border-left-width: 6px !important; }
 .ed-blocks .blocklyTreeLabel, .ed-blocks .blocklyToolboxCategoryLabel { font: 600 14px "Segoe UI", sans-serif; color: #f2f4f7; }
@@ -353,3 +354,88 @@ body:not(.portal) .portal-only { display: none !important; }
 .modal.profile { width: min(560px, calc(100vw - 32px)); max-height: calc(100vh - 32px); overflow: auto; }
 .modal.profile h4 { margin: 14px 0 6px; font-size: 14px; color: var(--muted); }
 .modal.profile .form input { padding: 5px 8px; }
+
+/* ---------------------------------------------------------------- обучение (M11) */
+.tutorial h1 .btn { float: right; }
+.mission-list { display: flex; flex-direction: column; gap: 6px; margin-top: 12px; }
+.mission-row { display: flex; align-items: center; gap: 12px; padding: 8px 12px; background: rgba(255,255,255,0.05);
+  border-radius: 10px; }
+.mission-row.locked { opacity: 0.5; }
+.mission-num { width: 28px; height: 28px; border-radius: 50%; display: grid; place-items: center; font-weight: 700;
+  background: rgba(255,255,255,0.12); flex: none; }
+.mission-row.done .mission-num { background: var(--ok); color: #10241a; }
+.mission-text { flex: 1 1 auto; min-width: 0; }
+.mission-text .name { font-weight: 600; }
+/* Полоса миссии над полем и редактором (DECISIONS №103): цель и кнопки всегда на виду. */
+body.mission { --mh: 58px; }
+body.mission #view { top: var(--mh); }
+body.mission .editor, body.mission .ed-split { top: var(--mh); }
+.mission-bar { position: fixed; left: 0; right: 0; top: 0; height: var(--mh, 58px); z-index: 20; display: flex; align-items: center;
+  gap: 12px; padding: 6px 12px; background: #1a1f26; border-bottom: 2px solid var(--accent); }
+.mb-text { flex: 1 1 auto; min-width: 0; }
+.mb-title { color: var(--accent); font-weight: 700; font-size: 14px; }
+.mb-goal { font-size: 14px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.mb-goal #mission-goal { font-weight: 600; }
+.mission-progress { color: var(--ok); font-variant-numeric: tabular-nums; margin-left: 12px; }
+.mb-actions { display: flex; gap: 6px; flex: none; }
+#mission-error { cursor: pointer; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.mission-only, body.mission .free-only { display: none; }
+body.mission .mission-only { display: inline; }
+/* В миссии нет формы матча и работы с файлами; остальное открывается по мере прохождения. */
+body.mission .dock-match, body.mission #ed-file, body.mission #ed-new, body.mission #ed-save-as,
+body.mission .ed-toolbar label.file, body.mission .ed-foot { display: none; }
+body.mission .dock { grid-template-columns: 1fr; }
+body.lock-logs #view { bottom: 0; }
+body.lock-logs .dock { display: none; }
+body.lock-python #ed-tabs, body.lock-python #ed-to-python, body.lock-python #ed-mode-note { display: none; }
+body.lock-help #ed-help { display: none; }
+body.lock-project #ed-export { display: none; }
+body.lock-free #mission-free { display: none; }
+/* Окна обучения посреди экрана: брифинг, подсказки, итог. */
+.mission-window .modal { width: min(680px, calc(100vw - 32px)); padding: 20px 22px; border-color: var(--accent);
+  box-shadow: 0 18px 60px rgba(0, 0, 0, 0.6); }
+.mission-window h3 { font-size: 21px; margin: 0 0 10px; }
+.mw-kicker { color: var(--accent); font-size: 12px; font-weight: 700; letter-spacing: 0.04em; text-transform: uppercase; margin-bottom: 4px; }
+.mw-body { max-height: 56vh; overflow: auto; }
+.mw-body p { margin: 0 0 10px; font-size: 16px; line-height: 1.5; white-space: pre-wrap; }
+.mw-body .mw-goal { font-size: 18px; font-weight: 600; }
+.mw-body .mw-stats { color: var(--muted); font-size: 14px; }
+.mw-body .mw-error { font: 13px/1.45 Consolas, "Cascadia Mono", monospace; color: #ffb4a8; background: rgba(230, 57, 70, 0.12);
+  border-left: 3px solid var(--bad, #e63946); border-radius: 6px; padding: 8px 10px; }
+/* Картинка-пример из блоков (DECISIONS №104): настоящие блоки, только для чтения. */
+.mw-picture { margin: 4px 0 10px; padding: 6px; background: #161b22; border: 1px solid var(--line); border-radius: 10px;
+  overflow: auto; max-height: 46vh; }
+.mw-canvas { width: 480px; height: 160px; pointer-events: none; }
+.mw-canvas .blocklyMainBackground { stroke: none; fill: transparent; }
+.mw-note { margin: 4px 0 0; color: var(--muted); font-size: 13px; line-height: 1.4; }
+.mission-window .modal-actions { align-items: center; margin-top: 16px; }
+.mw-foot { margin-right: auto; }
+.mission-fresh { color: #cfe8ff; }
+@media (max-width: 1200px) {
+  body.mission { --mh: 110px; }
+  .mission-bar { flex-wrap: wrap; align-content: center; gap: 6px; }
+  .mb-text { flex-basis: 100%; }
+  .mb-actions { max-width: 100%; overflow-x: auto; padding-bottom: 2px; }
+  .mb-goal { white-space: normal; font-size: 13px; }
+}
+@media (max-width: 600px) {
+  body.mission { --mh: 148px; }
+  body.mission { --lesson-scene: max(240px, 32dvh); }
+  body.mission #view { top: var(--mh); right: 0; bottom: auto; height: calc(var(--lesson-scene) - 80px); }
+  body.mission.lock-logs #view { height: var(--lesson-scene); }
+  body.mission .editor { top: calc(var(--mh) + var(--lesson-scene)); width: 100%; }
+  body.mission .ed-split, body.mission .dock-split { display: none; }
+  body.mission .dock { top: calc(var(--mh) + var(--lesson-scene) - 80px); right: 0; bottom: auto; height: 80px; }
+  body.mission .info { min-width: 0; width: calc(50% - 18px); font-size: 12px; }
+  body.mission .teams { width: calc(50% - 18px); flex-direction: row; overflow-x: auto; }
+  body.mission .team { flex: 0 0 100%; }
+  body.mission .team-res { gap: 6px; font-size: 11px; }
+  body.mission .info-title { white-space: nowrap; }
+  body.mission .bar { overflow-x: auto; }
+  body.mission .bar > * { flex-shrink: 0; }
+  .mb-title { font-size: 13px; }
+  .mission-progress { display: block; margin-left: 0; }
+  .mission-window .modal { padding: 16px; max-height: calc(100dvh - 24px); overflow-y: auto; }
+  .mission-window .modal-actions { flex-wrap: wrap; }
+  .mission-window .modal-actions .btn { white-space: normal; }
+}

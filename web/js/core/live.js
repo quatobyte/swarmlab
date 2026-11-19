@@ -48,6 +48,7 @@ export class LiveSource extends Emitter {
         if (msg.tick <= this._lastTick) return;
         this._lastTick = msg.tick;
         this.frames.push(msg);
+        this.emit("frame", msg); // каждый кадр, даже если рендер его пропустит (судья миссии, M11)
         if (this.frames.length > KEEP_FRAMES) this.frames.splice(0, this.frames.length - KEEP_FRAMES);
         if (this.renderTime === null) this.renderTime = msg.time;
         break;

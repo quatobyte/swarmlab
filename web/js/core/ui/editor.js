@@ -26,6 +26,9 @@ const TEMPLATE_FILE = "template.py";
 const NAME_RE = /^[A-Za-z_][A-Za-z0-9_]{0,63}\.py$/;
 const MAX_LOG_LINES = 5000;
 const TEAM_COLORS = ["#f5b700", "#3a86ff", "#e63946"];
+// Возможности редактора, которые миссия обучения может держать закрытыми (DECISIONS №103):
+// вкладка Python, лог, памятка, экспорт проекта, выход в свободную игру.
+const FEATURES = ["python", "logs", "help", "project", "free"];
 
 function fmtTime(s) {
   s = Math.max(0, Math.floor(s || 0));
@@ -66,6 +69,7 @@ export class Editor {
     this.gen = null; // последний результат генерации из блоков
     this.savedBlocks = "";
     this._regenTimer = 0;
+    this.mission = null; // обучение (M11): MissionRun из ui/tutorial.js или null
   }
 
   // ------------------------------------------------------------ вход и выход
@@ -75,12 +79,16 @@ export class Editor {
     document.body.classList.add("editing");
     for (const id of ["editor", "dock", "ed-split"]) $(id).hidden = false;
     await (this._ready ||= this._init());
+    if (this.reloadUser) await this._openUserFile();
     this.cm.refresh();
     this.blocks?.resize();
     if (this.view === "python") this.cm.focus();
   }
 
   close() {
+    this.clearMission();
+    this.source = null;
+    this.setRunning(false);
     this.active = false;
     document.body.classList.remove("editing");
     for (const id of ["editor", "dock", "ed-split", "view-empty"]) $(id).hidden = true;
@@ -154,7 +162,16 @@ export class Editor {
     };
     $("match-start").onclick = () => this.start();
     $("match-stop").onclick = () => this.h.stop();
+    $("mission-start").onclick = () => this.start();
+    $("mission-stop").onclick = () => this.h.stop();
+    $("mission-list").onclick = () => this.h.missions?.();
+    $("mission-free").onclick = async () => {
+      if (this.dirty && !(await this.save())) return;
+      await this.setMission(null);
+      history.replaceState(null, "", "#editor");
+    };
     $("match-error").onclick = () => this._jumpToError();
+    $("mission-error").onclick = () => this._jumpToError();
     $("ed-status").onclick = () => this._jumpToError();
     window.addEventListener("beforeunload", (e) => {
       if (this.active && this.dirty) e.preventDefault();
@@ -163,10 +180,15 @@ export class Editor {
     this._renderLogTabs();
     this._renderLogs();
 
+    await this._openUserFile();
+  }
+
+  /** После смены аккаунта перечитать его файлы, сохранив один экземпляр редактора. */
+  async _openUserFile() {
     await this._loadScripts();
     if (!this.scripts.some((s) => s.name === DEFAULT_FILE)) {
       // Первый вход: свой файл — из блоков (DECISIONS №51); модуль без блоков — из шаблона.
-      if (mod.BlocksEditor) await this._createBlocksScript(DEFAULT_FILE);
+      if (this.mod.BlocksEditor) await this._createBlocksScript(DEFAULT_FILE);
       else await api.saveScript(DEFAULT_FILE, (await api.script(TEMPLATE_FILE)).text);
       await this._loadScripts();
     }
@@ -177,6 +199,7 @@ export class Editor {
       last = null;
     }
     await this.openFile(this.scripts.some((s) => s.name === last) ? last : DEFAULT_FILE);
+    this.reloadUser = false;
   }
 
   // ------------------------------------------------------------ файлы
@@ -268,7 +291,7 @@ export class Editor {
   _payload(name) {
     if (this.mode !== "blocks") return { text: this.cm.getValue(), blocks: null };
     const workspace = this.blocks.save();
-    const gen = this.mod.generateBlocks(workspace, { file: blocksName(name) });
+    const gen = this.blocks.generate(blocksName(name)); // с настройкой миссии, если она есть (M11)
     return { text: gen.code, blocks: { format: 1, mode: "blocks", workspace } };
   }
 
@@ -359,6 +382,10 @@ export class Editor {
 
   /** «📂 Открыть проект…»: `.swarm` → новый свой скрипт (с блоками), после предупреждения. */
   async openProjectFile(file) {
+    if (this.mission) {
+      this.mission.startError("Чтобы открыть другой проект, сначала выйдите из обучения в меню или свободную игру.");
+      return;
+    }
     let project;
     try {
       project = parseProject(await file.text());
@@ -499,10 +526,70 @@ export class Editor {
     this.cm.performLint();
   }
 
-  async _createBlocksScript(name) {
-    const workspace = this.mod.starterWorkspace();
+  async _createBlocksScript(name, workspace = this.mod.starterWorkspace()) {
     const gen = this.mod.generateBlocks(workspace, { file: blocksName(name) });
     await api.saveScript(name, gen.code, { format: 1, mode: "blocks", workspace });
+  }
+
+  // ------------------------------------------------------------ обучение (M11)
+
+  /**
+   * Режим миссии (DECISIONS №100, №103): программа — файл кампании (создаётся из стартовых блоков
+   * модуля), над полем — полоса миссии, в редакторе открыто только то, что разрешает миссия
+   * (`run.setup` от кампании). `null` — обычный редактор.
+   * `false` — не вышло (пользователь не бросил несохранённые правки другого файла).
+   */
+  async setMission(run) {
+    await this._ready;
+    if (this.mission && this.dirty && !(await this.save())) return false;
+    this.clearMission();
+    if (!run) return true;
+    const name = run.script;
+    await this._loadScripts();
+    if (!this.scripts.some((s) => s.name === name)) {
+      await this._createBlocksScript(name, run.campaign.starterWorkspace());
+      await this._loadScripts();
+    }
+    if (this.file?.name !== name) await this._switchFile(name);
+    if (this.file?.name !== name) return false;
+    this.mission = run;
+    document.body.classList.add("mission");
+    $("mission").hidden = false;
+    this._lock(run.setup.features);
+    if (this.mode === "blocks") {
+      const added = await this.blocks.setup?.(run.setup.blocks);
+      this._regenerate();
+      if ((added || this.dirty || this.gen?.code !== this.savedText) && !(await this.save())) return false;
+      this.setView("blocks");
+    }
+    this.blocks?.resize();
+    this._showStartError(null);
+    return true;
+  }
+
+  /** Сброс режима синхронный: закрытый экран не должен позже менять новый редактор. */
+  clearMission() {
+    if (!this.mission) return;
+    this.mission.dispose();
+    this.mission = null;
+    document.body.classList.remove("mission");
+    $("mission").hidden = true;
+    this._lock(null);
+    this.blocks?.setup?.(null);
+    this.blocks?.resize();
+  }
+
+  /**
+   * Возможности редактора, закрытые в миссии: всё из FEATURES, чего нет в `open`
+   * (`null` — открыто всё). Скрывает их стиль `body.lock-<имя>` (style.css).
+   */
+  _lock(open) {
+    for (const f of FEATURES) document.body.classList.toggle(`lock-${f}`, !!open && !open.includes(f));
+  }
+
+  /** Открыть закрытую возможность до конца миссии (лог — когда в программе ошибка). */
+  unlock(feature) {
+    document.body.classList.remove(`lock-${feature}`);
   }
 
   /** Новый скрипт из блоков (режим по умолчанию для новых скриптов, DECISIONS №51). */
@@ -614,9 +701,12 @@ export class Editor {
 
   _showStartError(text, data) {
     this._startError = data && (data.line || data.block) ? data : null;
-    const el = $("match-error");
+    $(this.mission ? "match-error" : "mission-error").hidden = true;
+    const el = $(this.mission ? "mission-error" : "match-error");
     el.hidden = !text;
     el.textContent = text ? `${text}${this._startError ? " — нажмите, чтобы перейти к строке" : ""}` : "";
+    // Обучение (DECISIONS №104): ошибка запуска — ещё и окном с советом, как исправить.
+    if (text && this.mission) this.mission.startError(text, this._startError ? () => this._jumpToError() : null);
   }
 
   // ------------------------------------------------------------ матч
@@ -636,23 +726,27 @@ export class Editor {
   }
 
   async start() {
-    if (!this.file) return;
+    if (!this.file || this.starting) return;
+    this.starting = true;
     this._showStartError(null);
-    if (!(await this._readyToRun())) return;
-    const body = this.panel.build();
-    $("match-start").disabled = true;
+    const btn = $(this.mission ? "mission-start" : "match-start");
+    btn.disabled = true;
     try {
+      if (!(await this._readyToRun())) return;
+      const body = this.mission ? this.mission.request(this.file.name, this.scripts) : this.panel.build();
       await this.h.start(body);
     } catch (e) {
       this._showStartError(`Матч не запущен: ${e.message}`, e.data);
       if (this._startError) this._jumpToError();
     } finally {
-      $("match-start").disabled = false;
+      this.starting = false;
+      btn.disabled = false;
     }
   }
 
   /** Новый матч (живой источник): логи и ошибки выполнения — заново. */
   attach(source) {
+    this.source = source;
     this.logs = [];
     this.teams = new Map();
     this.runErrors = [];
@@ -662,18 +756,25 @@ export class Editor {
     this._renderLogs();
     this.cm?.performLint();
     source.on("header", (h) => {
+      if (this.source !== source) return;
       for (const r of h.runners || []) this._team(r.team, r.name, r.script);
       this._renderLogTabs();
     });
-    source.on("log", (msg) => this._onLog(msg));
-    source.on("status", (st) => this.setRunning(!["finished", "stopped", "error"].includes(st.state)));
-    source.on("close", () => this.setRunning(false));
+    source.on("log", (msg) => { if (this.source === source) this._onLog(msg); });
+    source.on("status", (st) => {
+      if (this.source === source) this.setRunning(!["finished", "stopped", "error"].includes(st.state));
+    });
+    source.on("close", () => { if (this.source === source) this.setRunning(false); });
+    // Судья миссии получает код, с которым матч запущен (сохранён перед стартом).
+    if (this.mission) this.mission.attach(source, this._payload(this.file.name).text);
   }
 
   setRunning(running) {
     this.running = running;
     $("match-stop").disabled = !running;
     $("match-start").textContent = running ? "↻ Перезапустить" : "▶ Запустить";
+    $("mission-stop").disabled = !running;
+    $("mission-start").textContent = running ? "↻ Начать заново" : "▶ Начать миссию";
   }
 
   // ------------------------------------------------------------ логи
@@ -716,6 +817,15 @@ export class Editor {
       if (fr && !this.runErrors.some((r) => r.file === fr.file && r.line === fr.line)) {
         this.runErrors.push({ ...fr, team: t.name, message: text });
         if (fr.file === this.file?.name) this.cm.performLint();
+        if (this.mission && fr.file === this.file?.name) {
+          // Обучение (DECISIONS №103): об ошибке программы — окном; лог открывается, даже если был закрыт.
+          this.unlock("logs");
+          this.mission.runError(text, () => {
+            const id = this.mode === "blocks" && this.gen ? this.mod.blockAtLine?.(this.gen.code, fr.line) : null;
+            if (id && this.blocks.focus(id)) this.setView("blocks");
+            else this.goto(fr.line);
+          });
+        }
       }
       return "err";
     }
@@ -724,6 +834,11 @@ export class Editor {
     }
     if (text.startsWith("[ядро]") || text.startsWith("[сервер]")) {
       if (/пропущен|бюджет|отключ|перезапуск/.test(text)) t.warn += 1;
+      // Обучение (DECISIONS №104): программа игрока зависла или не загрузилась — окном с советом.
+      if (this.mission && baseName(t.script) === this.file?.name && /перезапуск|отключ|не загрузился/.test(text)) {
+        this.unlock("logs");
+        this.mission.runError(text.replace(/^\[ядро\]\s*/, ""), null);
+      }
       return "core";
     }
     return "";

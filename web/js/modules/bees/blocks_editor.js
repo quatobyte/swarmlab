@@ -144,8 +144,12 @@ function toolboxBlock(type) {
   return entry;
 }
 
-/** Панель: стартовый набор по категориям + «Продвинутые» (остальное) + переменные и процедуры. */
-export function toolbox() {
+/**
+ * Панель: стартовый набор по категориям + «Продвинутые» (остальное) + переменные и процедуры.
+ * `only` (обучение, DECISIONS №103) — открытые типы блоков: панель без «Продвинутых», в категориях
+ * только они; `"variables"` и `"procedures"` в списке открывают эти категории.
+ */
+export function toolbox(only = null) {
   const beginner = {};
   const advanced = {};
   const push = (map, cat, type) => (map[cat] ||= []).push(toolboxBlock(type));
@@ -178,6 +182,17 @@ export function toolbox() {
     kind: "category", name: SEARCH_RU.category, colour: "#f5b700", custom: SEARCH_CATEGORY,
     toolboxitemid: SEARCH_CATEGORY, hidden: "true",
   }];
+  if (only) {
+    const open = new Set(only);
+    for (const c of [...order, "python"]) {
+      const items = [...(beginner[c] || []), ...(advanced[c] || [])].filter((b) => open.has(b.type));
+      if (items.length) contents.push(category(c, items));
+    }
+    if (open.has("variables")) contents.push({ ...category("variables", undefined), custom: "VARIABLE" });
+    if (open.has("procedures")) contents.push({ ...category("procedures", undefined), custom: "PROCEDURE" });
+    for (const c of contents) if (c.contents === undefined) delete c.contents;
+    return { kind: "categoryToolbox", contents };
+  }
   contents.push(...order.filter((c) => beginner[c]).map((c) => category(c, beginner[c])));
   contents.push({ ...category("variables", undefined), custom: "VARIABLE" });
   contents.push({ ...category("procedures", undefined), custom: "PROCEDURE" });
@@ -262,6 +277,48 @@ const THEME = {
   },
 };
 
+const GRID = 32; // шаг сетки рабочей области
+
+function theme() {
+  const Bl = B();
+  return Bl.Theme.defineTheme(THEME.name, { base: Bl.Themes.Classic, ...THEME });
+}
+
+/**
+ * Картинка из блоков (обучение, DECISIONS №104): рабочая область только для чтения внутри `el`,
+ * по размеру блоков. `el` должен быть в документе (размеры текста). Возвращает «убрать картинку».
+ */
+export function renderBlocks(el, workspace, { scale = 0.75, minScale = 0.5, pad = 10 } = {}) {
+  defineBlocks();
+  const Bl = B();
+  const ws = Bl.inject(el, {
+    readOnly: true, renderer: "zelos", theme: theme(), media: "vendor/blockly/media/", sounds: false,
+    scrollbars: false, trashcan: false, zoom: { controls: false, wheel: false, startScale: scale },
+    move: { scrollbars: false, drag: false, wheel: false },
+  });
+  Bl.Events.disable();
+  try {
+    Bl.serialization.workspaces.load(workspace, ws);
+  } finally {
+    Bl.Events.enable();
+  }
+  Bl.renderManagement.finishQueuedRenders().then(() => {
+    if (!el.isConnected) return;
+    const box = ws.getBlocksBoundingBox();
+    // Широкая картинка уменьшается до ширины рамки (но не мельче minScale: дальше рамка прокручивается).
+    const frame = el.parentElement;
+    const cs = frame ? getComputedStyle(frame) : null;
+    const room = cs ? frame.clientWidth - parseFloat(cs.paddingLeft) - parseFloat(cs.paddingRight) : Infinity;
+    const k = Math.max(minScale, Math.min(scale, (room - 2 * pad) / (box.right - box.left)));
+    if (k !== scale) ws.setScale(k);
+    el.style.width = `${Math.ceil((box.right - box.left) * k + 2 * pad)}px`;
+    el.style.height = `${Math.ceil((box.bottom - box.top) * k + 2 * pad)}px`;
+    Bl.svgResize(ws);
+    ws.scroll(pad - box.left * k, pad - box.top * k);
+  });
+  return () => ws.dispose();
+}
+
 export class BlocksEditor {
   /** onChange() — после каждого изменения рабочей области (не во время перетаскивания). */
   constructor(el, { onChange }) {
@@ -274,8 +331,8 @@ export class BlocksEditor {
     this.ws = Bl.inject(el, {
       toolbox: this.tb,
       media: "vendor/blockly/media/",
-      theme: Bl.Theme.defineTheme(THEME.name, { base: Bl.Themes.Classic, ...THEME }),
-      grid: { spacing: 32, length: 2, colour: "#26303b", snap: true },
+      theme: theme(),
+      grid: { spacing: GRID, length: 2, colour: "#26303b", snap: true },
       zoom: { controls: true, wheel: true, startScale: 0.75, maxScale: 2, minScale: 0.35 },
       trashcan: true,
       sounds: false,
@@ -286,6 +343,7 @@ export class BlocksEditor {
     this.loading = false;
     this.marked = new Set();
     this.hints = [];
+    this.spec = null; // обучение: что открыто (setup)
     this.ws.addChangeListener((e) => {
       if (!this.loading) this._scheduleHints();
       if (this.loading || e.isUiEvent || this.ws.isDragging()) return;
@@ -336,6 +394,7 @@ export class BlocksEditor {
     input.setAttribute("aria-label", SEARCH_RU.placeholder);
     box.appendChild(input);
     this.el.appendChild(box);
+    this.searchBox = box;
     this.searchInput = input;
     this.query = "";
     this.ws.registerToolboxCategoryCallback(SEARCH_CATEGORY, () => {
@@ -442,7 +501,48 @@ export class BlocksEditor {
   }
 
   generate(file) {
-    return generate(this.save(), { file });
+    return generate(this.save(), { file, emptyKinds: this.spec?.emptyKinds });
+  }
+
+  /**
+   * Обучение (DECISIONS №103): открыть часть редактора. `spec` — от кампании (missions.js):
+   * `{blocks, search, programs, emptyKinds}`; `null` — обычный редактор. Обещает `true`, если в
+   * рабочую область добавлены блоки программ (её нужно сохранить).
+   */
+  async setup(spec) {
+    this.spec = spec || null;
+    this.tb = toolbox(spec?.blocks ?? null);
+    this.index = null;
+    if (this.searchInput.value) {
+      this.searchInput.value = "";
+      this.query = "";
+    }
+    this.ws.updateToolbox(this.tb);
+    const search = spec ? !!spec.search : true;
+    this.searchBox.hidden = !search;
+    this.el.classList.toggle("no-search", !search);
+    let added = false;
+    const tops = this.ws.getTopBlocks(false);
+    const kindOf = (b) => (b.type === "bees_program_hive" ? "hive" : b.type === "bees_program_bee" ? b.getFieldValue("KIND") : null);
+    for (const kind of spec?.programs || []) {
+      if (tops.some((b) => kindOf(b) === kind)) continue;
+      await this.Bl.renderManagement.finishQueuedRenders(); // размеры блоков — после отрисовки
+      const box = this.ws.getBlocksBoundingBox();
+      const state = kind === "hive" ? { type: "bees_program_hive" } : { type: "bees_program_bee", fields: { KIND: kind } };
+      this.Bl.Events.disable();
+      try {
+        const empty = this.ws.getAllBlocks(false).length === 0;
+        // По сетке рабочей области: иначе Blockly сам сдвинет блок позже, и файл станет «изменён».
+        const grid = (v) => Math.ceil(v / GRID) * GRID;
+        this.Bl.serialization.blocks.append({ ...state, x: grid(box.left || 30), y: empty ? GRID : grid(box.bottom + 40) }, this.ws);
+      } finally {
+        this.Bl.Events.enable();
+      }
+      added = true;
+    }
+    if (added) this.ws.clearUndo();
+    this.resize();
+    return added;
   }
 
   resize() {

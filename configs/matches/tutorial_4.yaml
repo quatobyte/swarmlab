@@ -1,0 +1,18 @@
+# Обучение, миссия 4 «Цветы кончаются» (M11, DECISIONS №100): больше разведчиков.
+# Восемь маленьких полян далеко, цветы не отрастают.
+
+seed: 5
+profile: small
+duration_s: 270
+
+hives:
+  - {script: examples/bees/template.py, color: "#f5b700"}
+
+weather: {enabled: false}
+enemies:
+  spiders: {enabled: false}
+world:
+  flowers: {clusters_per_hive: 8, flowers_per_cluster: 4, cluster_radius: 3.0, cluster_distance: [45.0, 65.0], regen_per_s: 0.0}
+economy:
+  start_honey: 12.0
+  start_bees: {scout: 1, forager: 6, house: 3}

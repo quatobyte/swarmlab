@@ -101,6 +101,24 @@ button:focus-visible, a:focus-visible, summary:focus-visible, label.file:focus-w
 .home-project-dialog .btn.primary { background: var(--accent); color: #fff; border-color: var(--accent); }
 #tutorial, #help { background: rgb(64 41 29 / 25%); }
 #tutorial .lobby, #help .lobby { background: #fff8f1; }
+/* Кампания продолжает оформление главной страницы; поле и редактор остаются тёмными. */
+#tutorial .tutorial { width: min(940px, calc(100vw - 32px)); border-color: var(--line); padding: 28px; }
+#tutorial h1 { display: flex; align-items: center; justify-content: space-between; gap: 16px; }
+#tutorial .mission-list { gap: 10px; margin-top: 24px; }
+#tutorial .mission-row { padding: 14px 16px; border: 1px solid var(--line); background: #fff; border-radius: 16px; }
+#tutorial .mission-num { background: #ffebd8; color: var(--accent); }
+#tutorial .mission-row.done .mission-num { background: var(--ok); color: #fff; }
+#tutorial .mission-text .name { margin-bottom: 4px; }
+#tutorial .btn { background: #fff; color: var(--text); border-color: var(--line); }
+#tutorial .btn:hover { background: #ffebd8; }
+#tutorial .btn.primary { background: var(--accent); color: #fff; border-color: transparent; }
+@media (max-width: 600px) {
+  #tutorial .tutorial { padding: 18px; }
+  #tutorial h1 { font-size: 22px; }
+  #tutorial .mission-row { flex-wrap: wrap; gap: 10px; }
+  #tutorial .mission-text { flex-basis: calc(100% - 46px); }
+  #tutorial .mission-row > .btn { margin-left: 38px; }
+}
 @media (min-height: 1050px) { .auth-content { min-height: calc(100vh - 100px); } }
 @media (max-height: 800px) and (min-width: 761px) {
   .auth-content { padding-top: 48px; padding-bottom: 92px; }

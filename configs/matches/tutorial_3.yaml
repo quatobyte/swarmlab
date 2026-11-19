@@ -1,0 +1,17 @@
+# Обучение, миссия 3 «Улей растёт» (M11, DECISIONS №100): улей выводит пчёл по порогу мёда.
+
+seed: 37
+profile: small
+duration_s: 420
+
+hives:
+  - {script: examples/bees/template.py, color: "#f5b700"}
+
+weather: {enabled: false}
+enemies:
+  spiders: {enabled: false}
+world:
+  flowers: {clusters_per_hive: 3, flowers_per_cluster: 14, cluster_distance: [20.0, 35.0]}
+economy:
+  start_honey: 8.0
+  start_bees: {scout: 1, forager: 3, house: 3}

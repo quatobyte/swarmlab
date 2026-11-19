@@ -48,6 +48,7 @@ where = ["src"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 markers = [
+    "tutorial: миссии обучения на настоящем движке (требуется Node.js)",
     "sandbox: песочница nsjail портала — только Linux в контейнере (README, DECISIONS 95)",
 ]
 
