@@ -83,10 +83,13 @@ export function editorSetup(mission) {
 
 // ------------------------------------------------------------------ картинки и ошибки
 
-/** Нарисовать картинку из блоков (`examples[].pic`) в `el`; возвращает «убрать картинку». */
-export function illustrate(el, pic) {
+/**
+ * Нарисовать картинку из блоков (`examples[].pic`) в `el`; `opts.scale` — крупность блоков.
+ * Возвращает «убрать картинку».
+ */
+export function illustrate(el, pic, opts = {}) {
   const p = PICTURES[pic];
-  return p ? renderBlocks(el, p.workspace) : null;
+  return p ? renderBlocks(el, p.workspace, opts) : null;
 }
 
 /** Сообщение генератора блоков (`MESSAGES[key]`) → регулярное выражение: `{имя}` — что угодно. */

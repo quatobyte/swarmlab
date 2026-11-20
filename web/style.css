@@ -427,6 +427,15 @@ body.lock-free #mission-free { display: none; }
 .mw-canvas .blocklyMainBackground { stroke: none; fill: transparent; }
 .mw-note { margin: 4px 0 0; color: var(--muted); font-size: 13px; line-height: 1.4; }
 .mission-window .modal-actions { align-items: center; margin-top: 16px; }
+/* Пример окошком над полем матча (DECISIONS №109): не модальное, под окнами обучения (60). */
+.mission-pin { position: fixed; z-index: 25; width: min(470px, calc(100vw - 16px)); display: flex; flex-direction: column;
+  background: #1a1f26; border: 1px solid var(--accent); border-radius: 10px; box-shadow: 0 10px 30px rgba(0, 0, 0, 0.55); }
+.mission-pin.big { width: min(760px, calc(100vw - 16px)); }
+.mp-head { display: flex; align-items: center; gap: 4px; padding: 4px 6px 4px 10px; cursor: move; user-select: none; touch-action: none; }
+.mp-title { flex: 1 1 auto; min-width: 0; font-weight: 600; font-size: 13px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.mp-head .btn.small { padding: 2px 8px; }
+.mp-picture.mw-picture { margin: 0 6px 6px; max-height: min(50vh, 420px); }
+.mission-pin.big .mp-picture.mw-picture { max-height: 70vh; }
 .mw-foot { margin-right: auto; }
 .mission-fresh { color: #cfe8ff; }
 .log-line .log-error { display: flex; flex-direction: column; gap: 2px; }

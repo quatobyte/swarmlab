@@ -528,7 +528,10 @@ export class Editor {
    */
   async setMission(run) {
     await this._ready;
-    if (this.mission) this.mission.decided = true; // прежняя миссия больше не судит матч
+    if (this.mission) {
+      this.mission.decided = true; // прежняя миссия больше не судит матч
+      this.mission.close?.(); // и убирает своё окошко с примером
+    }
     this.mission = null;
     document.body.classList.remove("mission");
     $("mission").hidden = true;

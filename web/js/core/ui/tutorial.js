@@ -4,7 +4,7 @@
 // (`missions` в registry.js). Модуль кампании отдаёт:
 //   CAMPAIGN {title, intro, script}           — название, вступление, файл программы игрока;
 //   MISSIONS [{id, title, brief[], examples[{pic, title, text}], fresh, watch, goal}] — по порядку;
-//   illustrate(el, pic)                        — нарисовать картинку примера в `el` → «убрать»;
+//   illustrate(el, pic, {scale}?)              — нарисовать картинку примера в `el` → «убрать»;
 //   explainError(message)                      — совет, как исправить ошибку программы;
 //   starterWorkspace()                         — блоки новой программы игрока;
 //   editorSetup(mission)                       — что открыто в редакторе: {features[], blocks};
@@ -14,12 +14,14 @@
 //   result = {win, title, text, stats}.
 // Ядро хранит прогресс в браузере и показывает: список миссий, полосу миссии над полем (цель,
 // прогресс, кнопки) и окна посреди экрана — брифинг по страницам с картинками-примерами,
-// подсказки, ошибки программы с советом и итог (№103, №104).
+// подсказки, ошибки программы с советом и итог (№103, №104). Пример можно оставить окошком
+// над полем матча и собирать программу, подсматривая в него (№109).
 
 import { DEFAULT_MODULE, MODULES } from "../../modules/registry.js";
 
 const $ = (id) => document.getElementById(id);
 const STORE = "swarmlab.tutorial";
+const PIN_STORE = "swarmlab.tutorial.pin"; // место и размер окошка с примером: {x, y, big}
 
 /** Модуль кампании или `null`, если у модуля нет обучения. */
 export async function loadCampaign() {
@@ -176,15 +178,167 @@ export function showWindow({ kicker = "", title = "", body = [], note = "", foot
   box.querySelector(".btn.primary")?.focus();
 }
 
-/** Окна по страницам: «Назад» / «Далее», на последней — кнопка `last`; после неё — `done()`. */
+/**
+ * Окна по страницам: «Назад» / «Далее», на последней — кнопка `last`; после неё — `done()`.
+ * `page.extra` — свои кнопки страницы `[[подпись, действие]]` (перед «Назад»).
+ */
 export function showPages(pages, { last = "Понятно", done = null } = {}, i = 0) {
-  const page = pages[i];
+  const { extra = [], ...page } = pages[i];
   const end = i === pages.length - 1;
-  const actions = [];
+  const actions = [...extra];
   if (i > 0) actions.push(["← Назад", () => showPages(pages, { last, done }, i - 1)]);
   actions.push(end ? [last, done, true] : ["Далее →", () => showPages(pages, { last, done }, i + 1), true]);
   showWindow({ draw: null, ...page, foot: pages.length > 1 ? `${i + 1} из ${pages.length}` : "", actions, esc: done || (() => {}) });
 }
+
+// ------------------------------------------------------------------ пример окошком
+
+/**
+ * Окошко с примером программы над полем матча (DECISIONS №109): не модальное — блоки собираются,
+ * матч идёт; одно на миссию, листается ◀ ▶ по её примерам; двигается за заголовок, ⤢ — крупнее.
+ * Место и размер помнит браузер. Окна обучения посреди экрана открываются поверх него.
+ */
+class PinnedExample {
+  constructor() {
+    this.root = null;
+    this.undo = null; // убрать нарисованную картинку
+    this.examples = [];
+    this.i = 0;
+    this.draw = null;
+    this.state = { x: null, y: null, big: false };
+    try {
+      Object.assign(this.state, JSON.parse(localStorage.getItem(PIN_STORE) || "{}"));
+    } catch {
+      /* хранилище недоступно — окошко на месте по умолчанию */
+    }
+    window.addEventListener("resize", () => this.root && this._place());
+  }
+
+  get open() {
+    return !!this.root;
+  }
+
+  /** Показать пример `i` из `examples` ([{pic, title, text}]); `draw(el, pic)` рисует картинку. */
+  show(examples, i, draw) {
+    this.examples = examples;
+    this.draw = draw;
+    this.i = Math.min(Math.max(i, 0), examples.length - 1);
+    if (!this.root) this._build();
+    this._render();
+  }
+
+  hide() {
+    this.undo?.();
+    this.undo = null;
+    this.root?.remove();
+    this.root = null;
+  }
+
+  _build() {
+    const root = el("div", "mission-pin");
+    root.setAttribute("role", "dialog");
+    root.setAttribute("aria-label", "Пример программы");
+    const head = el("div", "mp-head");
+    this.title = el("span", "mp-title");
+    this.count = el("span", "mp-count muted small");
+    const btn = (text, title, fn) => {
+      const b = el("button", "btn small", text);
+      b.title = title;
+      b.onclick = fn;
+      return b;
+    };
+    this.prev = btn("◀", "Предыдущий пример", () => this.show(this.examples, this.i - 1, this.draw));
+    this.next = btn("▶", "Следующий пример", () => this.show(this.examples, this.i + 1, this.draw));
+    this.size = btn("⤢", "", () => {
+      this.state.big = !this.state.big;
+      this._save();
+      this._render();
+    });
+    head.append(this.title, this.count, this.prev, this.next, this.size,
+      btn("✕", "Убрать окошко (снова — «📌 Примеры» в полосе миссии)", () => this.hide()));
+    this.frame = el("div", "mw-picture mp-picture");
+    root.append(head, this.frame);
+    this._drag(head);
+    document.body.append(root);
+    this.root = root;
+  }
+
+  _render() {
+    const ex = this.examples[this.i];
+    const many = this.examples.length > 1;
+    this.title.textContent = `📌 ${ex.title}`;
+    this.title.title = ex.text || "";
+    this.count.textContent = many ? `${this.i + 1} из ${this.examples.length}` : "";
+    this.prev.hidden = this.next.hidden = !many;
+    this.prev.disabled = this.i === 0;
+    this.next.disabled = this.i === this.examples.length - 1;
+    this.root.classList.toggle("big", !!this.state.big);
+    this.size.title = this.state.big ? "Мельче" : "Крупнее";
+    this._place();
+    // Картинка заново: её масштаб зависит от размера окошка.
+    this.undo?.();
+    this.undo = null;
+    this.frame.innerHTML = "";
+    const canvas = el("div", "mw-canvas");
+    this.frame.append(canvas);
+    // Крупное окошко — и блоки крупнее (на картинке-примере в задании они 0,75).
+    const undo = this.draw?.(canvas, ex.pic, { scale: this.state.big ? 1 : 0.75 });
+    if (typeof undo === "function") this.undo = undo;
+  }
+
+  /** На экран целиком: по умолчанию — над полем матча слева, под карточками счёта. */
+  _place() {
+    const r = this.root;
+    const view = document.getElementById("view")?.getBoundingClientRect();
+    const top = view ? view.top : 0;
+    let { x, y } = this.state;
+    if (x === null || y === null) {
+      x = (view ? view.left : 0) + 12;
+      y = top + 104;
+    }
+    const w = r.offsetWidth, h = r.offsetHeight;
+    x = Math.min(Math.max(x, 0), Math.max(0, innerWidth - w));
+    y = Math.min(Math.max(y, top), Math.max(top, innerHeight - Math.min(h, 80)));
+    r.style.left = `${x}px`;
+    r.style.top = `${y}px`;
+  }
+
+  _drag(head) {
+    head.addEventListener("pointerdown", (e) => {
+      if (e.button !== 0 || e.target.closest("button")) return;
+      const r = this.root.getBoundingClientRect();
+      const dx = e.clientX - r.left, dy = e.clientY - r.top;
+      head.setPointerCapture(e.pointerId);
+      const move = (ev) => {
+        this.state.x = ev.clientX - dx;
+        this.state.y = ev.clientY - dy;
+        this._place();
+      };
+      const up = () => {
+        head.removeEventListener("pointermove", move);
+        head.removeEventListener("pointerup", up);
+        head.removeEventListener("pointercancel", up);
+        const box = this.root?.getBoundingClientRect();
+        if (box) Object.assign(this.state, { x: box.left, y: box.top });
+        this._save();
+      };
+      head.addEventListener("pointermove", move);
+      head.addEventListener("pointerup", up);
+      head.addEventListener("pointercancel", up);
+      e.preventDefault();
+    });
+  }
+
+  _save() {
+    try {
+      localStorage.setItem(PIN_STORE, JSON.stringify(this.state));
+    } catch {
+      /* не запомним */
+    }
+  }
+}
+
+const pinned = new PinnedExample();
 
 const clock = (time) => `${Math.floor(time / 60)}:${String(Math.floor(time % 60)).padStart(2, "0")}`;
 
@@ -227,7 +381,25 @@ export class MissionRun {
     $("mission-progress").textContent = "";
     $("mission-brief-open").onclick = () => this.brief();
     $("mission-hints-open").onclick = () => this.showHints();
+    pinned.hide(); // окошко прежней миссии
+    pinned.i = 0; // у новой миссии — с её первого примера
+    const pin = $("mission-pin-open");
+    pin.hidden = !this.mission.examples?.length;
+    pin.onclick = () => (pinned.open ? pinned.hide() : this.pin(pinned.i));
     this._renderHints();
+  }
+
+  /** Пример `i` миссии — окошком над полем матча (DECISIONS №109). */
+  pin(i = 0) {
+    const examples = this.mission.examples || [];
+    if (!examples.length) return;
+    pinned.show(examples, Math.min(i, examples.length - 1),
+      (canvas, pic, opts) => this.campaign.illustrate?.(canvas, pic, opts));
+  }
+
+  /** Миссия закрыта (выход из обучения или в обычный редактор): убрать окошко с примером. */
+  close() {
+    pinned.hide();
   }
 
   /** Брифинг по страницам: сюжет, примеры с картинками, что нового, цель (DECISIONS №103, №104). */
@@ -235,9 +407,12 @@ export class MissionRun {
     const m = this.mission;
     const draw = (canvas, pic) => this.campaign.illustrate?.(canvas, pic);
     const pages = m.brief.map((text) => ({ kicker: this.name, title: "Задание", body: [text] }));
-    for (const ex of m.examples || []) {
-      pages.push({ kicker: this.name, title: ex.title, body: [ex.text, { picture: ex.pic }], draw });
-    }
+    (m.examples || []).forEach((ex, k) => {
+      pages.push({
+        kicker: this.name, title: ex.title, body: [ex.text, { picture: ex.pic }], draw,
+        extra: [["📌 Оставить окошком", () => this.pin(k)]],
+      });
+    });
     if (m.fresh) pages.push({ kicker: this.name, title: "Что нового", body: [{ text: m.fresh, cls: "mission-fresh" }] });
     // Как следить за работой программы во время матча (инспектор, DECISIONS №105).
     if (m.watch) pages.push({ kicker: this.name, title: "Как следить за программой", body: [m.watch] });
