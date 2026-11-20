@@ -260,16 +260,40 @@ def test_auto_return_epoch_restarts_loop_and_commands_return_false():
     assert EVENTS[-2:] == [("finally",), ("start",)]
 
 
-class Busy(Collector):
+class Spinner(Collector):
+    """Сборщик миссий 7–8: «пока не полный — собирать» без ожидания между командами."""
+
     def loop(self):
-        EVENTS.append(("go", self.go_home(), self.fly_to(1, 1)))
-        self.wait(100)
+        EVENTS.append(("start",))
+        try:
+            for _ in range(50):  # без ожидания было бы 50 «False» за один тик
+                EVENTS.append(("collect", self.collect(1, 1)))
+                if self.is_full:
+                    break
+        finally:
+            EVENTS.append(("finally",))
 
 
-def test_movement_during_auto_return_returns_false_at_once():
-    host, _ = host_with(forager=Busy)
-    out = host.step(batch(0, raw_bee(5, 0, auto_home=True)))
-    assert EVENTS == [("go", False, False)] and "move" not in out.commands.get(5, {})
+def test_movement_during_auto_return_waits_for_refuel():
+    """DECISIONS №108: во время автовозврата команда движения ждёт, а не возвращается сразу."""
+    host, _ = host_with(forager=Spinner)
+    for tick in range(5):
+        out = host.step(batch(tick, raw_bee(5, tick, auto_home=True)))
+        assert "move" not in out.commands.get(5, {})  # модулю ничего не уходит
+    assert EVENTS == [("start",)]  # цикл стоит на первой команде
+    # Заправилась (epoch +1): поток закрыт, loop() с начала — и команда уходит модулю.
+    out = host.step(batch(20, raw_bee(5, 20, epoch=1, in_hive=True)))
+    assert EVENTS == [("start",), ("finally",), ("start",)]
+    assert out.commands[5]["move"][0] == "collect_at" and out.commands[5]["wait"] > 0
+
+
+def test_movement_after_auto_return_without_restart_returns_false():
+    """Автовозврат кончился без нового epoch (на всякий случай): ждавшая команда — `False`."""
+    host, _ = host_with(forager=Spinner)
+    host.step(batch(0, raw_bee(5, 0, auto_home=True)))
+    out = host.step(batch(1, raw_bee(5, 1)))
+    assert EVENTS[:2] == [("start",), ("collect", False)]
+    assert out.commands[5]["move"][0] == "collect_at"  # следующая команда — уже модулю
 
 
 def test_end_of_match_closes_threads():

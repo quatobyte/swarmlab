@@ -88,6 +88,13 @@ def _named(items: Any) -> list[list[Any]]:
     return out
 
 
+def _auto_home(obj: Any) -> bool:
+    """Пчела сама летит домой заправляться (сенсор `me.auto_home`)."""
+    view = getattr(obj, "_v", None)
+    me = view.raw.get("me") if view is not None else None
+    return bool(me and me.get("auto_home"))
+
+
 def snapshot(program: Program | None, obj: Any, heard: list[Any], script: str,
              error: dict[str, Any] | None) -> dict[str, Any]:
     """Снимок программы агента после тика. `script` — файл игрока (`co_filename`)."""
@@ -103,7 +110,12 @@ def snapshot(program: Program | None, obj: Any, heard: list[Any], script: str,
     if isinstance(w, Order):
         snap["wait"] = [encode(v) for v in w.move]
     elif isinstance(w, Wait):
-        snap["wait"] = ["wait", _num(w.seconds)] if w.seconds > 0 else ["tick"]
+        if w.seconds > 0:
+            snap["wait"] = ["wait", _num(w.seconds)]
+        elif not program.at_pass_end() and _auto_home(obj):
+            snap["wait"] = ["auto_home"]  # команда ждёт конца заправки (DECISIONS №108)
+        else:
+            snap["wait"] = ["tick"]
     frames: list[FrameType] = [f for f in program.stack() if f.f_code.co_filename == script]
     if frames:
         inner = frames[0]

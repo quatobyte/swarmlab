@@ -101,6 +101,13 @@ def test_procedure_frame_heard_and_plain_wait():
     assert snap["line"] == line_of("wait-seconds") and snap["wait"] == ["wait", 2.5]
 
 
+def test_command_waiting_for_auto_return_is_shown_as_such():
+    """DECISIONS №108: команда ждёт конца автозаправки — инспектор так и пишет, не «круг»."""
+    host, _ = debug_host(forager=Gatherer)
+    snap = host.step(batch(0, raw_bee(5, 0, auto_home=True))).debug["5"]
+    assert snap["wait"] == ["auto_home"] and snap["line"] == line_of("wait-explore")
+
+
 class Broken(Collector):
     def loop(self):
         цель = None

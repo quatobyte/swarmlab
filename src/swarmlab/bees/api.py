@@ -399,7 +399,12 @@ class _Flyer(_Agent):
 
     def _wait_move(self, *move: Any) -> Any:
         if self._v.raw["me"].get("auto_home"):
-            return None  # пчела сама летит домой заправляться — команды не выполняются
+            # Пчела сама летит домой заправляться (DECISIONS №108): команда не выполняется, а ждёт
+            # конца заправки — иначе цикл «пока … — собирать» крутился бы без ожидания и вешал
+            # раннер. Конец заправки обычно начинает loop() сначала (epoch), сюда не возвращаясь.
+            while self._v.raw["me"].get("auto_home"):
+                _wait(0)
+            return None
         return request(self._go(*move))
 
     def fly_to(self, target: Any, y: float | None = None, *, speed: float | None = None) -> bool:

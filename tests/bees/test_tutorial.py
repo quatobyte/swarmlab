@@ -86,6 +86,8 @@ def play(n: int, program: Path, tmp_path: Path) -> dict:
         if not out["done"]:
             out = judge.step(sim.time, rows, end=True)
         out["time"] = sim.time
+        # Раннер, зависший в коде игрока, ядро перезапускает (игрок видит окно ошибки).
+        out["restarts"] = {int(t): st.restarts for t, st in sim.runners.stats.items()}
         return out
     finally:
         sim.close()
@@ -116,6 +118,9 @@ def test_missions_js_knows_every_tutorial_match():
 def test_reference_passes_and_previous_program_fails(n, tmp_path):
     ok = play(n, REF / f"ref_{n}.py", tmp_path)
     assert ok["win"], f"эталон миссии {n} не прошёл: {ok}"
+    # Эталон ни разу не завис (DECISIONS №108: команды не крутятся без ожидания во время
+    # автозаправки) — иначе игрок видит «раннер перезапускается».
+    assert not any(ok["restarts"].values()), f"эталон миссии {n}: перезапуски раннера {ok}"
     prev = REF / FAILS_WITH.get(n, f"ref_{n - 1}.py")
     bad = play(n, prev, tmp_path)
     assert bad["win"] is False, (
@@ -136,3 +141,4 @@ def test_program_from_mission_pictures_passes(n, tmp_path):
     program.write_text(code, encoding="utf-8")
     out = play(n, program, tmp_path)
     assert out["win"], f"программа из картинок не прошла миссию {n}: {out}"
+    assert not any(out["restarts"].values()), f"миссия {n}: перезапуски раннера {out}"

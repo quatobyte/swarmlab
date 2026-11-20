@@ -39,6 +39,7 @@ const waits = {
   "заправляется": ["refuel", 80],
   "ждёт 2.5 с": ["wait", 2.5],
   "закончила круг, начинает новый": ["tick"],
+  "сама летит домой заправиться, потом начнёт программу сначала": ["auto_home"],
 };
 for (const [text, wait] of Object.entries(waits)) assert.equal(describeWait({ wait }), text);
 // Все команды движения модуля названы (имена — из api.py: `_wait_move("имя", …)`).
